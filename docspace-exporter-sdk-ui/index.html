@@ -1,0 +1,79 @@
+﻿<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DocSpace: HTTP → XLSX → Room (SDK)</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>DocSpace: HTTP → XLSX → Room (SDK)</h1>
+
+      <section class="card">
+        <h2>DocSpace</h2>
+        <div class="grid">
+          <label>
+            <span>Base URL</span>
+            <input id="baseUrl" placeholder="https://example.onlyoffice.com" />
+          </label>
+          <label>
+            <span>Auth Token</span>
+            <input id="authToken" placeholder="Bearer ... или raw token" />
+          </label>
+          <label>
+            <span>Room ID</span>
+            <input id="roomId" placeholder="123456" />
+          </label>
+          <label>
+            <span>Folder Title</span>
+            <input id="folderTitle" value="Reports" />
+          </label>
+          <label class="span2">
+            <span>Upload endpoint template (не используется в SDK-режиме)</span>
+            <input id="uploadTpl" value="/api/2.0/files/{folderId}/upload" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="save">Сохранить</button>
+          <button id="load">Загрузить</button>
+          <button id="clear">Очистить</button>
+          <button id="testAuth" class="primary">Test auth</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>HTTP Data Source</h2>
+        <div class="grid">
+          <label class="span2">
+            <span>Data URL template (use {table})</span>
+            <input id="dataUrlTemplate" placeholder="https://example.com/api/data?table={table}" />
+          </label>
+          <label class="span2">
+            <span>Tables (comma separated)</span>
+            <input id="tablesCsv" placeholder="public.users, public.orders" />
+          </label>
+        </div>
+        <div class="row">
+          <select id="tablesSelect">
+            <option value="">(tables)</option>
+          </select>
+          <label class="inline">
+            <span>Limit</span>
+            <input id="rowLimit" value="5000" />
+          </label>
+          <button id="exportTable" class="primary">Export via SDK → XLSX → Room</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Лог</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <div id="docspace-sdk-hidden-editor" class="hidden-editor"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

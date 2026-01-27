@@ -1,0 +1,7 @@
+﻿{
+  "name": "DB XLSX Export",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "description": "Export Postgres table to XLSX and fill it via DocSpace JS SDK in a hidden editor.",
+  "scopes": ["settings", "room"]
+}

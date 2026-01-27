@@ -1,0 +1,101 @@
+﻿<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DB → XLSX (DocSpace Plugin)</title>
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: #0b1220; color: #e7eefc; }
+      .wrap { padding: 12px; max-width: 980px; margin: 0 auto; }
+      h1 { margin: 0 0 12px; font-size: 18px; }
+      .card { background: #111b2e; border: 1px solid rgba(231,238,252,0.12); border-radius: 10px; padding: 10px; margin: 10px 0; }
+      h2 { margin: 0 0 8px; font-size: 13px; color: rgba(231,238,252,0.8); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      label span { display: block; font-size: 11px; color: rgba(231,238,252,0.75); margin-bottom: 4px; }
+      input, select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid rgba(231,238,252,0.12); background: rgba(0,0,0,0.2); color: #e7eefc; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+      button { padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(231,238,252,0.16); background: #1e2a44; color: #e7eefc; cursor: pointer; }
+      button.primary { background: #2a6df5; border-color: rgba(42,109,245,0.6); }
+      pre { margin: 0; padding: 8px; background: rgba(0,0,0,0.25); border: 1px solid rgba(231,238,252,0.12); border-radius: 8px; max-height: 240px; overflow: auto; }
+      .hidden-editor { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; z-index: -1; }
+      @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>DB → XLSX (DocSpace Plugin SDK)</h1>
+
+      <section class="card">
+        <h2>Backend (локальный)</h2>
+        <div class="grid">
+          <label>
+            <span>Backend URL</span>
+            <input id="backendUrl" value="http://localhost:5180" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="pingBackend">Ping backend</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Database (Postgres)</h2>
+        <div class="grid">
+          <label>
+            <span>JDBC connection string</span>
+            <input id="dbConnectionString" placeholder="jdbc:postgresql://host:5432/db?user=...&password=..." />
+          </label>
+          <label>
+            <span>Hostaddr (IP, optional)</span>
+            <input id="dbHostaddr" placeholder="1.2.3.4" />
+          </label>
+          <label>
+            <span>Host</span>
+            <input id="dbHost" value="localhost" />
+          </label>
+          <label>
+            <span>Port</span>
+            <input id="dbPort" value="5432" />
+          </label>
+          <label>
+            <span>Database</span>
+            <input id="dbName" value="postgres" />
+          </label>
+          <label>
+            <span>User</span>
+            <input id="dbUser" value="postgres" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="dbPassword" type="password" />
+          </label>
+          <label>
+            <span>SSL</span>
+            <select id="dbSsl">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <button id="loadTables" class="primary">Load tables</button>
+          <select id="tablesSelect"><option value="">(tables)</option></select>
+          <label>
+            <span>Limit</span>
+            <input id="rowLimit" value="5000" />
+          </label>
+          <button id="exportSdk" class="primary">Export via SDK (.xlsx)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Log</h2>
+        <pre id="log"></pre>
+      </section>
+    </div>
+
+    <div id="docspace-plugin-hidden-editor" class="hidden-editor"></div>
+
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>

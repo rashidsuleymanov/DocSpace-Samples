@@ -1,0 +1,13 @@
+{
+  "name": "export_plugin",
+  "version": "0.0.2",
+  "minDocSpaceVersion": "3.5.0",
+  "description": "Test",
+  "license": "",
+  "author": "SuleymanovRN",
+  "pluginName": "Exportplugin",
+  "homePage": "",
+  "image": "",
+  "scopes": "API,Settings,MainButton",
+  "cspDomains": ""
+}
