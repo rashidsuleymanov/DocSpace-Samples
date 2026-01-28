@@ -12,19 +12,19 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
     <div className="auth-layout">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-dot" />
-          DocSpace Medical
+          <span className="brand-mark" />
+          City Clinic
         </div>
-        <h1>Welcome back</h1>
+        <h1>Patient sign in</h1>
         <p className="muted">
-          Sign in to access your patient room, medical records, and appointments.
+          Sign in to access your medical room, documents, and upcoming appointments.
         </p>
         <form className="auth-form" onSubmit={submit}>
           <label>
             Email
             <input
               type="email"
-              placeholder="patient@clinic.com"
+              placeholder="emily.carter@maildemo.com"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               required
@@ -43,24 +43,34 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           <button className="primary" type="submit" disabled={busy}>
             {busy ? "Signing in..." : "Sign in"}
           </button>
+          <button className="secondary" type="button">
+            Sign in with Google
+          </button>
         </form>
         {success && <p className="muted">{success}</p>}
         {error && <p className="muted">Ошибка входа: {error}</p>}
-        <button className="link" onClick={onGoRegister}>
-          Create a new patient account
-        </button>
-        <button className="link" type="button" onClick={onGoDoctor}>
-          Doctor portal
-        </button>
+        <div className="auth-footer">
+          <button className="link" onClick={onGoRegister}>
+            Create a new patient account
+          </button>
+          <button className="link" type="button" onClick={onGoDoctor}>
+            Doctor portal
+          </button>
+        </div>
       </div>
-      <div className="auth-panel">
-        <h2>One portal. All patient documents.</h2>
-        <ul>
-          <li>Personalized DocSpace room for each patient</li>
-          <li>Secure sharing of lab results and prescriptions</li>
-          <li>Automated folder structure on registration</li>
-        </ul>
-        <div className="auth-gradient" />
+      <div className="auth-visual">
+        <div className="auth-hero-card">
+          <div>
+            <h2>Patient registration</h2>
+            <p className="muted">
+              Please enter your email address or phone number to continue.
+            </p>
+          </div>
+          <div className="auth-photo" role="presentation" />
+        </div>
+        <div className="auth-support">
+          <span>support@cityclinic.com</span>
+        </div>
       </div>
     </div>
   );

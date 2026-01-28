@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import Sidebar from "../components/Sidebar.jsx";
+import PatientShell from "../components/PatientShell.jsx";
 import ShareQrModal from "../components/ShareQrModal.jsx";
-
-import Topbar from "../components/Topbar.jsx";
 import { createFileShareLink } from "../services/docspaceApi.js";
 
 
@@ -124,6 +122,46 @@ export default function Appointments({ session, onLogout, onNavigate }) {
   const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
 
   const editorRef = useRef(null);
+
+  const ensureRoomId = async () => {
+    if (session?.room?.id) return session.room.id;
+    const fullName =
+      session?.user?.fullName || session?.user?.displayName || session?.user?.name || "Patient";
+    const response = await fetch("/api/patients/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fullName })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Patient room is missing");
+    }
+    const room = data?.room || null;
+    if (room?.id) {
+      try {
+        const raw = localStorage.getItem("medical.portal.session");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const nextSession = {
+            ...(parsed?.session || session || {}),
+            room: {
+              id: room.id,
+              name: room.title || room.name || `${fullName} - Patient Room`,
+              url: room.webUrl || room.url || ""
+            }
+          };
+          localStorage.setItem(
+            "medical.portal.session",
+            JSON.stringify({ session: nextSession, view: parsed?.view || "dashboard" })
+          );
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return room.id;
+    }
+    throw new Error("Patient room is missing");
+  };
 
 
 
@@ -311,28 +349,169 @@ export default function Appointments({ session, onLogout, onNavigate }) {
               "editorInstance",
               `
                 try {
-                  if (typeof editorInstance?.createConnector !== "function") {
-                    console.error("createConnector is not available", editorInstance);
+                  if (!editorInstance || typeof editorInstance.createConnector !== "function") {
+                    console.error("Editor instance is invalid", editorInstance);
                     return;
                   }
+
                   const connector = editorInstance.createConnector();
-                  if (typeof connector?.callCommand !== "function") {
-                    console.error("connector.callCommand is not available", connector);
+                  if (!connector || typeof connector.callCommand !== "function") {
+                    console.error("Connector is invalid", connector);
                     return;
                   }
-                  Asc.scope.textToInsert = ${JSON.stringify(ticketText)};
+
+                  Asc.scope.ticket = ${JSON.stringify(templateData)};
+
                   connector.callCommand(function () {
-                    const doc = Api.GetDocument();
-                    const p = Api.CreateParagraph();
-                    p.AddText(Asc.scope.textToInsert);
-                    doc.InsertContent([p]);
-                    Api.Save();
+                    try {
+                      var t = Asc.scope.ticket;
+
+                      var doc = Api.GetDocument();
+
+                      // Clear document if possible
+                      if (doc.RemoveAllElements) doc.RemoveAllElements();
+
+                      // Base typography
+                      var textPr = doc.GetDefaultTextPr();
+                      textPr.SetFontFamily("Calibri");
+                      textPr.SetFontSize(22);
+                      textPr.SetLanguage("en-US");
+
+                      var normalStyle = doc.GetDefaultStyle("paragraph");
+                      var normalParaPr = normalStyle.GetParaPr();
+                      normalParaPr.SetSpacingLine(240, "auto");
+                      normalParaPr.SetSpacingAfter(120);
+                      normalParaPr.SetJc("left");
+
+                      var normalTextPr = normalStyle.GetTextPr();
+                      normalTextPr.SetColor(0x26, 0x26, 0x26, false);
+
+                      // Title style
+                      var titleStyle = doc.CreateStyle("TicketTitle", "paragraph");
+                      var titleParaPr = titleStyle.GetParaPr();
+                      titleParaPr.SetJc("center");
+                      titleParaPr.SetSpacingAfter(180);
+
+                      var titleTextPr = titleStyle.GetTextPr();
+                      titleTextPr.SetFontFamily("Calibri Light");
+                      titleTextPr.SetFontSize(52);
+                      titleTextPr.SetColor(0x29, 0x33, 0x4F, false);
+
+                      // Subtitle style
+                      var subtitleStyle = doc.CreateStyle("TicketSubtitle", "paragraph");
+                      var subParaPr = subtitleStyle.GetParaPr();
+                      subParaPr.SetJc("center");
+                      subParaPr.SetSpacingAfter(240);
+
+                      var subTextPr = subtitleStyle.GetTextPr();
+                      subTextPr.SetFontFamily("Calibri");
+                      subTextPr.SetFontSize(20);
+                      subTextPr.SetColor(0x55, 0x55, 0x55, false);
+
+                      // Field style (card-like indent)
+                      var fieldStyle = doc.CreateStyle("TicketField", "paragraph");
+                      var fieldParaPr = fieldStyle.GetParaPr();
+                      fieldParaPr.SetJc("left");
+                      fieldParaPr.SetIndLeft(720);
+                      fieldParaPr.SetIndRight(720);
+                      fieldParaPr.SetSpacingAfter(120);
+
+                      var fieldTextPr = fieldStyle.GetTextPr();
+                      fieldTextPr.SetFontFamily("Calibri");
+                      fieldTextPr.SetFontSize(22);
+                      fieldTextPr.SetColor(0x26, 0x26, 0x26, false);
+
+                      // Footer style
+                      var footerStyle = doc.CreateStyle("TicketFooter", "paragraph");
+                      var footerParaPr = footerStyle.GetParaPr();
+                      footerParaPr.SetJc("right");
+                      footerParaPr.SetIndLeft(720);
+                      footerParaPr.SetIndRight(720);
+                      footerParaPr.SetSpacingBefore(180);
+                      footerParaPr.SetSpacingAfter(0);
+
+                      var footerTextPr = footerStyle.GetTextPr();
+                      footerTextPr.SetFontFamily("Calibri");
+                      footerTextPr.SetFontSize(18);
+                      footerTextPr.SetColor(0x55, 0x55, 0x55, false);
+
+                      function safeText(v) {
+                        return (v && String(v).trim()) ? String(v) : "-";
+                      }
+
+                      function pushPara(p) {
+                        if (doc.Push) doc.Push(p);
+                        else doc.InsertContent([p]);
+                      }
+
+                      function addDivider() {
+                        var p = Api.CreateParagraph();
+                        p.SetJc("center");
+                        p.SetSpacingAfter(180);
+                        var run = p.AddText("────────────────────────────────────────");
+                        run.SetColor(0x99, 0x99, 0x99, false);
+                        run.SetFontSize(18);
+                        pushPara(p);
+                      }
+
+                      function addField(label, value) {
+                        var p = Api.CreateParagraph();
+                        p.SetStyle(fieldStyle);
+
+                        var r1 = p.AddText(label + ": ");
+                        r1.SetBold(true);
+                        r1.SetColor(0x29, 0x33, 0x4F, false);
+
+                        var r2 = p.AddText(safeText(value));
+                        r2.SetBold(false);
+
+                        pushPara(p);
+                      }
+
+                      // Title
+                      var title = Api.CreateParagraph();
+                      title.SetStyle(titleStyle);
+                      title.AddText("APPOINTMENT TICKET");
+                      pushPara(title);
+
+                      // Subtitle (optional)
+                      var sub = Api.CreateParagraph();
+                      sub.SetStyle(subtitleStyle);
+                      var subRun = sub.AddText("Please arrive 10 minutes early and bring your ID.");
+                      subRun.SetItalic(true);
+                      pushPara(sub);
+
+                      addDivider();
+
+                      addField("Patient", t.customerName);
+                      addField("Document", t.projectName);
+                      addField("Date", t.startDate);
+                      addField("Time", t.time);
+                      addField("Doctor", t.doctor);
+                      addField("Reason", t.reason);
+
+                      addDivider();
+
+                      // Footer
+                      var footer = Api.CreateParagraph();
+                      footer.SetStyle(footerStyle);
+                      var f = footer.AddText("Generated: " + new Date().toLocaleString());
+                      f.SetItalic(true);
+                      pushPara(footer);
+
+                      Api.Save();
+                    } catch (e) {
+                      console.error("Error inside callCommand", e);
+                    }
                   });
+
                 } catch (e) {
-                  console.error("Error executing editor callback", e);
+                  console.error("Editor callback failed", e);
                 }
               `
             );
+
+
 
             frameInstance.executeInEditor(editorCallback);
 
@@ -421,6 +600,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
     try {
 
+      const roomId = await ensureRoomId();
       const response = await fetch("/api/patients/appointments/ticket", {
 
         method: "POST",
@@ -429,7 +609,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
         body: JSON.stringify({
 
-          roomId: session.room?.id,
+          roomId,
 
           patientName: session?.user?.fullName || "Patient",
 
@@ -491,29 +671,42 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
 
 
-  return (
+    return (
 
-    <div className="dashboard-layout">
+      <PatientShell
+        user={session.user}
+        active="appointments"
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+        roomId={session?.room?.id}
+        token={session?.user?.token}
+      >
 
-      <Sidebar user={session.user} onLogout={onLogout} active="appointments" onNavigate={onNavigate} />
-
-      <main>
-
-        <Topbar room={session.room} />
-
-        <section className="panel">
-
-          <div className="panel-head">
+          <section className="panel panel-hero">
 
             <div>
 
-              <h3>Book an appointment</h3>
+              <h3>Appointments</h3>
 
-              <p className="muted">Pick a time and the doctor will confirm the visit.</p>
+              <p className="muted">Schedule a visit and keep track of upcoming appointments.</p>
 
             </div>
 
-          </div>
+          </section>
+
+          <section className="panel">
+
+            <div className="panel-head">
+
+              <div>
+
+                <h3>Book an appointment</h3>
+
+                <p className="muted">Pick a time and the doctor will confirm the visit.</p>
+
+              </div>
+
+            </div>
 
           {doctorInfo && (
 
@@ -613,7 +806,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
         </section>
 
-        <section className="panel">
+          <section className="panel">
 
           <div className="panel-head">
 
@@ -835,13 +1028,11 @@ export default function Appointments({ session, onLogout, onNavigate }) {
         />
         <div id={editorFrameId} className="hidden-editor" />
 
-      </main>
+      </PatientShell>
 
-    </div>
+    );
 
-  );
-
-}
+  }
 
 function buildTicketText(data) {
   const datePart = data?.startDate ? `Date: ${data.startDate}` : "Date: -";

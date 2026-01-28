@@ -2,8 +2,11 @@ import { Router } from "express";
 import {
   createPatientRoom,
   createPatientFolders,
+  getFolderByTitleWithin,
   getRoomSummary,
   getFolderContents,
+  getNewFolderItems,
+  moveFileToFolder,
   updateMember,
   getRoomInfo,
   getDoctorProfile,
@@ -156,6 +159,71 @@ router.post("/file-share-link", async (req, res) => {
     }
     const link = await setFileExternalLink(String(fileId), auth);
     return res.json({ link });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/fill-sign/complete", async (req, res) => {
+  try {
+    const { roomId, fileId } = req.body || {};
+    if (!roomId || !fileId) {
+      return res.status(400).json({ error: "roomId and fileId are required" });
+    }
+    const fillFolder = await getRoomSummary(roomId).then((items) =>
+      (items || []).find((item) => String(item.title || "").toLowerCase() === "fill & sign")
+    );
+    if (!fillFolder?.id) {
+      return res.status(404).json({ error: "Fill & Sign folder not found" });
+    }
+    const completeFolder = await getFolderByTitleWithin(fillFolder.id, "Complete");
+    if (!completeFolder?.id) {
+      return res.status(404).json({ error: "Complete folder not found" });
+    }
+    await moveFileToFolder({ fileId, destFolderId: completeFolder.id });
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/room-news", async (req, res) => {
+  try {
+    const roomId = req.query.roomId;
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+    const summary = await getRoomSummary(roomId, auth);
+    const folders = await Promise.all(
+      (summary || []).map(async (folder) => {
+        try {
+          const items = await getNewFolderItems(folder.id, auth);
+          return {
+            id: folder.id,
+            title: folder.title,
+            items
+          };
+        } catch (error) {
+          return {
+            id: folder.id,
+            title: folder.title,
+            items: [],
+            error: error.message
+          };
+        }
+      })
+    );
+    return res.json({ folders });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,

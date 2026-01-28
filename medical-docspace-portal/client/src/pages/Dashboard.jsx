@@ -1,238 +1,177 @@
-import { useEffect, useState } from "react";
-import Sidebar from "../components/Sidebar.jsx";
-import Topbar from "../components/Topbar.jsx";
-import FolderTile from "../components/FolderTile.jsx";
-import ShareQrModal from "../components/ShareQrModal.jsx";
-import folderStructure from "../data/folderStructure.js";
-import { createFileShareLink } from "../services/docspaceApi.js";
+import { useEffect, useMemo, useState } from "react";
+import PatientShell from "../components/PatientShell.jsx";
 
-const appointmentsStorageKey = "medical.portal.appointments";
+const seenNewsStorageKey = "medical.portal.news.seen";
 
-export default function Dashboard({ session, onLogout, onNavigate }) {
-  const [folderStats, setFolderStats] = useState(folderStructure);
-  const [summaryError, setSummaryError] = useState("");
-  const [activeFolder, setActiveFolder] = useState(null);
-  const [folderContents, setFolderContents] = useState([]);
-  const [folderLoading, setFolderLoading] = useState(false);
-  const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
-
-  useEffect(() => {
-    if (!session?.room?.id || session.room.id === "DOCSPACE") return;
-    const load = async () => {
-      try {
-        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
-        const response = await fetch(`/api/patients/room-summary?roomId=${session.room.id}`, {
-          headers
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          const details =
-            typeof data?.error === "string" ? data.error : JSON.stringify(data?.error || {});
-          throw new Error(details || "Failed to load room summary");
-        }
-        const mapped = mapFoldersFromSummary(folderStructure, data.summary || []);
-        const withAppointments = applyAppointmentsCount(mapped, session);
-        setFolderStats(withAppointments);
-        setSummaryError("");
-      } catch (error) {
-        setSummaryError(error.message || "Failed to load room summary");
-      }
-    };
-    load();
-  }, [session]);
-
-  const openFolder = async (folder) => {
-    if (!folder?.id) return;
-    setActiveFolder(folder);
-    setFolderContents([]);
-    setFolderLoading(true);
-    try {
-      const contents = await fetchFolderContents(folder.id, session?.user?.token);
-      const nextItems = filterFolderItems(folder, contents.items || [], session);
-      setFolderContents(nextItems);
-    } finally {
-      setFolderLoading(false);
-    }
-  };
-
-  const handleShareFile = async (item) => {
-    if (!item?.id) return;
-    setShareModal({ open: true, title: item.title, link: "", loading: true, error: "" });
-    try {
-      const link = await createFileShareLink({ fileId: item.id, token: session?.user?.token });
-      setShareModal({ open: true, title: item.title, link: link?.shareLink || "", loading: false, error: "" });
-    } catch (error) {
-      setShareModal({ open: true, title: item.title, link: "", loading: false, error: typeof error?.message === "string" ? error.message : JSON.stringify(error?.message || error || "", null, 2) });
-    }
-  };
-
-
-  return (
-    <div className="dashboard-layout">
-      <Sidebar user={session.user} onLogout={onLogout} active="dashboard" onNavigate={onNavigate} />
-      <main>
-        <Topbar room={session.room} />
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <h3>Patient room structure</h3>
-              <p className="muted">
-                {activeFolder
-                  ? `Viewing: ${activeFolder.title}`
-                  : "Folders are created automatically after registration."}
-              </p>
-            </div>
-            {activeFolder ? (
-              <button className="secondary" onClick={() => setActiveFolder(null)}>
-                Back to folders
-              </button>
-            ) : (
-              <button className="secondary">Request new folder</button>
-            )}
-          </div>
-          {session?.warnings?.length ? (
-            <p className="muted">Warnings: {session.warnings.join("; ")}</p>
-          ) : null}
-          {!session?.room?.id && (
-            <p className="muted">Room is not linked to this account yet.</p>
-          )}
-          {summaryError && <p className="muted">Summary error: {summaryError}</p>}
-          {!activeFolder ? (
-            <div className="folder-grid">
-              {folderStats.map((folder) => {
-                const { key: folderKey, ...rest } = folder;
-                return (
-                  <FolderTile
-                    key={folder.id || folderKey || folder.title}
-                    {...rest}
-                    onClick={() => openFolder(folder)}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="folder-contents">
-              {folderLoading && <p className="muted">Loading folder contents...</p>}
-              {!folderLoading && folderContents.length === 0 && (
-                <p className="muted">No items in this folder yet.</p>
-              )}
-              <ul className="content-list">
-                {folderContents.map((item) => (
-                  <li
-                    key={`${item.type}-${item.id}`}
-                    className={`content-item ${item.type}`}
-                    onClick={() => {
-                      if (item.type === "file" && item.openUrl) {
-                        window.open(item.openUrl, "_blank", "noopener,noreferrer");
-                      }
-                    }}
-                  >
-                    <span className="content-icon" />
-                    <span className="content-title">{item.title}</span>
-                    {item.type === "file" && (
-                      <button
-                        className="secondary share-btn"
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShareFile(item);
-                        }}
-                      >
-                        Share QR
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-        <ShareQrModal
-          open={shareModal.open}
-          title={shareModal.title}
-          link={shareModal.link}
-          loading={shareModal.loading}
-          error={shareModal.error}
-          onClose={() => setShareModal({ open: false, title: "", link: "", loading: false, error: "" })}
-        />
-      </main>
-    </div>
-  );
+function getSeenNewsKey(session) {
+  const userId = session?.user?.docspaceId || "anon";
+  const roomId = session?.room?.id || "room";
+  return `${seenNewsStorageKey}.${userId}.${roomId}`;
 }
 
-function mapFoldersFromSummary(base, summary) {
-  const descriptionMap = new Map(base.map((item) => [normalize(item.title), item.description]));
-  const iconMap = new Map(base.map((item) => [normalize(item.title), item.icon]));
-
-  return summary.map((folder) => {
-    const count = (folder.filesCount ?? 0) + (folder.foldersCount ?? 0);
-    return {
-      id: folder.id,
-      title: folder.title,
-      description: descriptionMap.get(normalize(folder.title)) || "Patient documents",
-      icon: iconMap.get(normalize(folder.title)) || "folder",
-      count
-    };
-  });
-}
-
-function normalize(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-async function fetchFolderContents(folderId, token) {
-  const headers = token ? { Authorization: token } : undefined;
-  const response = await fetch(`/api/patients/folder-contents?folderId=${folderId}`, {
-    headers
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.error || "Failed to load folder contents");
-  }
-  return data.contents;
-}
-
-function applyAppointmentsCount(folders, session) {
-  const activeCount = getActiveAppointmentsCount(session);
-  return folders.map((folder) =>
-    normalize(folder.title) === "appointments" ? { ...folder, count: activeCount } : folder
-  );
-}
-
-function getActiveAppointmentsCount(session) {
+function loadSeenNews(session) {
   try {
-    const raw = localStorage.getItem(getAppointmentsKey(session));
-    const items = raw ? JSON.parse(raw) : [];
-    return items.filter((item) => item?.status === "Scheduled").length;
-  } catch {
-    return 0;
-  }
-}
-
-
-function filterFolderItems(folder, items, session) {
-  if (normalize(folder?.title) !== "appointments") return items;
-  const activeTicketIds = getActiveAppointmentTicketIds(session);
-  if (activeTicketIds.size === 0) return [];
-  return items.filter((item) => item?.type !== "file" || activeTicketIds.has(String(item.id)));
-}
-
-function getActiveAppointmentTicketIds(session) {
-  try {
-    const raw = localStorage.getItem(getAppointmentsKey(session));
-    const items = raw ? JSON.parse(raw) : [];
-    const ids = items
-      .filter((item) => item?.status === "Scheduled" && item?.ticket?.id)
-      .map((item) => String(item.ticket.id));
-    return new Set(ids);
+    const raw = localStorage.getItem(getSeenNewsKey(session));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(parsed);
   } catch {
     return new Set();
   }
 }
 
-function getAppointmentsKey(session) {
-  const userId = session?.user?.docspaceId || "anon";
-  const roomId = session?.room?.id || "room";
-  return `${appointmentsStorageKey}.${userId}.${roomId}`;
+function saveSeenNews(session, set) {
+  try {
+    localStorage.setItem(getSeenNewsKey(session), JSON.stringify(Array.from(set)));
+  } catch {}
 }
 
+export default function Dashboard({ session, onLogout, onNavigate }) {
+  const [summaryError] = useState("");
+  const [showBanner, setShowBanner] = useState(true);
+  const [news, setNews] = useState([]);
+  const [newsError, setNewsError] = useState("");
+
+  useEffect(() => {
+    const loadNews = async () => {
+      if (!session?.room?.id || session.room.id === "DOCSPACE") return;
+      try {
+        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
+        const response = await fetch(`/api/patients/room-news?roomId=${session.room.id}`, {
+          headers
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load notifications");
+        }
+        setNews(data?.folders || []);
+        setNewsError("");
+      } catch (error) {
+        setNewsError(error.message || "Failed to load notifications");
+      }
+    };
+    loadNews();
+  }, [session]);
+
+  const notifications = useMemo(() => {
+    const seen = loadSeenNews(session);
+    const items = [];
+    news.forEach((folder) => {
+      const entries = Array.isArray(folder?.items) ? folder.items : [];
+      const unseen = entries.filter((entry) => entry?.id && !seen.has(`${folder.id}:${entry.id}`));
+      if (unseen.length) {
+        items.push({
+          id: `news-${folder.id}`,
+          title: `${unseen.length} new file${unseen.length > 1 ? "s" : ""} in ${folder.title}`,
+          detail: "Open documents to review the updates.",
+          type: "info",
+          action: () => {
+            const nextSeen = loadSeenNews(session);
+            unseen.forEach((entry) => {
+              if (entry?.id) nextSeen.add(`${folder.id}:${entry.id}`);
+            });
+            saveSeenNews(session, nextSeen);
+            onNavigate("records");
+          }
+        });
+      }
+    });
+    if (!items.length) {
+      items.push({
+        id: "news-empty",
+        title: "No new documents",
+        detail: "New files from the clinic will appear here.",
+        type: "muted",
+        action: null
+      });
+    }
+    return items;
+  }, [news, onNavigate, session]);
+
+  return (
+    <PatientShell
+      user={session.user}
+      active="dashboard"
+      onNavigate={onNavigate}
+      onLogout={onLogout}
+      roomId={session?.room?.id}
+      token={session?.user?.token}
+      banner={
+        showBanner ? (
+          <section className="notice-banner">
+            <strong>Please confirm your email address</strong>
+            <span>
+              We've sent a confirmation email to <strong>{session.user.email || "your inbox"}</strong>.
+            </span>
+            <button
+              className="ghost ghost-light"
+              type="button"
+              onClick={() => setShowBanner(false)}
+            >
+              Dismiss
+            </button>
+          </section>
+        ) : null
+      }
+    >
+      <section className="panel panel-hero">
+        <div>
+          <h3>Hello, {session.user.fullName.split(" ")[0] || "Patient"}</h3>
+          <p className="muted">
+            Welcome to your personal medical account. Review documents, book appointments, and
+            track your medical records.
+          </p>
+        </div>
+      </section>
+
+      <section className="panel split-panel">
+        <div className="panel-card">
+          <h4>Notifications</h4>
+          {newsError && <p className="muted">{newsError}</p>}
+          <div className="notification-list">
+            {notifications.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`notification-item ${item.type}`}
+                onClick={item.action || undefined}
+                disabled={!item.action}
+              >
+                <strong>{item.title}</strong>
+                <span className="muted">{item.detail}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="panel-card">
+          <h4>Make an appointment</h4>
+          <p className="muted">
+            Schedule a visit with your doctor at a convenient time. Add the reason to help the
+            clinic prepare.
+          </p>
+          <button className="primary" type="button" onClick={() => onNavigate("appointments")}>
+            Book an appointment
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3>Quick actions</h3>
+            <p className="muted">Jump to the most common actions in your account.</p>
+          </div>
+        </div>
+        <div className="quick-actions">
+          <button className="secondary" type="button" onClick={() => onNavigate("fill-sign")}>
+            Review & sign documents
+          </button>
+          <button className="ghost ghost-dark" type="button" onClick={() => onNavigate("records")}>
+            Open documents
+          </button>
+        </div>
+      </section>
+
+      {summaryError && <p className="muted">Summary error: {summaryError}</p>}
+    </PatientShell>
+  );
+}

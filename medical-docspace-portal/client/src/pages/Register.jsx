@@ -1,4 +1,5 @@
-﻿import { useState } from "react";
+import { useState } from "react";
+import registrationHero from "../assets/registration-hero.svg";
 
 export default function Register({ busy, error, onRegister, onGoLogin }) {
   const [form, setForm] = useState({
@@ -17,19 +18,17 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
     <div className="auth-layout">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-dot" />
-          DocSpace Medical
+          <span className="brand-mark" />
+          City Clinic
         </div>
-        <h1>Create patient account</h1>
-        <p className="muted">
-          We will create a DocSpace user and a private patient room automatically.
-        </p>
+        <h1>Patient registration</h1>
+        <p className="muted">Please fill out the form below to register at our clinic.</p>
         <form className="auth-form" onSubmit={submit}>
           <label>
             Full name
             <input
               type="text"
-              placeholder="Anna Petrova"
+              placeholder="Emily Carter"
               value={form.fullName}
               onChange={(e) => setForm({ ...form, fullName: e.target.value })}
               required
@@ -39,17 +38,17 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
             Email
             <input
               type="email"
-              placeholder="patient@clinic.com"
+              placeholder="emily.carter@maildemo.com"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               required
             />
           </label>
           <label>
-            Phone
+            Phone number
             <input
               type="tel"
-              placeholder="+1 555 014 221"
+              placeholder="+1 (415) 732-8491"
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               required
@@ -66,22 +65,29 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
             />
           </label>
           <button className="primary" type="submit" disabled={busy}>
-            {busy ? "Registering..." : "Create account"}
+            {busy ? "Registering..." : "Register"}
           </button>
         </form>
         {error && <p className="muted">Ошибка регистрации: {error}</p>}
         <button className="link" onClick={onGoLogin}>
-          Back to sign in
+          Already have an account? Sign in
         </button>
       </div>
-      <div className="auth-panel">
-        <h2>Designed for modern clinics</h2>
-        <ul>
-          <li>Data synchronized with DocSpace profile</li>
-          <li>Folders prepared for documents and insurance</li>
-          <li>Audit-friendly patient workspace</li>
-        </ul>
-        <div className="auth-gradient" />
+      <div className="auth-visual">
+        <div className="auth-hero-card">
+          <div>
+            <h2>Patient registration</h2>
+            <p className="muted">
+              Please enter your email address or phone number to continue.
+            </p>
+          </div>
+          <div className="auth-photo-frame">
+            <img className="auth-photo-img" src={registrationHero} alt="Registration illustration" />
+          </div>
+        </div>
+        <div className="auth-support">
+          <span>support@cityclinic.com</span>
+        </div>
       </div>
     </div>
   );

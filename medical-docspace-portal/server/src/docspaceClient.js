@@ -195,6 +195,7 @@ export async function createPatientFolders({ roomId }) {
     "Lab Results",
     "Medical Records",
     "Appointments",
+    "Fill & Sign",
     "Sick Leave",
     "Insurance",
     "Prescriptions",
@@ -208,6 +209,18 @@ export async function createPatientFolders({ roomId }) {
       body: { title }
     });
     folders.push(normalizeFolder(folder));
+  }
+
+  const fillFolder = folders.find((folder) => normalize(folder.title) === "fill & sign");
+  if (fillFolder?.id) {
+    const subfolders = ["In Process", "Complete"];
+    for (const title of subfolders) {
+      const sub = await apiRequest(`/api/2.0/files/folder/${fillFolder.id}`, {
+        method: "POST",
+        body: { title }
+      });
+      folders.push(normalizeFolder(sub));
+    }
   }
 
   return { roomId, folders };
@@ -278,6 +291,16 @@ export async function getRoomFolderByTitle(roomId, title) {
   return match ? normalizeFolder(match) : null;
 }
 
+export async function getFolderByTitleWithin(parentId, title) {
+  if (!parentId || !title) return null;
+  const content = await apiRequest(`/api/2.0/files/${parentId}`);
+  const folders = content?.folders || [];
+  const target = normalize(title);
+  const exact = folders.find((folder) => normalize(folder.title) === target);
+  const match = exact || folders.find((folder) => normalize(folder.title).includes(target));
+  return match ? normalizeFolder(match) : null;
+}
+
 export async function ensureRoomFolderByTitle(roomId, title) {
   const existing = await getRoomFolderByTitle(roomId, title);
   if (existing?.id) return existing;
@@ -322,6 +345,22 @@ export async function copyFileToFolder({ fileId, destFolderId }) {
       fileIds: [String(fileId)],
       destFolderId: String(destFolderId),
       deleteAfter: false,
+      content: true,
+      toFillOut: false
+    }
+  });
+}
+
+export async function moveFileToFolder({ fileId, destFolderId }) {
+  if (!fileId || !destFolderId) {
+    throw new Error("fileId and destFolderId are required");
+  }
+  return apiRequest("/api/2.0/files/fileops/move", {
+    method: "PUT",
+    body: {
+      fileIds: [String(fileId)],
+      destFolderId: String(destFolderId),
+      deleteAfter: true,
       content: true,
       toFillOut: false
     }
@@ -463,6 +502,15 @@ export async function getFolderContents(folderId, auth) {
     title: content?.title || "Folder",
     items: [...folders, ...files]
   };
+}
+
+export async function getNewFolderItems(folderId, auth) {
+  if (!folderId) return [];
+  const response = await apiRequest(`/api/2.0/files/${folderId}/news`, { auth });
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.items)) return response.items;
+  if (Array.isArray(response?.response)) return response.response;
+  return [];
 }
 
 export async function getRoomInfo(roomId, auth) {

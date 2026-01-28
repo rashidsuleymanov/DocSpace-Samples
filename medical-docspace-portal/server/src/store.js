@@ -39,17 +39,21 @@ export function listAppointments({ date } = {}) {
 
 export function recordMedicalRecord(record) {
   if (!record?.id || !record?.roomId) return null;
+  const normalized = { ...record, roomId: String(record.roomId) };
   const index = medicalRecords.findIndex((item) => item.id === record.id);
   if (index >= 0) {
-    medicalRecords[index] = { ...medicalRecords[index], ...record };
+    medicalRecords[index] = { ...medicalRecords[index], ...normalized };
     return medicalRecords[index];
   }
-  medicalRecords.push({ ...record, createdAt: new Date().toISOString() });
-  return record;
+  medicalRecords.push({ ...normalized, createdAt: new Date().toISOString() });
+  return normalized;
 }
 
 export function listMedicalRecords(roomId) {
-  const items = roomId ? medicalRecords.filter((item) => item.roomId === roomId) : medicalRecords;
+  const target = roomId ? String(roomId) : "";
+  const items = target
+    ? medicalRecords.filter((item) => String(item.roomId) === target)
+    : medicalRecords;
   return [...items].sort((a, b) => `${b.date || ""}`.localeCompare(a.date || ""));
 }
 

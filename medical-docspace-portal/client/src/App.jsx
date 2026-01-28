@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Settings from "./pages/Settings.jsx";
 import Appointments from "./pages/Appointments.jsx";
 import MedicalRecords from "./pages/MedicalRecords.jsx";
+import FillSign from "./pages/FillSign.jsx";
 import DoctorPortal from "./pages/DoctorPortal.jsx";
 import {
   getSession,
@@ -135,6 +136,13 @@ export default function App() {
       )}
       {view === "records" && session && (
         <MedicalRecords
+          session={session}
+          onLogout={actions.onLogout}
+          onNavigate={actions.onNavigate}
+        />
+      )}
+      {view === "fill-sign" && session && (
+        <FillSign
           session={session}
           onLogout={actions.onLogout}
           onNavigate={actions.onNavigate}

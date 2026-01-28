@@ -290,6 +290,21 @@ export default function DoctorPortal({ doctor, onExit }) {
     loadAppointments();
   }, [dateFilter]);
 
+  useEffect(() => {
+    let host = document.getElementById(editorFrameId);
+    if (!host) {
+      host = document.createElement("div");
+      host.id = editorFrameId;
+      host.className = "hidden-editor";
+      document.body.appendChild(host);
+    }
+    return () => {
+      if (host?.parentNode) {
+        host.parentNode.removeChild(host);
+      }
+    };
+  }, []);
+
   const destroyEditor = () => {
     if (editorRef.current?.destroy) {
       editorRef.current.destroy();
@@ -297,7 +312,7 @@ export default function DoctorPortal({ doctor, onExit }) {
     editorRef.current = null;
   };
 
-  const runHiddenEditor = async (file, textToInsert) => {
+  const runHiddenEditor = async (file, payload) => {
     if (!file?.id || !file?.shareToken) return;
     if (!docspaceUrl) {
       setMessage("VITE_DOCSPACE_URL is not set.");
@@ -324,18 +339,169 @@ export default function DoctorPortal({ doctor, onExit }) {
               "editorInstance",
               `
                 try {
-                  const connector = editorInstance?.createConnector?.();
-                  if (!connector?.callCommand) {
-                    console.error("connector.callCommand is not available", connector);
+                  if (!editorInstance || typeof editorInstance.createConnector !== "function") {
+                    console.error("Editor instance is invalid", editorInstance);
                     return;
                   }
-                  Asc.scope.textToInsert = ${JSON.stringify(textToInsert)};
+                  const connector = editorInstance.createConnector();
+                  if (!connector || typeof connector.callCommand !== "function") {
+                    console.error("Connector is invalid", connector);
+                    return;
+                  }
+                  Asc.scope.payload = ${JSON.stringify(payload)};
                   connector.callCommand(function () {
-                    const doc = Api.GetDocument();
-                    const p = Api.CreateParagraph();
-                    p.AddText(Asc.scope.textToInsert);
-                    doc.InsertContent([p]);
-                    Api.Save();
+                    try {
+                      var data = Asc.scope.payload || {};
+                      var doc = Api.GetDocument();
+
+                      if (doc.RemoveAllElements) doc.RemoveAllElements();
+
+                      var textPr = doc.GetDefaultTextPr();
+                      textPr.SetFontFamily("Calibri");
+                      textPr.SetFontSize(26);
+                      textPr.SetLanguage("en-US");
+
+                      var normalStyle = doc.GetDefaultStyle("paragraph");
+                      var normalParaPr = normalStyle.GetParaPr();
+                      normalParaPr.SetSpacingLine(240, "auto");
+                      normalParaPr.SetSpacingAfter(120);
+                      normalParaPr.SetJc("left");
+
+                      var normalTextPr = normalStyle.GetTextPr();
+                      normalTextPr.SetColor(0x26, 0x26, 0x26, false);
+
+                      var titleStyle = doc.CreateStyle("DoctorDocTitle", "paragraph");
+                      var titleParaPr = titleStyle.GetParaPr();
+                      titleParaPr.SetJc("left");
+                      titleParaPr.SetSpacingAfter(180);
+                      var titleTextPr = titleStyle.GetTextPr();
+                      titleTextPr.SetFontFamily("Calibri Light");
+                      titleTextPr.SetFontSize(54);
+                      titleTextPr.SetColor(0x22, 0x33, 0x55, false);
+
+                      var subtitleStyle = doc.CreateStyle("DoctorDocSubtitle", "paragraph");
+                      var subParaPr = subtitleStyle.GetParaPr();
+                      subParaPr.SetJc("left");
+                      subParaPr.SetSpacingAfter(160);
+                      var subTextPr = subtitleStyle.GetTextPr();
+                      subTextPr.SetFontFamily("Calibri");
+                      subTextPr.SetFontSize(24);
+                      subTextPr.SetColor(0x5f, 0x6b, 0x7a, false);
+
+                      var sectionStyle = doc.CreateStyle("DoctorDocSection", "paragraph");
+                      var sectionParaPr = sectionStyle.GetParaPr();
+                      sectionParaPr.SetJc("left");
+                      sectionParaPr.SetSpacingBefore(160);
+                      sectionParaPr.SetSpacingAfter(120);
+                      var sectionTextPr = sectionStyle.GetTextPr();
+                      sectionTextPr.SetFontFamily("Calibri");
+                      sectionTextPr.SetFontSize(28);
+                      sectionTextPr.SetBold(true);
+                      sectionTextPr.SetColor(0x22, 0x33, 0x55, false);
+
+                      var fieldStyle = doc.CreateStyle("DoctorDocField", "paragraph");
+                      var fieldParaPr = fieldStyle.GetParaPr();
+                      fieldParaPr.SetJc("left");
+                      fieldParaPr.SetIndLeft(480);
+                      fieldParaPr.SetIndRight(480);
+                      fieldParaPr.SetSpacingAfter(110);
+                      var fieldTextPr = fieldStyle.GetTextPr();
+                      fieldTextPr.SetFontFamily("Calibri");
+                      fieldTextPr.SetFontSize(26);
+                      fieldTextPr.SetColor(0x26, 0x26, 0x26, false);
+
+                      function safeText(v) {
+                        return (v && String(v).trim()) ? String(v) : "-";
+                      }
+
+                      function pushPara(p) {
+                        if (doc.Push) doc.Push(p);
+                        else doc.InsertContent([p]);
+                      }
+
+                      function addTitle(text, subtitle, meta) {
+                        var p = Api.CreateParagraph();
+                        p.SetStyle(titleStyle);
+                        p.AddText(text);
+                        pushPara(p);
+
+                        if (subtitle) {
+                          var sp = Api.CreateParagraph();
+                          sp.SetStyle(subtitleStyle);
+                          sp.AddText(subtitle);
+                          pushPara(sp);
+                        }
+
+                        if (meta) {
+                          var mp = Api.CreateParagraph();
+                          mp.SetStyle(subtitleStyle);
+                          mp.SetSpacingAfter(200);
+                          mp.AddText(meta);
+                          pushPara(mp);
+                        }
+                      }
+
+                      function addSection(text) {
+                        var p = Api.CreateParagraph();
+                        p.SetStyle(sectionStyle);
+                        p.AddText(text);
+                        pushPara(p);
+                      }
+
+                      function addField(label, value) {
+                        var p = Api.CreateParagraph();
+                        p.SetStyle(fieldStyle);
+                        var r1 = p.AddText(label + ": ");
+                        r1.SetBold(true);
+                        r1.SetColor(0x29, 0x33, 0x4F, false);
+                        p.AddText(safeText(value));
+                        pushPara(p);
+                      }
+
+                      function addBody(text) {
+                        var p = Api.CreateParagraph();
+                        p.SetStyle(fieldStyle);
+                        p.SetIndLeft(0);
+                        p.SetIndRight(0);
+                        p.SetSpacingAfter(160);
+                        p.AddText(safeText(text));
+                        pushPara(p);
+                      }
+
+                      if (data.type === "prescription") {
+                        addTitle(
+                          "Prescription",
+                          data.patient ? "Issued for " + data.patient : "",
+                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
+                        );
+                        addSection("Patient Details");
+                        addField("Patient", data.patient);
+                        addField("Doctor", data.doctor);
+                        addField("Date", data.date);
+                        addSection("Medication");
+                        addField("Name", data.medication);
+                        addField("Dosage", data.dosage);
+                        addSection("Instructions");
+                        addBody(data.instructions);
+                      } else if (data.type === "medical-record") {
+                        addTitle(
+                          "Medical Record",
+                          data.patient ? "Visit summary for " + data.patient : "",
+                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
+                        );
+                        addSection("Visit Details");
+                        addField("Patient", data.patient);
+                        addField("Doctor", data.doctor);
+                        addField("Appointment", data.appointment);
+                        addField("Record type", data.recordType);
+                        addSection("Summary");
+                        addBody(data.summary);
+                      }
+
+                      Api.Save();
+                    } catch (e) {
+                      console.error("Doctor editor command failed", e);
+                    }
                   });
                 } catch (e) {
                   console.error("Doctor editor callback failed", e);
@@ -408,10 +574,13 @@ export default function DoctorPortal({ doctor, onExit }) {
     try {
       const result = await createPrescription(selectedRoom.id, rxForm);
       const file = result?.file || null;
-      const payload = result?.payload || null;
-      const text = buildPrescriptionText({ payload, patient: selectedRoom, doctor });
+      const payload = buildPrescriptionPayload({
+        payload: result?.payload || null,
+        patient: selectedRoom,
+        doctor
+      });
       if (file?.shareToken) {
-        await runHiddenEditor(file, text);
+        await runHiddenEditor(file, payload);
       }
       setRxForm({ medication: "", dosage: "", instructions: "" });
       setRxModalOpen(false);
@@ -439,9 +608,14 @@ export default function DoctorPortal({ doctor, onExit }) {
         doctorName: doctor?.displayName || "Doctor"
       });
       const file = record?.document || null;
-      const text = buildMedicalRecordText({ record, appointment, patient: selectedRoom, doctor });
+      const payload = buildMedicalRecordPayload({
+        record,
+        appointment,
+        patient: selectedRoom,
+        doctor
+      });
       if (file?.shareToken) {
-        await runHiddenEditor(file, text);
+        await runHiddenEditor(file, payload);
       }
       setRecordForm({
         appointmentId: "",
@@ -838,7 +1012,6 @@ export default function DoctorPortal({ doctor, onExit }) {
           </Modal>
         )}
 
-        <div id={editorFrameId} className="hidden-editor" />
       </main>
     </div>
   );
@@ -881,36 +1054,29 @@ function getTopbarProps({ view, selectedRoom, dateFilter, onDateFilter }) {
   };
 }
 
-function buildPrescriptionText({ payload, patient, doctor }) {
+function buildPrescriptionPayload({ payload, patient, doctor }) {
   const data = payload || {};
-  return [
-    "PRESCRIPTION",
-    "",
-    `Date: ${data.date || "-"}`,
-    `Doctor: ${doctor?.displayName || "Doctor"}`,
-    `Patient: ${patient?.patientName || "Patient"}`,
-    "",
-    `Medication: ${data.medication || "-"}`,
-    `Dosage: ${data.dosage || "-"}`,
-    "",
-    "Instructions:",
-    data.instructions || "-"
-  ].join("\n");
+  return {
+    type: "prescription",
+    date: data.date || "-",
+    doctor: doctor?.displayName || "Doctor",
+    patient: patient?.patientName || "Patient",
+    medication: data.medication || "-",
+    dosage: data.dosage || "-",
+    instructions: data.instructions || "-"
+  };
 }
 
-function buildMedicalRecordText({ record, appointment, patient, doctor }) {
-  return [
-    "MEDICAL RECORD",
-    "",
-    `Date: ${record?.date || "-"}`,
-    `Type: ${record?.type || "Visit note"}`,
-    `Doctor: ${doctor?.displayName || "Doctor"}`,
-    `Patient: ${patient?.patientName || "Patient"}`,
-    appointment
-      ? `Appointment: ${appointment.date || ""} ${appointment.time || ""}`.trim()
-      : "Appointment: -",
-    "",
-    "Summary:",
-    record?.description || "-"
-  ].join("\n");
+function buildMedicalRecordPayload({ record, appointment, patient, doctor }) {
+  return {
+    type: "medical-record",
+    date: record?.date || "-",
+    recordType: record?.type || "Visit note",
+    doctor: doctor?.displayName || "Doctor",
+    patient: patient?.patientName || "Patient",
+    appointment: appointment
+      ? `${appointment.date || ""} ${appointment.time || ""}`.trim()
+      : "-",
+    summary: record?.description || "-"
+  };
 }
