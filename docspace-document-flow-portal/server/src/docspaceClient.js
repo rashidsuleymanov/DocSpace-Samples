@@ -2,9 +2,9 @@ import { config } from "./config.js";
 
 const baseUrl = config.baseUrl;
 const authHeader = config.rawAuthToken ? normalizeAuthHeader(config.rawAuthToken) : "";
-const doctorEmail = config.doctorEmail;
-const doctorAccess = config.doctorAccess;
-const patientAccess = config.patientAccess;
+const officerEmail = config.officerEmail;
+const officerAccess = config.officerAccess;
+const citizenAccess = config.patientAccess;
 
 function normalizeAuthHeader(value) {
   if (!value) return "";
@@ -178,27 +178,21 @@ export async function createDocSpaceUser({ fullName, email, password }) {
   });
 }
 
-export async function createPatientRoom({ fullName, userId }) {
+export async function createCitizenRoom({ fullName }) {
   return apiRequest("/api/2.0/files/rooms", {
     method: "POST",
     body: {
-      title: `${fullName} - Patient Room`,
+      title: `${fullName} - Document Flow Room`,
       roomType: 2
     }
   });
 }
 
-export async function createPatientFolders({ roomId }) {
+export async function createCitizenFolders({ roomId }) {
   const folderTitles = [
-    "Personal Data",
-    "Contracts",
-    "Lab Results",
-    "Medical Records",
-    "Appointments",
-    "Sick Leave",
-    "Insurance",
-    "Prescriptions",
-    "Imaging"
+    "My Documents",
+    "Requests Inbox",
+    "Applications"
   ];
 
   const folders = [];
@@ -219,9 +213,9 @@ export async function getUserByEmail(email) {
   return apiRequest(`/api/2.0/people/email?email=${encodeURIComponent(email)}`);
 }
 
-export async function getDoctorProfile() {
-  if (!doctorEmail) return null;
-  return getUserByEmail(doctorEmail);
+export async function getOfficerProfile() {
+  if (!officerEmail) return null;
+  return getUserByEmail(officerEmail);
 }
 
 export async function shareRoom({ roomId, invitations, notify = false, message }) {
@@ -236,19 +230,19 @@ export async function shareRoom({ roomId, invitations, notify = false, message }
   });
 }
 
-export async function ensureRoomMembers({ roomId, patientId }) {
+export async function ensureRoomMembers({ roomId, citizenId }) {
   const invitations = [];
 
-  if (patientId) {
-    invitations.push({ id: patientId, access: patientAccess });
+  if (citizenId) {
+    invitations.push({ id: citizenId, access: citizenAccess });
   }
 
-  if (doctorEmail) {
-    const doctor = await getUserByEmail(doctorEmail);
-    if (doctor?.id) {
-      invitations.push({ id: doctor.id, access: doctorAccess });
+  if (officerEmail) {
+    const officer = await getUserByEmail(officerEmail);
+    if (officer?.id) {
+      invitations.push({ id: officer.id, access: officerAccess });
     } else {
-      invitations.push({ email: doctorEmail, access: doctorAccess });
+      invitations.push({ email: officerEmail, access: officerAccess });
     }
   }
 
@@ -278,6 +272,15 @@ export async function getRoomFolderByTitle(roomId, title) {
   return match ? normalizeFolder(match) : null;
 }
 
+export async function createFolderInParent({ parentId, title }) {
+  if (!parentId || !title) return null;
+  const created = await apiRequest(`/api/2.0/files/folder/${parentId}`, {
+    method: "POST",
+    body: { title }
+  });
+  return normalizeFolder(created);
+}
+
 export async function ensureRoomFolderByTitle(roomId, title) {
   const existing = await getRoomFolderByTitle(roomId, title);
   if (existing?.id) return existing;
@@ -294,6 +297,26 @@ async function createEmptyDoc({ folderId, title }) {
     method: "POST",
     body: { title }
   });
+}
+
+async function uploadTextContent({ fileId, content }) {
+  if (!fileId) return null;
+  requireConfig({ requiresAuth: true });
+  const response = await fetch(`${baseUrl}/api/2.0/files/file/${fileId}/content`, {
+    method: "PUT",
+    headers: {
+      Authorization: authHeader,
+      "Content-Type": "text/plain; charset=utf-8"
+    },
+    body: String(content || "")
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    const error = new Error(raw || response.statusText);
+    error.status = response.status;
+    throw error;
+  }
+  return true;
 }
 
 async function createFileShareLink(fileId, access = "ReadWrite") {
@@ -354,7 +377,7 @@ export async function setFileExternalLink(fileId, auth) {
       shareToken: extractShareToken(shared)
     };
   } catch (error) {
-    // Patient tokens often cannot create external links; retry with admin token.
+    // Citizen tokens often cannot create external links; retry with admin token.
     if (auth && error?.status === 403) {
       const response = await apiRequest(`/api/2.0/files/file/${fileId}/links`, {
         method: "PUT",
@@ -388,6 +411,41 @@ export async function createRoomDocument({ roomId, folderTitle, title }) {
   };
 }
 
+export async function createFolderDocument({ folderId, title }) {
+  if (!folderId) {
+    throw new Error("folderId is required");
+  }
+  const file = await createEmptyDoc({ folderId, title });
+  if (!file?.id) return file;
+  const info = await apiRequest(`/api/2.0/files/file/${file.id}`).catch(() => null);
+  let webUrl = info?.webUrl || info?.viewUrl || file?.webUrl || file?.viewUrl || null;
+  const linkInfo = await createFileShareLink(file.id, "ReadWrite");
+  webUrl = linkInfo.shareLink || webUrl;
+  return {
+    ...file,
+    webUrl,
+    shareToken: linkInfo.shareToken || extractShareToken(webUrl)
+  };
+}
+
+export async function createTextFileInFolder({ folderId, title, content }) {
+  const safeTitle = String(title || "Decision.txt").trim();
+  const fileTitle = safeTitle.toLowerCase().endsWith(".txt") ? safeTitle : `${safeTitle}.txt`;
+  const file = await createEmptyDoc({ folderId, title: fileTitle });
+  if (!file?.id) return file;
+  try {
+    await uploadTextContent({ fileId: file.id, content });
+  } catch (error) {
+    console.warn("[docspace] failed to upload text content", error?.message || error);
+  }
+  const info = await apiRequest(`/api/2.0/files/file/${file.id}`).catch(() => null);
+  return {
+    ...file,
+    title: info?.title || fileTitle,
+    webUrl: info?.webUrl || info?.viewUrl || file?.webUrl || file?.viewUrl || null
+  };
+}
+
 export async function createAppointmentTicket({ roomId, appointment }) {
   const targetFolder = await ensureRoomFolderByTitle(roomId, "Appointments");
   if (!targetFolder?.id) {
@@ -405,12 +463,26 @@ export async function createAppointmentTicket({ roomId, appointment }) {
   const info = await apiRequest(`/api/2.0/files/file/${file.id}`);
   let webUrl = info?.webUrl || info?.viewUrl || file?.webUrl || file?.viewUrl || null;
   let shareToken = null;
-  try {
-    const linkInfo = await setFileExternalLink(file.id);
-    webUrl = linkInfo?.shareLink || webUrl;
-    shareToken = linkInfo?.shareToken || extractShareToken(webUrl);
-  } catch {
-    shareToken = extractShareToken(webUrl);
+  if (!webUrl) {
+    try {
+      const link = await apiRequest(`/api/2.0/files/file/${file.id}/link`, {
+        method: "POST",
+        body: {
+          primary: true,
+          internal: false,
+          access: "ReadWrite"
+        }
+      });
+      webUrl = link?.sharedLink?.shareLink || link?.shareLink || webUrl;
+      shareToken = extractShareToken(webUrl);
+      if (!webUrl) {
+        const existing = await apiRequest(`/api/2.0/files/file/${file.id}/link`);
+        webUrl = existing?.sharedLink?.shareLink || existing?.shareLink || webUrl;
+        shareToken = extractShareToken(webUrl);
+      }
+    } catch {
+      webUrl = webUrl || null;
+    }
   }
   return {
     ...file,
@@ -422,7 +494,8 @@ export async function createAppointmentTicket({ roomId, appointment }) {
 function normalizeFolder(folder) {
   return {
     id: folder?.id,
-    title: folder?.title
+    title: folder?.title,
+    webUrl: folder?.webUrl || folder?.shortWebUrl || null
   };
 }
 
@@ -470,7 +543,7 @@ export async function getRoomInfo(roomId, auth) {
   const content = await apiRequest(`/api/2.0/files/${roomId}`, { auth });
   return {
     id: content?.id || roomId,
-    title: content?.title || "Patient Room",
+    title: content?.title || "Document Flow Room",
     webUrl: content?.webUrl || content?.shortWebUrl || null
   };
 }

@@ -62,11 +62,23 @@ function loadDocSpaceSdk(src) {
 
 
 
-function loadAppointments() {
+function getAppointmentsKey(session) {
+
+  const userId = session?.user?.docspaceId || "anon";
+
+  const roomId = session?.room?.id || "room";
+
+  return `${storageKey}.${userId}.${roomId}`;
+
+}
+
+
+
+function loadAppointments(session) {
 
   try {
 
-    const raw = localStorage.getItem(storageKey);
+    const raw = localStorage.getItem(getAppointmentsKey(session));
 
     return raw ? JSON.parse(raw) : [];
 
@@ -80,9 +92,9 @@ function loadAppointments() {
 
 
 
-function saveAppointments(items) {
+function saveAppointments(session, items) {
 
-  localStorage.setItem(storageKey, JSON.stringify(items));
+  localStorage.setItem(getAppointmentsKey(session), JSON.stringify(items));
 
 }
 
@@ -90,7 +102,7 @@ function saveAppointments(items) {
 
 export default function Appointments({ session, onLogout, onNavigate }) {
 
-  const [items, setItems] = useState(() => loadAppointments());
+  const [items, setItems] = useState([]);
 
   const [form, setForm] = useState({
 
@@ -152,6 +164,14 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     loadDoctor();
 
   }, []);
+
+
+
+  useEffect(() => {
+
+    setItems(loadAppointments(session));
+
+  }, [session?.user?.docspaceId, session?.room?.id]);
 
 
 
@@ -391,7 +411,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
     setItems(next);
 
-    saveAppointments(next);
+    saveAppointments(session, next);
 
     setForm({ date: "", time: "", doctor: "", reason: "" });
 
@@ -437,7 +457,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
       setItems(updated);
 
-      saveAppointments(updated);
+      saveAppointments(session, updated);
 
       const title = file?.title || "ticket";
 
@@ -465,7 +485,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
     setItems(next);
 
-    saveAppointments(next);
+    saveAppointments(session, next);
 
   };
 

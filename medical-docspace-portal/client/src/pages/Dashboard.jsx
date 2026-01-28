@@ -31,7 +31,7 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
           throw new Error(details || "Failed to load room summary");
         }
         const mapped = mapFoldersFromSummary(folderStructure, data.summary || []);
-        const withAppointments = applyAppointmentsCount(mapped);
+        const withAppointments = applyAppointmentsCount(mapped, session);
         setFolderStats(withAppointments);
         setSummaryError("");
       } catch (error) {
@@ -48,7 +48,7 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
     setFolderLoading(true);
     try {
       const contents = await fetchFolderContents(folder.id, session?.user?.token);
-      const nextItems = filterFolderItems(folder, contents.items || []);
+      const nextItems = filterFolderItems(folder, contents.items || [], session);
       setFolderContents(nextItems);
     } finally {
       setFolderLoading(false);
@@ -192,16 +192,16 @@ async function fetchFolderContents(folderId, token) {
   return data.contents;
 }
 
-function applyAppointmentsCount(folders) {
-  const activeCount = getActiveAppointmentsCount();
+function applyAppointmentsCount(folders, session) {
+  const activeCount = getActiveAppointmentsCount(session);
   return folders.map((folder) =>
     normalize(folder.title) === "appointments" ? { ...folder, count: activeCount } : folder
   );
 }
 
-function getActiveAppointmentsCount() {
+function getActiveAppointmentsCount(session) {
   try {
-    const raw = localStorage.getItem(appointmentsStorageKey);
+    const raw = localStorage.getItem(getAppointmentsKey(session));
     const items = raw ? JSON.parse(raw) : [];
     return items.filter((item) => item?.status === "Scheduled").length;
   } catch {
@@ -210,16 +210,16 @@ function getActiveAppointmentsCount() {
 }
 
 
-function filterFolderItems(folder, items) {
+function filterFolderItems(folder, items, session) {
   if (normalize(folder?.title) !== "appointments") return items;
-  const activeTicketIds = getActiveAppointmentTicketIds();
+  const activeTicketIds = getActiveAppointmentTicketIds(session);
   if (activeTicketIds.size === 0) return [];
   return items.filter((item) => item?.type !== "file" || activeTicketIds.has(String(item.id)));
 }
 
-function getActiveAppointmentTicketIds() {
+function getActiveAppointmentTicketIds(session) {
   try {
-    const raw = localStorage.getItem(appointmentsStorageKey);
+    const raw = localStorage.getItem(getAppointmentsKey(session));
     const items = raw ? JSON.parse(raw) : [];
     const ids = items
       .filter((item) => item?.status === "Scheduled" && item?.ticket?.id)
@@ -228,5 +228,11 @@ function getActiveAppointmentTicketIds() {
   } catch {
     return new Set();
   }
+}
+
+function getAppointmentsKey(session) {
+  const userId = session?.user?.docspaceId || "anon";
+  const roomId = session?.room?.id || "room";
+  return `${appointmentsStorageKey}.${userId}.${roomId}`;
 }
 
