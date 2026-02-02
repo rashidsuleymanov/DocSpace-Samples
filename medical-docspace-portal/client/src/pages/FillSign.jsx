@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import PatientShell from "../components/PatientShell.jsx";
+import DocSpaceModal from "../components/DocSpaceModal.jsx";
 
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
 const editorFrameId = "fill-sign-hidden-editor";
@@ -49,6 +50,7 @@ export default function FillSign({ session, onLogout, onNavigate }) {
   const [actionItems, setActionItems] = useState([]);
   const [completedItems, setCompletedItems] = useState([]);
   const [busyId, setBusyId] = useState("");
+  const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
   const editorRef = useRef(null);
 
   const loadItems = async () => {
@@ -340,16 +342,6 @@ export default function FillSign({ session, onLogout, onNavigate }) {
       token={session?.user?.token}
       badgeCounts={badgeCounts}
     >
-      <section className="panel panel-hero">
-        <div>
-          <h3>Fill & Sign</h3>
-          <p className="muted">
-            Complete and sign medical documents online. Some forms may require your action before
-            your appointment.
-          </p>
-        </div>
-      </section>
-
       <section className="panel">
         <div className="panel-tabs">
           <button
@@ -394,9 +386,17 @@ export default function FillSign({ session, onLogout, onNavigate }) {
                             const fillUrl = item.url.includes("?")
                               ? `${item.url}&action=fill`
                               : `${item.url}?action=fill`;
-                            window.open(fillUrl, "_blank", "noopener,noreferrer");
+                            setDocModal({
+                              open: true,
+                              title: item.title || "Fill form",
+                              url: fillUrl
+                            });
                           } else {
-                            window.open(item.url, "_blank", "noopener,noreferrer");
+                            setDocModal({
+                              open: true,
+                              title: item.title || "Document",
+                              url: item.url
+                            });
                           }
                         }
                       }}
@@ -420,6 +420,12 @@ export default function FillSign({ session, onLogout, onNavigate }) {
           </div>
         )}
       </section>
+      <DocSpaceModal
+        open={docModal.open}
+        title={docModal.title}
+        url={docModal.url}
+        onClose={() => setDocModal({ open: false, title: "", url: "" })}
+      />
     </PatientShell>
   );
 }

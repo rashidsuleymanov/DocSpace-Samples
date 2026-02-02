@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from "react";
 
 import PatientShell from "../components/PatientShell.jsx";
+import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import FolderTile from "../components/FolderTile.jsx";
 import ShareQrModal from "../components/ShareQrModal.jsx";
 import folderStructure from "../data/folderStructure.js";
@@ -10,12 +11,22 @@ const appointmentsStorageKey = "medical.portal.appointments";
 
 export default function MedicalRecords({ session, onLogout, onNavigate }) {
   const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
+  const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
   const [folderStats, setFolderStats] = useState(folderStructure);
   const [summaryError, setSummaryError] = useState("");
   const [activeFolder, setActiveFolder] = useState(null);
   const [folderContents, setFolderContents] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
+
+  const openRecord = (item) => {
+    if (!item?.openUrl) return;
+    setDocModal({
+      open: true,
+      title: item.title || "Medical record",
+      url: item.openUrl
+    });
+  };
 
   useEffect(() => {
     if (!session?.room?.id || session.room.id === "DOCSPACE") return;
@@ -76,15 +87,6 @@ export default function MedicalRecords({ session, onLogout, onNavigate }) {
       roomId={session?.room?.id}
       token={session?.user?.token}
     >
-      <section className="panel panel-hero">
-        <div>
-          <h3>Documents</h3>
-          <p className="muted">
-            Your room structure, forms, and medical records are stored here.
-          </p>
-        </div>
-      </section>
-
       <section className="panel documents-panel">
         <div className="panel-head">
           <div>
@@ -138,7 +140,7 @@ export default function MedicalRecords({ session, onLogout, onNavigate }) {
                   className={`content-item ${item.type}`}
                   onClick={() => {
                     if (item.type === "file" && item.openUrl) {
-                      window.open(item.openUrl, "_blank", "noopener,noreferrer");
+                      openRecord(item);
                     }
                   }}
                 >
@@ -174,6 +176,12 @@ export default function MedicalRecords({ session, onLogout, onNavigate }) {
         loading={shareModal.loading}
         error={shareModal.error}
         onClose={() => setShareModal({ open: false, title: "", link: "", loading: false, error: "" })}
+      />
+      <DocSpaceModal
+        open={docModal.open}
+        title={docModal.title}
+        url={docModal.url}
+        onClose={() => setDocModal({ open: false, title: "", url: "" })}
       />
     </PatientShell>
   );

@@ -59,15 +59,6 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
         </div>
       </div>
       <div className="auth-visual">
-        <div className="auth-hero-card">
-          <div>
-            <h2>Patient registration</h2>
-            <p className="muted">
-              Please enter your email address or phone number to continue.
-            </p>
-          </div>
-          <div className="auth-photo" role="presentation" />
-        </div>
         <div className="auth-support">
           <span>support@cityclinic.com</span>
         </div>

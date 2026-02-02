@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 
 import PatientShell from "../components/PatientShell.jsx";
 import ShareQrModal from "../components/ShareQrModal.jsx";
+import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import { createFileShareLink } from "../services/docspaceApi.js";
 
 
@@ -120,6 +121,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
   const [ticketMessage, setTicketMessage] = useState("");
   const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
+  const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
   const editorRef = useRef(null);
 
@@ -669,6 +671,15 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
   };
 
+  const openTicket = (ticket) => {
+    if (!ticket?.url) return;
+    setDocModal({
+      open: true,
+      title: ticket?.title || "Appointment ticket",
+      url: ticket.url
+    });
+  };
+
 
 
     return (
@@ -681,18 +692,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
         roomId={session?.room?.id}
         token={session?.user?.token}
       >
-
-          <section className="panel panel-hero">
-
-            <div>
-
-              <h3>Appointments</h3>
-
-              <p className="muted">Schedule a visit and keep track of upcoming appointments.</p>
-
-            </div>
-
-          </section>
 
           <section className="panel">
 
@@ -856,11 +855,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
                               type="button"
 
-                              onClick={() =>
-
-                                window.open(item.ticket.url, "_blank", "noopener,noreferrer")
-
-                              }
+                              onClick={() => openTicket(item.ticket)}
 
                             >
 
@@ -954,11 +949,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
                               type="button"
 
-                              onClick={() =>
-
-                                window.open(item.ticket.url, "_blank", "noopener,noreferrer")
-
-                              }
+                              onClick={() => openTicket(item.ticket)}
 
                             >
 
@@ -1025,6 +1016,12 @@ export default function Appointments({ session, onLogout, onNavigate }) {
           loading={shareModal.loading}
           error={shareModal.error}
           onClose={() => setShareModal({ open: false, title: "", link: "", loading: false, error: "" })}
+        />
+        <DocSpaceModal
+          open={docModal.open}
+          title={docModal.title}
+          url={docModal.url}
+          onClose={() => setDocModal({ open: false, title: "", url: "" })}
         />
         <div id={editorFrameId} className="hidden-editor" />
 

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 
 import DoctorSidebar from "../components/DoctorSidebar.jsx";
 import DoctorTopbar from "../components/DoctorTopbar.jsx";
+import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import FolderTile from "../components/FolderTile.jsx";
 import folderStructure from "../data/folderStructure.js";
 import {
@@ -10,14 +11,16 @@ import {
   createMedicalRecord,
   createPrescription,
   getDoctorAppointments,
+  getDoctorFillSignContents,
   getDoctorFolderContents,
   getDoctorRoomSummary,
-  getDoctorRooms
+  getDoctorRooms,
+  listTemplateFiles,
+  requestFillSign
 } from "../services/doctorApi.js";
 
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
 const editorFrameId = "doctor-hidden-editor";
-const selectorFrameId = "doctor-file-selector-frame";
 
 let sdkLoaderPromise = null;
 
@@ -54,6 +57,7 @@ function normalizeTitle(value) {
 export default function DoctorPortal({ doctor, onExit }) {
   const [view, setView] = useState("doctor-schedule");
   const [rooms, setRooms] = useState([]);
+  const [patientQuery, setPatientQuery] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [summary, setSummary] = useState([]);
   const [labResults, setLabResults] = useState([]);
@@ -61,16 +65,26 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [activeFolderTitle, setActiveFolderTitle] = useState("");
   const [activeFolderItems, setActiveFolderItems] = useState([]);
   const [activeFolderLoading, setActiveFolderLoading] = useState(false);
-  const [selectorLoading, setSelectorLoading] = useState(false);
-  const [selectorError, setSelectorError] = useState("");
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState("");
+  const [templateFiles, setTemplateFiles] = useState([]);
+  const [templatesQuery, setTemplatesQuery] = useState("");
+  const [fillTab, setFillTab] = useState("action");
+  const [fillItems, setFillItems] = useState([]);
+  const [fillLoading, setFillLoading] = useState(false);
+  const [fillError, setFillError] = useState("");
+  const [fillCounts, setFillCounts] = useState({ action: 0, completed: 0 });
+  const [fillPatientQuery, setFillPatientQuery] = useState("");
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
   const [appointments, setAppointments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
   const [labModalOpen, setLabModalOpen] = useState(false);
   const [labMode, setLabMode] = useState("local");
   const [labFile, setLabFile] = useState(null);
+  const [fillModalOpen, setFillModalOpen] = useState(false);
   const [rxModalOpen, setRxModalOpen] = useState(false);
   const [recordModalOpen, setRecordModalOpen] = useState(false);
 
@@ -85,12 +99,23 @@ export default function DoctorPortal({ doctor, onExit }) {
   });
 
   const editorRef = useRef(null);
-  const selectorInitedRef = useRef(false);
 
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId) || null,
     [rooms, selectedRoomId]
   );
+
+  const filteredRooms = useMemo(() => {
+    const query = patientQuery.trim().toLowerCase();
+    if (!query) return rooms;
+    return rooms.filter((room) => String(room.patientName || "").toLowerCase().includes(query));
+  }, [rooms, patientQuery]);
+
+  const filteredFillRooms = useMemo(() => {
+    const query = fillPatientQuery.trim().toLowerCase();
+    if (!query) return rooms;
+    return rooms.filter((room) => String(room.patientName || "").toLowerCase().includes(query));
+  }, [rooms, fillPatientQuery]);
 
   const patientAppointments = useMemo(() => {
     if (!selectedRoom) return [];
@@ -116,6 +141,14 @@ export default function DoctorPortal({ doctor, onExit }) {
     });
   }, [summary]);
 
+  const filteredTemplates = useMemo(() => {
+    const query = templatesQuery.trim().toLowerCase();
+    if (!query) return templateFiles;
+    return templateFiles.filter((file) =>
+      String(file.title || "").toLowerCase().includes(query)
+    );
+  }, [templateFiles, templatesQuery]);
+
   const handleDoctorFolderClick = async (folder) => {
     const name = folder?.title;
     if (!name || !selectedRoomId) return;
@@ -134,7 +167,7 @@ export default function DoctorPortal({ doctor, onExit }) {
 
   const openActiveFolderItem = (item) => {
     if (item?.type === "file" && item.openUrl) {
-      window.open(item.openUrl, "_blank", "noopener,noreferrer");
+      openDoc(item.title, item.openUrl);
     }
   };
 
@@ -196,86 +229,28 @@ export default function DoctorPortal({ doctor, onExit }) {
   }, [selectedRoomId]);
 
   useEffect(() => {
-    if (!labModalOpen || labMode !== "docspace" || !selectedRoomId) return;
+    if ((!labModalOpen || labMode !== "docspace") && !fillModalOpen) return;
     let cancelled = false;
-
-    const initSelector = async () => {
+    const loadTemplates = async () => {
       try {
-        setSelectorLoading(true);
-        setSelectorError("");
-        await loadDocSpaceSdk(docspaceUrl);
+        setTemplatesLoading(true);
+        setTemplatesError("");
+        const data = await listTemplateFiles();
         if (cancelled) return;
-        const sdk = window.DocSpace?.SDK;
-        if (!sdk?.initFileSelector) {
-          setSelectorError("DocSpace File Selector is not available.");
-          setSelectorLoading(false);
-          return;
-        }
-        const config = {
-          src: docspaceUrl,
-          requestToken: doctor?.token || undefined,
-          frameId: selectorFrameId,
-          width: "100%",
-          height: "520px",
-          events: {
-            onAppReady: () => {
-              if (!cancelled) setSelectorLoading(false);
-            },
-            onAppError: (error) => {
-              if (cancelled) return;
-              setSelectorError(error?.message || "File selector error");
-              setSelectorLoading(false);
-            },
-            onSelectCallback: async (item) => {
-              if (cancelled || !item?.id) return;
-              setBusy(true);
-              setMessage("");
-              try {
-                const destTitle = labForm.title.trim() || item.title || "Lab result";
-                await copyLabResultFromDocSpace(selectedRoomId, {
-                  fileId: item.id,
-                  title: destTitle
-                });
-                const data = await getDoctorRoomSummary(selectedRoomId);
-                setSummary(data);
-                const contents = await getDoctorFolderContents(selectedRoomId, "Lab Results");
-                setLabResults(contents.items || []);
-                setLabModalOpen(false);
-                setLabMode("local");
-                setLabForm({ title: "" });
-                setMessage(`Lab result copied: ${destTitle}`);
-              } catch (error) {
-                setMessage(error.message || "Failed to copy file");
-              } finally {
-                setBusy(false);
-              }
-            }
-          }
-        };
-        sdk.initFileSelector(config);
-        selectorInitedRef.current = true;
+        setTemplateFiles(data.files || []);
       } catch (error) {
         if (cancelled) return;
-        setSelectorError(error.message || "Failed to initialize DocSpace selector");
-        setSelectorLoading(false);
+        setTemplatesError(error.message || "Failed to load templates");
+        setTemplateFiles([]);
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
       }
     };
-
-    initSelector();
-
+    loadTemplates();
     return () => {
       cancelled = true;
     };
-  }, [labModalOpen, labMode, selectedRoomId, labForm.title]);
-
-  useEffect(() => {
-    if (labModalOpen) return;
-    const frame = document.getElementById(selectorFrameId);
-    if (frame) frame.innerHTML = "";
-    selectorInitedRef.current = false;
-    setSelectorError("");
-    setSelectorLoading(false);
-  }, [labModalOpen]);
+  }, [labModalOpen, labMode, fillModalOpen]);
 
   useEffect(() => {
     const loadAppointments = async () => {
@@ -289,6 +264,15 @@ export default function DoctorPortal({ doctor, onExit }) {
     };
     loadAppointments();
   }, [dateFilter]);
+
+  useEffect(() => {
+    if (view !== "doctor-fill-sign") return;
+    if (!selectedRoomId) {
+      setFillItems([]);
+      return;
+    }
+    loadFillItems(selectedRoomId, fillTab);
+  }, [view, selectedRoomId, fillTab]);
 
   useEffect(() => {
     let host = document.getElementById(editorFrameId);
@@ -540,6 +524,83 @@ export default function DoctorPortal({ doctor, onExit }) {
     setRecordModalOpen(true);
   };
 
+  const openDoc = (title, url) => {
+    if (!url) return;
+    setDocModal({
+      open: true,
+      title: title || "Document",
+      url
+    });
+  };
+
+  const handleTemplateSelect = async (file) => {
+    if (!selectedRoomId || !file?.id) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const destTitle = labForm.title.trim() || file.title || "Lab result";
+      await copyLabResultFromDocSpace(selectedRoomId, {
+        fileId: file.id,
+        title: destTitle
+      });
+      const data = await getDoctorRoomSummary(selectedRoomId);
+      setSummary(data);
+      const contents = await getDoctorFolderContents(selectedRoomId, "Lab Results");
+      setLabResults(contents.items || []);
+      setLabModalOpen(false);
+      setLabMode("local");
+      setLabForm({ title: "" });
+      setTemplatesQuery("");
+      setMessage(`Lab result copied: ${destTitle}`);
+    } catch (error) {
+      setMessage(error.message || "Failed to copy file");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFillRequest = async (file) => {
+    if (!selectedRoomId || !file?.id) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await requestFillSign(selectedRoomId, { fileId: file.id });
+      setFillModalOpen(false);
+      setMessage(`Request sent: ${file.title}`);
+      setTemplatesQuery("");
+      setFillError("");
+      await loadFillItems(selectedRoomId, fillTab);
+    } catch (error) {
+      setFillError(error.message || "Failed to request signature");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadFillItems = async (roomId, tab) => {
+    if (!roomId) return;
+    try {
+      setFillLoading(true);
+      setFillError("");
+      const [actionContents, completedContents] = await Promise.all([
+        getDoctorFillSignContents(roomId, "action"),
+        getDoctorFillSignContents(roomId, "completed")
+      ]);
+
+      const actionFiles = (actionContents?.items || []).filter((item) => item.type === "file");
+      const completedFiles = (completedContents?.items || []).filter((item) => item.type === "file");
+      setFillCounts({ action: actionFiles.length, completed: completedFiles.length });
+
+      setFillItems(tab === "completed" ? completedFiles : actionFiles);
+    } catch (error) {
+      setFillError(error.message || "Failed to load Fill & Sign files");
+      setFillItems([]);
+      setFillCounts({ action: 0, completed: 0 });
+    } finally {
+      setFillLoading(false);
+    }
+  };
+
   const handleLabUpload = async (event) => {
     event.preventDefault();
     if (!selectedRoom) return;
@@ -654,20 +715,9 @@ export default function DoctorPortal({ doctor, onExit }) {
       <main>
         <DoctorTopbar {...topbar} />
 
-        {message && (
-          <section className="panel">
-            <p className="muted">{message}</p>
-          </section>
-        )}
-
         {view === "doctor-schedule" && (
           <section className="panel">
-            <div className="panel-head">
-              <div>
-                <h3>Appointments</h3>
-                <p className="muted">Click an appointment to create a medical record.</p>
-              </div>
-            </div>
+            <p className="muted">Click an appointment to create a medical record.</p>
             <div className="doctor-schedule">
               {scheduledAppointments.length === 0 && <p className="muted">No appointments on this date.</p>}
               {scheduledAppointments.map((item) => (
@@ -684,7 +734,7 @@ export default function DoctorPortal({ doctor, onExit }) {
                         <button
                           className="link"
                           type="button"
-                          onClick={() => window.open(item.ticket.url, "_blank", "noopener,noreferrer")}
+                          onClick={() => openDoc(item.ticket?.title, item.ticket.url)}
                         >
                           Open ticket
                         </button>
@@ -707,32 +757,31 @@ export default function DoctorPortal({ doctor, onExit }) {
 
         {view === "doctor-patients" && (
           <section className="panel">
-            <p className="muted doctor-patients-hint">Open a patient room to manage documents.</p>
+            <div className="doctor-search-row">
+              <div className="doctor-search">
+                <input
+                  type="search"
+                  placeholder="Search patients..."
+                  value={patientQuery}
+                  onChange={(e) => setPatientQuery(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="doctor-patients-grid">
-              {rooms.map((room) => (
+              {filteredRooms.map((room) => (
                 <article key={room.id} className="record-card doctor-patient-card">
-                  <div className="record-meta">
-                    <span className="record-type">Room</span>
-                    <span className="record-date">{room.patientName}</span>
+                  <div className="doctor-patient-head">
+                    <h4 className="record-title">{room.patientName}</h4>
+                    {room.lastVisit && <span className="doctor-last-visit">{room.lastVisit}</span>}
                   </div>
-                  <h4 className="record-title">{room.title}</h4>
                   <div className="record-actions">
                     <button className="primary" type="button" onClick={() => openPatient(room.id)}>
                       Open patient
                     </button>
-                    {room.url && (
-                      <button
-                        className="secondary"
-                        type="button"
-                        onClick={() => window.open(room.url, "_blank", "noopener,noreferrer")}
-                      >
-                        Open DocSpace
-                      </button>
-                    )}
                   </div>
                 </article>
               ))}
-              {rooms.length === 0 && <p className="muted">No patient rooms found.</p>}
+              {filteredRooms.length === 0 && <p className="muted">No patient rooms found.</p>}
             </div>
           </section>
         )}
@@ -740,10 +789,6 @@ export default function DoctorPortal({ doctor, onExit }) {
         {view === "doctor-patient" && selectedRoom && (
           <section className="panel">
             <div className="panel-head">
-              <div>
-                <h3>{selectedRoom.patientName}</h3>
-                <p className="muted">Manage this patient room.</p>
-              </div>
               <div className="record-actions doctor-quick-actions">
                 <button className="secondary" type="button" onClick={() => setView("doctor-patients")}>
                   Back to patients
@@ -832,7 +877,7 @@ export default function DoctorPortal({ doctor, onExit }) {
                       className={`content-item ${item.type}`}
                       onClick={() => {
                         if (item.openUrl) {
-                          window.open(item.openUrl, "_blank", "noopener,noreferrer");
+                          openDoc(item.title, item.openUrl);
                         }
                       }}
                     >
@@ -843,6 +888,99 @@ export default function DoctorPortal({ doctor, onExit }) {
               </ul>
             </div>
             )}
+          </section>
+        )}
+
+        {view === "doctor-fill-sign" && (
+          <section className="panel">
+            <div className="fill-sign-actions">
+              <button className="primary" type="button" onClick={() => setFillModalOpen(true)}>
+                Request signature
+              </button>
+            </div>
+
+            <div className="fill-sign-layout">
+              <div className="fill-sign-patients">
+                <div className="panel-head">
+                  <div>
+                    <h4>Patients</h4>
+                  </div>
+                  <div className="doctor-search">
+                    <input
+                      type="search"
+                      placeholder="Search patients..."
+                      value={fillPatientQuery}
+                      onChange={(e) => setFillPatientQuery(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="patient-list">
+                  {filteredFillRooms.map((room) => (
+                    <button
+                      key={room.id}
+                      type="button"
+                      className={`patient-pill ${selectedRoomId === room.id ? "active" : ""}`}
+                      onClick={() => setSelectedRoomId(room.id)}
+                    >
+                      <strong>{room.patientName}</strong>
+                    </button>
+                  ))}
+                  {filteredFillRooms.length === 0 && <p className="muted">No patients found.</p>}
+                </div>
+              </div>
+              <div className="fill-sign-documents">
+                <div className="panel-tabs fill-tabs">
+                  <button
+                    type="button"
+                    className={`tab-pill ${fillTab === "action" ? "active" : ""}`}
+                    onClick={() => setFillTab("action")}
+                  >
+                    Requires action <span className="tab-count">{fillCounts.action}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-pill ${fillTab === "completed" ? "active" : ""}`}
+                    onClick={() => setFillTab("completed")}
+                  >
+                    Completed <span className="tab-count">{fillCounts.completed}</span>
+                  </button>
+                </div>
+                {!selectedRoomId && <p className="muted">Select a patient to see their forms.</p>}
+                {fillError && <p className="error-banner">Error: {fillError}</p>}
+                {fillLoading && <p className="muted">Loading forms...</p>}
+                {!fillLoading && selectedRoomId && (
+                  <>
+                    {fillItems.length === 0 ? (
+                      <p className="muted">No documents in this section yet.</p>
+                    ) : (
+                      <div className="fill-grid">
+                        {fillItems.map((file) => (
+                          <article key={file.id} className="fill-card">
+                            <div className={`fill-thumb fill-thumb-${fillTab === "action" ? "action" : "completed"}`} />
+                            <div className="fill-body">
+                              <h4>{file.title}</h4>
+                              <p className="muted">
+                                {fillTab === "action" ? "Waiting for patient signature" : "Completed"}
+                              </p>
+                              <p className="muted">Initiated by: City Clinic</p>
+                              <div className="fill-actions">
+                                <button
+                                  className={fillTab === "action" ? "primary" : "secondary"}
+                                  type="button"
+                                  onClick={() => openDoc(file.title, file.openUrl)}
+                                >
+                                  View
+                                </button>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
           </section>
         )}
 
@@ -898,11 +1036,37 @@ export default function DoctorPortal({ doctor, onExit }) {
             ) : (
               <div className="docspace-picker">
                 <p className="muted">
-                  Select any file in DocSpace. It will be copied into this patient's Lab Results.
+                  Choose a template file to copy into this patient's Lab Results.
                 </p>
-                {selectorError && <p className="muted">{selectorError}</p>}
-                {selectorLoading && <p className="muted">Loading DocSpace selector...</p>}
-                <div id={selectorFrameId} className="docspace-frame" />
+                <div className="search-row">
+                  <input
+                    type="text"
+                    placeholder="Search templates..."
+                    value={templatesQuery}
+                    onChange={(e) => setTemplatesQuery(e.target.value)}
+                  />
+                </div>
+                {templatesError && <p className="muted">{templatesError}</p>}
+                {templatesLoading && <p className="muted">Loading templates...</p>}
+                {!templatesLoading && !templatesError && (
+                  <div className="template-list">
+                    {filteredTemplates.length === 0 ? (
+                      <p className="muted">No templates found.</p>
+                    ) : (
+                      filteredTemplates.map((file) => (
+                        <button
+                          key={file.id}
+                          className="template-item"
+                          type="button"
+                          onClick={() => handleTemplateSelect(file)}
+                        >
+                          <span className="content-icon" />
+                          <span className="template-name">{file.title}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
                 <div className="record-actions">
                   <button className="secondary" type="button" onClick={() => setLabMode("local")}>
                     Use local upload
@@ -1012,6 +1176,50 @@ export default function DoctorPortal({ doctor, onExit }) {
           </Modal>
         )}
 
+        {fillModalOpen && (
+          <Modal title="Request signature" onClose={() => setFillModalOpen(false)}>
+            <div className="docspace-picker">
+              <p className="muted">Select a document to send for patient signature.</p>
+              <div className="search-row">
+                <input
+                  type="text"
+                  placeholder="Search templates..."
+                  value={templatesQuery}
+                  onChange={(e) => setTemplatesQuery(e.target.value)}
+                />
+              </div>
+              {templatesError && <p className="muted">{templatesError}</p>}
+              {templatesLoading && <p className="muted">Loading templates...</p>}
+              {!templatesLoading && !templatesError && (
+                <div className="template-list">
+                  {filteredTemplates.length === 0 ? (
+                    <p className="muted">No templates found.</p>
+                  ) : (
+                    filteredTemplates.map((file) => (
+                      <button
+                        key={file.id}
+                        className="template-item"
+                        type="button"
+                        onClick={() => handleFillRequest(file)}
+                      >
+                        <span className="content-icon" />
+                        <span className="template-name">{file.title}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </Modal>
+        )}
+
+        <DocSpaceModal
+          open={docModal.open}
+          title={docModal.title}
+          url={docModal.url}
+          onClose={() => setDocModal({ open: false, title: "", url: "" })}
+        />
+
       </main>
     </div>
   );
@@ -1046,6 +1254,12 @@ function getTopbarProps({ view, selectedRoom, dateFilter, onDateFilter }) {
     return {
       title: "Patients",
       subtitle: "Browse patient rooms."
+    };
+  }
+  if (view === "doctor-fill-sign") {
+    return {
+      title: "Fill & Sign",
+      subtitle: "Manage patient signature requests."
     };
   }
   return {

@@ -1,4 +1,4 @@
-async function request(path, { method = "GET", body } = {}) {
+﻿async function request(path, { method = "GET", body } = {}) {
   const response = await fetch(path, {
     method,
     headers: {
@@ -67,10 +67,32 @@ export async function getDoctorFolderContents(roomId, title) {
   return data.contents || { items: [] };
 }
 
+export async function getDoctorFillSignContents(roomId, tab) {
+  const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
+  const data = await request(`/api/doctor/rooms/${roomId}/fill-sign/contents${query}`);
+  return data.contents || { items: [] };
+}
+
 export async function copyLabResultFromDocSpace(roomId, payload) {
   const data = await request(`/api/doctor/rooms/${roomId}/lab-result/copy`, {
     method: "POST",
     body: payload
   });
   return data.file || null;
+}
+
+export async function listTemplateFiles() {
+  const data = await request("/api/doctor/templates/files");
+  return {
+    room: data.room || null,
+    files: data.files || []
+  };
+}
+
+export async function requestFillSign(roomId, payload) {
+  const data = await request(`/api/doctor/rooms/${roomId}/fill-sign/request`, {
+    method: "POST",
+    body: payload
+  });
+  return data.files || [];
 }

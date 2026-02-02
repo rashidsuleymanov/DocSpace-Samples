@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import PatientShell from "../components/PatientShell.jsx";
 
 const seenNewsStorageKey = "medical.portal.news.seen";
@@ -113,16 +113,6 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
         ) : null
       }
     >
-      <section className="panel panel-hero">
-        <div>
-          <h3>Hello, {session.user.fullName.split(" ")[0] || "Patient"}</h3>
-          <p className="muted">
-            Welcome to your personal medical account. Review documents, book appointments, and
-            track your medical records.
-          </p>
-        </div>
-      </section>
-
       <section className="panel split-panel">
         <div className="panel-card">
           <h4>Notifications</h4>

@@ -1,6 +1,7 @@
 const navItems = [
   { id: "doctor-schedule", label: "Schedule" },
-  { id: "doctor-patients", label: "Patients" }
+  { id: "doctor-patients", label: "Patients" },
+  { id: "doctor-fill-sign", label: "Fill & Sign" }
 ];
 
 export default function DoctorSidebar({ doctor, active, onNavigate, onExit, hasPatient }) {

@@ -1,12 +1,14 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import {
   copyFileToFolder,
   createRoomDocument,
   ensureRoomFolderByTitle,
+  findRoomByCandidates,
   getDoctorProfile,
   getFileInfo,
   getFolderContents,
+  getFolderByTitleWithin,
   getRoomFolderByTitle,
   getRoomSummary,
   listRooms
@@ -63,13 +65,24 @@ router.get("/session", async (_req, res) => {
 router.get("/rooms", async (_req, res) => {
   try {
     const rooms = await listRooms();
+    const lastByRoomId = new Map();
+    for (const appt of listAppointments()) {
+      const roomId = String(appt.roomId || "");
+      if (!roomId) continue;
+      const key = `${appt.date || ""} ${appt.time || ""}`.trim();
+      const prev = lastByRoomId.get(roomId);
+      if (!prev || key.localeCompare(prev.key) > 0) {
+        lastByRoomId.set(roomId, { key, date: appt.date || "", time: appt.time || "" });
+      }
+    }
     const patientRooms = (rooms || [])
       .filter((room) => isPatientRoom(room.title))
       .map((room) => ({
         id: room.id,
         title: room.title,
         patientName: patientNameFromRoom(room.title),
-        url: room.webUrl || room.shortWebUrl || null
+        url: room.webUrl || room.shortWebUrl || null,
+        lastVisit: lastByRoomId.get(String(room.id))?.date || null
       }))
       .sort((a, b) => a.patientName.localeCompare(b.patientName));
     return res.json({ rooms: patientRooms });
@@ -125,10 +138,53 @@ router.get("/rooms/:roomId/summary", async (req, res) => {
   }
 });
 
+router.get("/rooms/:roomId/fill-sign/contents", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const tab = String(req.query.tab || "action").toLowerCase();
+    const fillFolder = await getRoomFolderByTitle(roomId, "Fill & Sign");
+    if (!fillFolder?.id) {
+      return res.status(404).json({ error: "Fill & Sign folder not found" });
+    }
+    const targetTitle = tab === "completed" ? "Complete" : "In Process";
+    const subfolder = await getFolderByTitleWithin(fillFolder.id, targetTitle);
+    if (!subfolder?.id) {
+      return res.status(404).json({ error: `Folder not found: ${targetTitle}` });
+    }
+    const contents = await getFolderContents(subfolder.id);
+    return res.json({ contents, folder: subfolder, fillFolder });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
 router.get("/appointments", (req, res) => {
   const date = req.query.date;
   const items = listAppointments({ date });
   return res.json({ appointments: items });
+});
+
+router.get("/templates/files", async (_req, res) => {
+  try {
+    const room = await findRoomByCandidates(["Medicine Templates", "Medical Templates"]);
+    if (!room?.id) {
+      return res.status(404).json({ error: "Templates room not found" });
+    }
+    const contents = await getFolderContents(room.id);
+    const files = (contents?.items || []).filter((item) => item.type === "file");
+    return res.json({
+      room: { id: room.id, title: room.title },
+      files
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
 });
 
 router.post("/rooms/:roomId/lab-result/copy", async (req, res) => {
@@ -260,6 +316,36 @@ router.post("/rooms/:roomId/medical-record", async (req, res) => {
       closeAppointment(appointmentId);
     }
     return res.json({ record });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { fileId } = req.body || {};
+    if (!fileId) {
+      return res.status(400).json({ error: "fileId is required" });
+    }
+    const fillFolder = await getRoomFolderByTitle(roomId, "Fill & Sign");
+    if (!fillFolder?.id) {
+      return res.status(404).json({ error: "Fill & Sign folder not found" });
+    }
+    const inProcess = await getFolderByTitleWithin(fillFolder.id, "In Process");
+    if (!inProcess?.id) {
+      return res.status(404).json({ error: "In Process folder not found" });
+    }
+    await copyFileToFolder({
+      fileId: String(fileId),
+      destFolderId: inProcess.id
+    });
+    const contents = await getFolderContents(inProcess.id);
+    const files = (contents?.items || []).filter((item) => item.type === "file");
+    return res.json({ files });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,

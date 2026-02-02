@@ -1,5 +1,4 @@
-import { useState } from "react";
-import registrationHero from "../assets/registration-hero.svg";
+﻿import { useState } from "react";
 
 export default function Register({ busy, error, onRegister, onGoLogin }) {
   const [form, setForm] = useState({
@@ -74,17 +73,6 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
         </button>
       </div>
       <div className="auth-visual">
-        <div className="auth-hero-card">
-          <div>
-            <h2>Patient registration</h2>
-            <p className="muted">
-              Please enter your email address or phone number to continue.
-            </p>
-          </div>
-          <div className="auth-photo-frame">
-            <img className="auth-photo-img" src={registrationHero} alt="Registration illustration" />
-          </div>
-        </div>
         <div className="auth-support">
           <span>support@cityclinic.com</span>
         </div>
