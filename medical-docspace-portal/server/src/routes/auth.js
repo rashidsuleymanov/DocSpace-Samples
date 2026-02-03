@@ -1,16 +1,63 @@
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import {
   createDocSpaceUser,
   createPatientRoom,
   createPatientFolders,
   ensureRoomMembers,
+  ensureExternalLinkAccess,
+  getFileInfo,
+  getFillOutLink,
   getSelfProfileWithToken,
   findRoomByCandidates,
   getRoomInfo,
   authenticateUser,
+  requireFormsRoom,
+  setFileExternalLink,
   updateMember
 } from "../docspaceClient.js";
 import { config } from "../config.js";
+import {
+  hasFillSignAssignmentForRoomTemplate,
+  recordFillSignAssignment,
+  recordPatientMapping
+} from "../store.js";
+
+async function ensureAutoFillSignAssignment({ userId, fullName, roomId } = {}) {
+  const templateId = String(config.autoFillSignTemplateId || "").trim();
+  if (!templateId) return false;
+  if (!roomId) return false;
+  if (hasFillSignAssignmentForRoomTemplate({ patientRoomId: roomId, templateFileId: templateId })) {
+    return true;
+  }
+
+  const templateInfo = await getFileInfo(templateId).catch(() => null);
+  const desiredTitle = "Link to fill out";
+  let fillLink = await getFillOutLink(templateId).catch(() => null);
+  const needsFillOutTitle = !String(fillLink?.title || "").toLowerCase().includes("fill out");
+  if (!fillLink?.shareLink || needsFillOutTitle) {
+    fillLink =
+      (await ensureExternalLinkAccess(templateId, { access: "FillForms", title: desiredTitle }).catch(() => null)) ||
+      (await setFileExternalLink(templateId, "", { access: "FillForms" }).catch(() => null)) ||
+      fillLink;
+  }
+  if (!fillLink?.shareLink) return false;
+
+  const formsRoom = await requireFormsRoom().catch(() => null);
+  recordFillSignAssignment({
+    assignmentId: randomUUID(),
+    patientRoomId: String(roomId),
+    patientId: userId ? String(userId) : null,
+    patientName: fullName || null,
+    templateFileId: templateId,
+    templateTitle: templateInfo?.title || null,
+    requestedBy: config.doctorEmail || "system",
+    medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
+    shareLink: fillLink.shareLink,
+    shareToken: fillLink.requestToken || fillLink.shareToken || null
+  });
+  return true;
+}
 
 const router = Router();
 
@@ -63,6 +110,12 @@ router.post("/login", async (req, res) => {
       }
     }
 
+    if (user?.id && room?.id) {
+      recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      await ensureAutoFillSignAssignment({ userId: user.id, fullName: displayName, roomId: room.id }).catch(
+        (e) => console.warn("[login] auto fill-sign assignment failed", e?.message || e)
+      );
+    }
     res.json({ user, room, token });
   } catch (error) {
     res.status(error.status || 500).json({
@@ -81,7 +134,20 @@ router.post("/register", async (req, res) => {
     let user = await createDocSpaceUser({ fullName, email, password });
     const room = await createPatientRoom({ fullName, userId: user.id });
     const folders = await createPatientFolders({ roomId: room.id });
+    recordPatientMapping({ userId: user.id, roomId: room.id, patientName: fullName });
+
     const warnings = [];
+    const autoAssigned = await ensureAutoFillSignAssignment({
+      userId: user?.id,
+      fullName,
+      roomId: room?.id
+    }).catch((e) => {
+      console.warn("[register] auto fill-sign assignment failed", e?.message || e);
+      return false;
+    });
+    if (String(config.autoFillSignTemplateId || "").trim() && !autoAssigned) {
+      warnings.push("Auto Fill & Sign assignment failed (template link unavailable).");
+    }
     if (phone) {
       try {
         const updateResult = await updateMember({ userId: user.id, phone });

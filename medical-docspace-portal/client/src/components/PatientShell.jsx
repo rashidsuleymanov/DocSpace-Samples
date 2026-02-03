@@ -1,20 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import PatientHeader from "./PatientHeader.jsx";
 
-function normalize(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-async function fetchFolderContents(folderId, token) {
-  const headers = token ? { Authorization: token } : undefined;
-  const response = await fetch(`/api/patients/folder-contents?folderId=${folderId}`, {
-    headers
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || "Failed to load folder contents");
-  }
-  return data.contents || { items: [] };
+function countFiles(node) {
+  if (!node) return 0;
+  if (node.type === "file") return 1;
+  const items = node.items || [];
+  return items.reduce((sum, item) => sum + countFiles(item), 0);
 }
 
 export default function PatientShell({
@@ -32,34 +23,19 @@ export default function PatientShell({
 
   useEffect(() => {
     const loadCount = async () => {
-      if (!roomId || roomId === "DOCSPACE") return;
+      if (!token) return;
       try {
-        const headers = token ? { Authorization: token } : undefined;
-        const response = await fetch(`/api/patients/room-summary?roomId=${roomId}`, { headers });
+        const headers = { Authorization: token };
+        const response = await fetch("/api/patients/fill-sign/contents?tab=action", { headers });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data?.error || "Failed to load room summary");
-        const summary = data.summary || [];
-        const fillFolder = summary.find((item) => normalize(item.title) === "fill & sign");
-        if (!fillFolder?.id) {
-          setFillSignCount(0);
-          return;
-        }
-        const fillContents = await fetchFolderContents(fillFolder.id, token);
-        const subfolders = (fillContents.items || []).filter((item) => item.type === "folder");
-        const inProcess = subfolders.find((item) => normalize(item.title) === "in process");
-        if (!inProcess?.id) {
-          setFillSignCount(0);
-          return;
-        }
-        const inProcessContents = await fetchFolderContents(inProcess.id, token);
-        const count = (inProcessContents.items || []).filter((item) => item.type === "file").length;
-        setFillSignCount(count);
+        if (!response.ok) throw new Error(data?.error || "Failed to load Fill & Sign count");
+        setFillSignCount(countFiles(data?.contents || null));
       } catch {
         setFillSignCount(null);
       }
     };
     loadCount();
-  }, [roomId, token]);
+  }, [token]);
 
   const mergedBadges = useMemo(() => {
     const base = badgeCounts || {};

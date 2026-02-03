@@ -14,7 +14,7 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
   };
 
   return (
-    <div className="auth-layout">
+    <div className="auth-layout auth-layout-centered">
       <div className="auth-card">
         <div className="auth-brand">
           <span className="brand-mark" />
@@ -71,11 +71,7 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
         <button className="link" onClick={onGoLogin}>
           Already have an account? Sign in
         </button>
-      </div>
-      <div className="auth-visual">
-        <div className="auth-support">
-          <span>support@cityclinic.com</span>
-        </div>
+        <div className="auth-support-inline">support@cityclinic.com</div>
       </div>
     </div>
   );

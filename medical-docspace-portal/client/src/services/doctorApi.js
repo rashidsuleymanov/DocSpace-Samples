@@ -58,7 +58,7 @@ export async function createMedicalRecord(roomId, payload) {
     method: "POST",
     body: payload
   });
-  return data.record || null;
+  return data.file || null;
 }
 
 export async function getDoctorFolderContents(roomId, title) {
@@ -83,6 +83,14 @@ export async function copyLabResultFromDocSpace(roomId, payload) {
 
 export async function listTemplateFiles() {
   const data = await request("/api/doctor/templates/files");
+  return {
+    room: data.room || null,
+    files: data.files || []
+  };
+}
+
+export async function listLabFiles() {
+  const data = await request("/api/doctor/lab/files");
   return {
     room: data.room || null,
     files: data.files || []

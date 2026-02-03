@@ -15,6 +15,7 @@ import {
   getDoctorFolderContents,
   getDoctorRoomSummary,
   getDoctorRooms,
+  listLabFiles,
   listTemplateFiles,
   requestFillSign
 } from "../services/doctorApi.js";
@@ -235,12 +236,12 @@ export default function DoctorPortal({ doctor, onExit }) {
       try {
         setTemplatesLoading(true);
         setTemplatesError("");
-        const data = await listTemplateFiles();
+        const data = fillModalOpen ? await listTemplateFiles() : await listLabFiles();
         if (cancelled) return;
         setTemplateFiles(data.files || []);
       } catch (error) {
         if (cancelled) return;
-        setTemplatesError(error.message || "Failed to load templates");
+        setTemplatesError(error.message || "Failed to load files");
         setTemplateFiles([]);
       } finally {
         if (!cancelled) setTemplatesLoading(false);
@@ -511,17 +512,51 @@ export default function DoctorPortal({ doctor, onExit }) {
     setView("doctor-patient");
   };
 
+  const resolveRoomIdForAppointment = (appointment) => {
+    const direct = String(appointment?.roomId || "").trim();
+    if (direct && rooms.some((room) => room.id === direct)) return direct;
+
+    const name = String(appointment?.patientName || appointment?.patient || "").trim().toLowerCase();
+    if (name) {
+      const exact = rooms.find((room) => String(room.patientName || "").trim().toLowerCase() === name);
+      if (exact?.id) return exact.id;
+      const contains = rooms.find((room) => String(room.patientName || "").trim().toLowerCase().includes(name));
+      if (contains?.id) return contains.id;
+    }
+
+    return direct;
+  };
+
   const openRecordFromAppointment = (appointment) => {
-    if (!appointment?.roomId) return;
-    setSelectedRoomId(appointment.roomId);
+    const resolvedRoomId = resolveRoomIdForAppointment(appointment);
+    if (!resolvedRoomId) return;
+    if (!rooms.some((room) => room.id === resolvedRoomId)) {
+      setMessage("Patient room not found for this appointment. Select the patient from the list first.");
+      return;
+    }
+    setSelectedRoomId(resolvedRoomId);
     setView("doctor-schedule");
-    setRecordForm((prev) => ({
-      ...prev,
+
+    setBusy(true);
+    setMessage("");
+    createMedicalRecord(resolvedRoomId, {
       appointmentId: appointment.id,
-      date: appointment.date || prev.date,
-      title: prev.title || `Visit summary - ${appointment.patientName}`
-    }));
-    setRecordModalOpen(true);
+      date: appointment.date || "",
+      patientName: appointment.patientName || appointment.patient || appointment.patientFullName || ""
+    })
+      .then((file) => {
+        if (file?.openUrl) {
+          openDoc(file.title || "Medical record", withFillAction(file.openUrl));
+        }
+        setMessage(file?.title ? `Medical record created: ${file.title}` : "Medical record created");
+        return getDoctorRoomSummary(resolvedRoomId)
+          .then((data) => setSummary(data))
+          .catch(() => null);
+      })
+      .catch((error) => {
+        setMessage(error.message || "Failed to create medical record");
+      })
+      .finally(() => setBusy(false));
   };
 
   const openDoc = (title, url) => {
@@ -531,6 +566,26 @@ export default function DoctorPortal({ doctor, onExit }) {
       title: title || "Document",
       url
     });
+  };
+
+  const withFillAction = (url) => {
+    const raw = String(url || "");
+    if (!raw) return "";
+    try {
+      const parsed = new URL(raw);
+      parsed.searchParams.set("action", "fill");
+      return parsed.toString();
+    } catch {
+      return raw.includes("?") ? `${raw}&action=fill` : `${raw}?action=fill`;
+    }
+  };
+
+  const handleDocModalClose = () => {
+    setDocModal({ open: false, title: "", url: "" });
+    if (view === "doctor-fill-sign" && selectedRoomId) {
+      loadFillItems(selectedRoomId, fillTab);
+      setTimeout(() => loadFillItems(selectedRoomId, fillTab), 1500);
+    }
   };
 
   const handleTemplateSelect = async (file) => {
@@ -664,33 +719,18 @@ export default function DoctorPortal({ doctor, onExit }) {
     setMessage("");
     try {
       const appointment = patientAppointments.find((item) => item.id === recordForm.appointmentId) || null;
-      const record = await createMedicalRecord(selectedRoom.id, {
-        ...recordForm,
-        doctorName: doctor?.displayName || "Doctor"
-      });
-      const file = record?.document || null;
-      const payload = buildMedicalRecordPayload({
-        record,
-        appointment,
-        patient: selectedRoom,
-        doctor
-      });
-      if (file?.shareToken) {
-        await runHiddenEditor(file, payload);
-      }
-      setRecordForm({
-        appointmentId: "",
-        type: "Visit note",
-        title: "",
-        date: new Date().toISOString().slice(0, 10),
-        summary: ""
+      const file = await createMedicalRecord(selectedRoom.id, {
+        appointmentId: appointment?.id || recordForm.appointmentId || null,
+        date: appointment?.date || recordForm.date || "",
+        patientName: selectedRoom.patientName || ""
       });
       setRecordModalOpen(false);
-      setMessage(record?.title ? `Medical record created: ${record.title}` : "Medical record created");
+      setMessage(file?.title ? `Medical record created: ${file.title}` : "Medical record created");
+      if (file?.openUrl) {
+        openDoc(file.title || "Medical record", withFillAction(file.openUrl));
+      }
       const data = await getDoctorRoomSummary(selectedRoom.id);
       setSummary(data);
-      const contents = await getDoctorFolderContents(selectedRoom.id, "Lab Results");
-      setLabResults(contents.items || []);
     } catch (error) {
       setMessage(error.message || "Failed to create medical record");
     } finally {
@@ -954,8 +994,8 @@ export default function DoctorPortal({ doctor, onExit }) {
                       <p className="muted">No documents in this section yet.</p>
                     ) : (
                       <div className="fill-grid">
-                        {fillItems.map((file) => (
-                          <article key={file.id} className="fill-card">
+                        {fillItems.map((file, index) => (
+                          <article key={file.assignmentId || `${file.id || "file"}-${index}`} className="fill-card">
                             <div className={`fill-thumb fill-thumb-${fillTab === "action" ? "action" : "completed"}`} />
                             <div className="fill-body">
                               <h4>{file.title}</h4>
@@ -994,13 +1034,13 @@ export default function DoctorPortal({ doctor, onExit }) {
               >
                 Upload from local storage
               </button>
-              <button
-                className={`mode-pill ${labMode === "docspace" ? "active" : ""}`}
-                type="button"
-                onClick={() => setLabMode("docspace")}
-              >
-                Upload from DocSpace
-              </button>
+                <button
+                  className={`mode-pill ${labMode === "docspace" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setLabMode("docspace")}
+                >
+                Upload
+                </button>
             </div>
 
             {labMode === "local" ? (
@@ -1036,22 +1076,22 @@ export default function DoctorPortal({ doctor, onExit }) {
             ) : (
               <div className="docspace-picker">
                 <p className="muted">
-                  Choose a template file to copy into this patient's Lab Results.
+                  Choose a file to copy into this patient's Lab Results.
                 </p>
                 <div className="search-row">
                   <input
                     type="text"
-                    placeholder="Search templates..."
+                    placeholder="Search files..."
                     value={templatesQuery}
                     onChange={(e) => setTemplatesQuery(e.target.value)}
                   />
                 </div>
                 {templatesError && <p className="muted">{templatesError}</p>}
-                {templatesLoading && <p className="muted">Loading templates...</p>}
+                {templatesLoading && <p className="muted">Loading files...</p>}
                 {!templatesLoading && !templatesError && (
                   <div className="template-list">
                     {filteredTemplates.length === 0 ? (
-                      <p className="muted">No templates found.</p>
+                      <p className="muted">No files found.</p>
                     ) : (
                       filteredTemplates.map((file) => (
                         <button
@@ -1118,6 +1158,9 @@ export default function DoctorPortal({ doctor, onExit }) {
         {recordModalOpen && selectedRoom && (
           <Modal title="Medical record" onClose={() => setRecordModalOpen(false)}>
             <form className="auth-form" onSubmit={handleMedicalRecord}>
+              <p className="muted">
+                Creates a medical record document from the template and opens it in the editor.
+              </p>
               <label>
                 Appointment
                 <select
@@ -1133,24 +1176,6 @@ export default function DoctorPortal({ doctor, onExit }) {
                 </select>
               </label>
               <label>
-                Type
-                <input
-                  type="text"
-                  value={recordForm.type}
-                  onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}
-                />
-              </label>
-              <label>
-                Title
-                <input
-                  type="text"
-                  placeholder="Visit summary"
-                  value={recordForm.title}
-                  onChange={(e) => setRecordForm({ ...recordForm, title: e.target.value })}
-                  required
-                />
-              </label>
-              <label>
                 Date
                 <input
                   type="date"
@@ -1159,18 +1184,8 @@ export default function DoctorPortal({ doctor, onExit }) {
                   required
                 />
               </label>
-              <label>
-                Summary
-                <textarea
-                  rows="4"
-                  placeholder="Clinical summary for the patient"
-                  value={recordForm.summary}
-                  onChange={(e) => setRecordForm({ ...recordForm, summary: e.target.value })}
-                  required
-                />
-              </label>
               <button className="primary" type="submit" disabled={busy}>
-                Save medical record
+                Open editor
               </button>
             </form>
           </Modal>
@@ -1217,7 +1232,7 @@ export default function DoctorPortal({ doctor, onExit }) {
           open={docModal.open}
           title={docModal.title}
           url={docModal.url}
-          onClose={() => setDocModal({ open: false, title: "", url: "" })}
+          onClose={handleDocModalClose}
         />
 
       </main>

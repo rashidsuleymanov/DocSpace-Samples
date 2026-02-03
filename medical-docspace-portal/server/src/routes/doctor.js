@@ -9,12 +9,27 @@ import {
   getFileInfo,
   getFolderContents,
   getFolderByTitleWithin,
+  requireFormsRoom,
   getRoomFolderByTitle,
+  getRoomInfo,
   getRoomSummary,
-  listRooms
+  listRooms,
+  requireLabRoom,
+  createRoomFileFromTemplate,
+  getFillOutLink,
+  ensureExternalLinkAccess,
+  setFileExternalLink,
+  startFilling
 } from "../docspaceClient.js";
-import { closeAppointment, listAppointments, recordMedicalRecord } from "../store.js";
+import {
+  closeAppointment,
+  listAppointments,
+  listFillSignAssignmentsForRoom,
+  recordFillSignAssignment,
+  recordMedicalRecord
+} from "../store.js";
 import { config } from "../config.js";
+import { resolveFillSignAssignments } from "../fillSignStatus.js";
 
 const router = Router();
 
@@ -142,17 +157,19 @@ router.get("/rooms/:roomId/fill-sign/contents", async (req, res) => {
   try {
     const { roomId } = req.params;
     const tab = String(req.query.tab || "action").toLowerCase();
-    const fillFolder = await getRoomFolderByTitle(roomId, "Fill & Sign");
-    if (!fillFolder?.id) {
-      return res.status(404).json({ error: "Fill & Sign folder not found" });
-    }
-    const targetTitle = tab === "completed" ? "Complete" : "In Process";
-    const subfolder = await getFolderByTitleWithin(fillFolder.id, targetTitle);
-    if (!subfolder?.id) {
-      return res.status(404).json({ error: `Folder not found: ${targetTitle}` });
-    }
-    const contents = await getFolderContents(subfolder.id);
-    return res.json({ contents, folder: subfolder, fillFolder });
+    const assignments = listFillSignAssignmentsForRoom(roomId);
+    const room = await getRoomInfo(roomId).catch(() => null);
+    const patientName = patientNameFromRoom(room?.title || "") || "";
+    const files = await resolveFillSignAssignments(assignments, { patientName });
+    const filtered = files.filter((file) =>
+      tab === "completed" ? file.status === "completed" : file.status !== "completed"
+    );
+
+    return res.json({
+      contents: { items: filtered },
+      patientRoomId: String(roomId),
+      source: "assignments"
+    });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,
@@ -169,12 +186,37 @@ router.get("/appointments", (req, res) => {
 
 router.get("/templates/files", async (_req, res) => {
   try {
-    const room = await findRoomByCandidates(["Medicine Templates", "Medical Templates"]);
-    if (!room?.id) {
-      return res.status(404).json({ error: "Templates room not found" });
-    }
+    const room = await requireFormsRoom();
     const contents = await getFolderContents(room.id);
-    const files = (contents?.items || []).filter((item) => item.type === "file");
+    const files = (contents?.items || [])
+      .filter((item) => item.type === "file")
+      .map((item) => ({
+        id: item.id,
+        title: item.title
+      }));
+    return res.json({
+      room: { id: room.id, title: room.title },
+      templatesFolder: null,
+      files
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/lab/files", async (_req, res) => {
+  try {
+    const room = await requireLabRoom();
+    const contents = await getFolderContents(room.id);
+    const files = (contents?.items || [])
+      .filter((item) => item.type === "file")
+      .map((item) => ({
+        id: item.id,
+        title: item.title
+      }));
     return res.json({
       room: { id: room.id, title: room.title },
       files
@@ -286,36 +328,55 @@ router.post("/rooms/:roomId/prescription", async (req, res) => {
 router.post("/rooms/:roomId/medical-record", async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { appointmentId, type, title, date, doctorName, summary } = req.body || {};
+    const { appointmentId, date, patientName: patientNameOverride } = req.body || {};
     const safeDate = String(date || new Date().toISOString().slice(0, 10)).slice(0, 10);
-    const recordType = String(type || "Visit note").trim();
-    const recordTitle = String(title || `Medical record ${safeDate}`).trim();
-    const docTitle = `${recordTitle}.docx`;
-    const file = await createRoomDocument({ roomId, folderTitle: "Medical Records", title: docTitle });
-    const normalizedFile = file
-      ? {
-          id: file.id,
-          title: file.title,
-          url: file.webUrl || file.viewUrl || file.url || null,
-          shareToken: file.shareToken || null
-        }
-      : null;
-    const record = recordMedicalRecord({
-      id: randomUUID(),
+    const room = await getRoomInfo(roomId).catch(() => null);
+    const patientName =
+      String(patientNameOverride || "").trim() ||
+      patientNameFromRoom(room?.title || "") ||
+      "Patient";
+
+    const templateId = String(config.medicalRecordTemplateId || "3174060");
+    const templateInfo = await getFileInfo(templateId).catch(() => null);
+    const ext =
+      String(templateInfo?.fileExst || "").trim() ||
+      (templateInfo?.isForm ? ".pdf" : "") ||
+      (String(templateInfo?.title || "").match(/\.[a-z0-9]+$/i)?.[0] || ".pdf");
+    const safeExt = ext.startsWith(".") ? ext : `.${ext}`;
+    const destTitle = `Medical Record - ${safeDate} - ${patientName}${safeExt}`;
+    const file = await createRoomFileFromTemplate({
       roomId,
-      appointmentId: appointmentId || null,
-      date: safeDate,
-      type: recordType,
-      title: recordTitle,
-      doctor: doctorName || "Doctor",
-      description: summary || "",
-      status: "Active",
-      document: normalizedFile
+      folderTitle: "Medical Records",
+      templateFileId: templateId,
+      title: destTitle
     });
+
     if (appointmentId) {
       closeAppointment(appointmentId);
     }
-    return res.json({ record });
+
+    const createdFileId = file?.id ? String(file.id) : "";
+    if (createdFileId) {
+      await startFilling(createdFileId).catch(() => null);
+    }
+    const fillLink =
+      (createdFileId ? await getFillOutLink(createdFileId).catch(() => null) : null) ||
+      (createdFileId ? await ensureExternalLinkAccess(createdFileId, { access: "FillForms" }).catch(() => null) : null) ||
+      (createdFileId ? await setFileExternalLink(createdFileId, "", { access: "FillForms" }).catch(() => null) : null);
+    const fillUrl = createdFileId
+      ? `${config.baseUrl}/doceditor?fileId=${encodeURIComponent(createdFileId)}&action=fill`
+      : null;
+
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: fillUrl || fillLink?.shareLink || file.webUrl || null,
+            shareToken: fillLink?.requestToken || fillLink?.shareToken || file.shareToken || null
+          }
+        : null
+    });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,
@@ -331,21 +392,50 @@ router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
     if (!fileId) {
       return res.status(400).json({ error: "fileId is required" });
     }
-    const fillFolder = await getRoomFolderByTitle(roomId, "Fill & Sign");
-    if (!fillFolder?.id) {
-      return res.status(404).json({ error: "Fill & Sign folder not found" });
+
+    const patientRoom = await getRoomInfo(roomId).catch(() => null);
+    const patientName = patientNameFromRoom(patientRoom?.title || "") || "";
+
+    const templateInfo = await getFileInfo(String(fileId)).catch(() => null);
+    if (!templateInfo?.id) {
+      return res.status(404).json({ error: "Template file not found" });
     }
-    const inProcess = await getFolderByTitleWithin(fillFolder.id, "In Process");
-    if (!inProcess?.id) {
-      return res.status(404).json({ error: "In Process folder not found" });
+
+    const fillLink =
+      (await getFillOutLink(String(fileId)).catch(() => null)) ||
+      (await setFileExternalLink(String(fileId), "", { access: "ReadWrite" }).catch(() => null));
+
+    if (!fillLink?.shareLink) {
+      return res.status(500).json({ error: "Unable to obtain public link to fill out" });
     }
-    await copyFileToFolder({
-      fileId: String(fileId),
-      destFolderId: inProcess.id
+
+    const formsRoom = await requireFormsRoom().catch(() => null);
+    const assignment = recordFillSignAssignment({
+      assignmentId: randomUUID(),
+      patientRoomId: String(roomId),
+      patientName,
+      templateFileId: String(fileId),
+      templateTitle: templateInfo.title || null,
+      requestedBy: config.doctorEmail || null,
+      medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
+      shareLink: fillLink.shareLink,
+      shareToken: fillLink.requestToken || fillLink.shareToken || null
     });
-    const contents = await getFolderContents(inProcess.id);
-    const files = (contents?.items || []).filter((item) => item.type === "file");
-    return res.json({ files });
+
+    return res.json({
+      files: [
+        {
+          type: "file",
+          id: templateInfo.id,
+          title: templateInfo.title,
+          openUrl: fillLink.shareLink,
+          assignmentId: assignment?.id || null
+        }
+      ],
+      patientRoomId: String(roomId),
+      room: formsRoom?.id ? { id: formsRoom.id, title: formsRoom.title } : null,
+      source: "assignments"
+    });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,

@@ -9,7 +9,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
   };
 
   return (
-    <div className="auth-layout">
+    <div className="auth-layout auth-layout-centered">
       <div className="auth-card">
         <div className="auth-brand">
           <span className="brand-mark" />
@@ -56,11 +56,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           <button className="link" type="button" onClick={onGoDoctor}>
             Doctor portal
           </button>
-        </div>
-      </div>
-      <div className="auth-visual">
-        <div className="auth-support">
-          <span>support@cityclinic.com</span>
+          <div className="auth-support-inline">support@cityclinic.com</div>
         </div>
       </div>
     </div>

@@ -2,18 +2,26 @@
 import {
   createPatientRoom,
   createPatientFolders,
-  getFolderByTitleWithin,
   getRoomSummary,
   getFolderContents,
   getNewFolderItems,
-  moveFileToFolder,
+  findRoomByCandidates,
+  getSelfProfileWithToken,
   updateMember,
   getRoomInfo,
   getDoctorProfile,
   createAppointmentTicket,
   setFileExternalLink
 } from "../docspaceClient.js";
-import { recordAppointment, listMedicalRecords } from "../store.js";
+import {
+  getPatientRoomIdByUserId,
+  listFillSignAssignmentsForRoom,
+  recordAppointment,
+  recordPatientMapping,
+  listMedicalRecords
+} from "../store.js";
+import { config } from "../config.js";
+import { resolveFillSignAssignments } from "../fillSignStatus.js";
 
 const router = Router();
 
@@ -169,22 +177,70 @@ router.post("/file-share-link", async (req, res) => {
 
 router.post("/fill-sign/complete", async (req, res) => {
   try {
-    const { roomId, fileId } = req.body || {};
-    if (!roomId || !fileId) {
-      return res.status(400).json({ error: "roomId and fileId are required" });
+    const { fileId } = req.body || {};
+    if (!fileId) {
+      return res.status(400).json({ error: "fileId is required" });
     }
-    const fillFolder = await getRoomSummary(roomId).then((items) =>
-      (items || []).find((item) => String(item.title || "").toLowerCase() === "fill & sign")
+    // Form Filling rooms handle completion and folder moves automatically.
+    // We keep this endpoint for backwards compatibility with the UI.
+    return res.json({ ok: true, note: "Completion is handled by DocSpace (form filling workflow)." });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/fill-sign/contents", async (req, res) => {
+  try {
+    const tab = String(req.query.tab || "action").toLowerCase();
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "";
+
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+    if (!patientRoomId) {
+      return res.json({ contents: { items: [] }, source: "assignments", note: "patient-room-not-resolved" });
+    }
+
+    const assignments = listFillSignAssignmentsForRoom(patientRoomId);
+    const files = await resolveFillSignAssignments(assignments, { patientName: displayName });
+    const filtered = files.filter((file) =>
+      tab === "completed" ? file.status === "completed" : file.status !== "completed"
     );
-    if (!fillFolder?.id) {
-      return res.status(404).json({ error: "Fill & Sign folder not found" });
-    }
-    const completeFolder = await getFolderByTitleWithin(fillFolder.id, "Complete");
-    if (!completeFolder?.id) {
-      return res.status(404).json({ error: "Complete folder not found" });
-    }
-    await moveFileToFolder({ fileId, destFolderId: completeFolder.id });
-    return res.json({ ok: true });
+
+    return res.json({
+      patientRoomId: String(patientRoomId),
+      contents: { items: filtered },
+      source: "assignments"
+    });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,
