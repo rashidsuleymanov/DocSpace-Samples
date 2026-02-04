@@ -8,5 +8,8 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   plugins: [react()],
-  envDir: path.resolve(__dirname, "..")
+  envDir: path.resolve(__dirname, ".."),
+  server: {
+    allowedHosts: [".ngrok-free.app"]
+  }
 });

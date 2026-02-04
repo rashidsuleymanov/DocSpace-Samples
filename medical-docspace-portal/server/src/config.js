@@ -6,7 +6,8 @@ const rawAuthToken =
   "";
 const doctorEmail = process.env.DOCSPACE_DOCTOR_EMAIL || "";
 const doctorAccess = process.env.DOCSPACE_DOCTOR_ACCESS || "RoomManager";
-const patientAccess = process.env.DOCSPACE_PATIENT_ACCESS || "Read";
+// DocSpace room sharing access level for the patient. Common values include "Read" and "Editing".
+const patientAccess = process.env.DOCSPACE_PATIENT_ACCESS || "Editing";
 const formsRoomTitle = process.env.DOCSPACE_FORMS_ROOM_TITLE || "Medical Room";
 const formsRoomTitleFallbacks = (process.env.DOCSPACE_FORMS_ROOM_TITLE_FALLBACKS || "Medical Forms")
   .split(",")

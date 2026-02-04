@@ -2,6 +2,7 @@
 import {
   createPatientRoom,
   createPatientFolders,
+  ensureRoomMembers,
   getRoomSummary,
   getFolderContents,
   getNewFolderItems,
@@ -26,10 +27,78 @@ import { resolveFillSignAssignments } from "../fillSignStatus.js";
 const router = Router();
 
 router.post("/bootstrap", async (req, res) => {
-  const { fullName } = req.body;
-  const room = await createPatientRoom({ fullName });
-  const folders = await createPatientFolders({ roomId: room.id });
-  res.json({ room, folders });
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      req.body?.fullName ||
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const mappedRoomId = getPatientRoomIdByUserId(user.id);
+    if (mappedRoomId) {
+      try {
+        await ensureRoomMembers({ roomId: mappedRoomId, patientId: user.id });
+      } catch (shareError) {
+        console.warn("[bootstrap] room share warning", shareError?.message || shareError);
+      }
+
+      const room = await getRoomInfo(mappedRoomId, auth).catch(() => ({
+        id: mappedRoomId,
+        title: `${displayName} - Patient Room`,
+        webUrl: null
+      }));
+      return res.json({ room, folders: null, source: "mapping" });
+    }
+
+    const emailPrefix = user.email ? user.email.split("@")[0] : "";
+    const candidates = [
+      displayName ? `${displayName} - Patient Room` : "",
+      user.userName ? `${user.userName} - Patient Room` : "",
+      user.email ? `${user.email} - Patient Room` : "",
+      emailPrefix ? `${emailPrefix} - Patient Room` : ""
+    ];
+
+    let room = await findRoomByCandidates(candidates, auth).catch(() => null);
+    if (room?.id) {
+      recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      try {
+        await ensureRoomMembers({ roomId: room.id, patientId: user.id });
+      } catch (shareError) {
+        console.warn("[bootstrap] room share warning", shareError?.message || shareError);
+      }
+      return res.json({ room, folders: null, source: "search" });
+    }
+
+    room = await createPatientRoom({ fullName: displayName, userId: user.id });
+    const folders = await createPatientFolders({ roomId: room.id });
+    recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+
+    try {
+      await ensureRoomMembers({ roomId: room.id, patientId: user.id });
+    } catch (shareError) {
+      console.warn("[bootstrap] room share warning", shareError?.message || shareError);
+    }
+
+    return res.json({ room, folders, source: "created" });
+  } catch (error) {
+    console.error("[bootstrap]", error?.message || error, error?.details || "");
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
 });
 
 router.get("/room-summary", async (req, res) => {

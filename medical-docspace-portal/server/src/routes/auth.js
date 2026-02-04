@@ -92,15 +92,9 @@ router.post("/login", async (req, res) => {
 
     if (room?.id) {
       try {
-        await getRoomInfo(room.id, token);
-      } catch (accessError) {
-        if (accessError?.status === 403) {
-          try {
-            await ensureRoomMembers({ roomId: room.id, patientId: user.id });
-          } catch (shareError) {
-            console.warn("[login] room share warning", shareError?.message || shareError);
-          }
-        }
+        await ensureRoomMembers({ roomId: room.id, patientId: user?.id });
+      } catch (shareError) {
+        console.warn("[login] room share warning", shareError?.message || shareError);
       }
       try {
         const verified = await getRoomInfo(room.id, token);

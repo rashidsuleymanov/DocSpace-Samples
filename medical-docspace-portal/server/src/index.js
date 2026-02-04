@@ -49,7 +49,10 @@ async function start() {
     const { createServer } = await import("vite");
     const vite = await createServer({
       root: clientRoot,
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: [".ngrok-free.app"]
+      },
       appType: "spa"
     });
 

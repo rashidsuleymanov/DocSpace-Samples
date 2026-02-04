@@ -133,7 +133,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
       session?.user?.fullName || session?.user?.displayName || session?.user?.name || "Patient";
     const response = await fetch("/api/patients/bootstrap", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(session?.user?.token ? { Authorization: session.user.token } : {})
+      },
       body: JSON.stringify({ fullName })
     });
     const data = await response.json().catch(() => ({}));
