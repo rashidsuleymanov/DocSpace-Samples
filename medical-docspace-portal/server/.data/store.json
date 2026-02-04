@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "savedAt": "2026-02-04T05:25:55.930Z",
+  "appointments": [
+    {
+      "id": "c343037a-d6a0-4df5-bbaf-bae3e75b3efa",
+      "roomId": 2269302,
+      "roomTitle": "Patient Room",
+      "patientName": "Emily Carter",
+      "date": "2026-02-04",
+      "time": "10:25",
+      "doctor": "John Smith",
+      "reason": "4324234234",
+      "status": "Closed",
+      "ticket": {
+        "id": "3174625",
+        "title": "Appointment 2026-02-04 10_25 - John Smith.docx",
+        "url": "https://suleymanovrn.onlyoffice.com/s/nMyd7DXDZZXVW3K",
+        "shareToken": "nMyd7DXDZZXVW3K"
+      },
+      "createdAt": "2026-02-04T05:25:40.631Z"
+    }
+  ],
+  "medicalRecords": [],
+  "fillSignAssignments": [
+    {
+      "id": "d1f8c8b9-3f4e-4596-8e0b-e84e15369c71",
+      "patientRoomId": "2269302",
+      "patientId": "f4492226-94b4-4427-ab7e-e403d7cc92bd",
+      "patientName": "Emily Carter",
+      "templateFileId": "3174347",
+      "templateTitle": "Medical Agreement.pdf",
+      "medicalRoomId": "2264561",
+      "requestedBy": "suleymanovrashidn@gmail.com",
+      "shareLink": "https://suleymanovrn.onlyoffice.com/s/RmhjRYFxZ3kqrxQ",
+      "shareToken": "Ty9TWW1QZDA3TSt3TXhWbk1jYUtEVEgzdE5FRnBLMWo0SHZFVHdIZmJQbz0_ImY1OGVhZTIzLWQ4ZjgtNGNlMy05MTI1LWEyNDBhY2ZhNWNhOCI",
+      "createdAt": "2026-02-04T05:24:30.857Z"
+    }
+  ],
+  "patientMappings": [
+    {
+      "userId": "f4492226-94b4-4427-ab7e-e403d7cc92bd",
+      "roomId": "2269302",
+      "patientName": "Emily Carter"
+    }
+  ]
+}

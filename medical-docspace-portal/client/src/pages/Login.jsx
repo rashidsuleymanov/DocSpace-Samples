@@ -34,7 +34,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
             Password
             <input
               type="password"
-              placeholder="Введите пароль"
+              placeholder="Enter your password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               required
@@ -48,7 +48,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           </button>
         </form>
         {success && <p className="muted">{success}</p>}
-        {error && <p className="muted">Ошибка входа: {error}</p>}
+        {error && <p className="muted">Sign-in error: {error}</p>}
         <div className="auth-footer">
           <button className="link" onClick={onGoRegister}>
             Create a new patient account

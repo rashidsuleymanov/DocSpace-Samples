@@ -25,7 +25,12 @@ if (configErrors.length) {
 app.use("/api/auth", authRoutes);
 app.use("/api/patients", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
-app.use("/api/debug", debugRoutes);
+
+const isProd = process.env.NODE_ENV === "production";
+const debugEnabled = process.env.ENABLE_DEBUG_API === "true" || !isProd;
+if (debugEnabled) {
+  app.use("/api/debug", debugRoutes);
+}
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -37,7 +42,6 @@ app.use((err, _req, res, _next) => {
 });
 
 const clientRoot = path.resolve(__dirname, "../../client");
-const isProd = process.env.NODE_ENV === "production";
 const port = process.env.PORT || 5173;
 
 async function start() {

@@ -21,6 +21,7 @@ export default function FillSign({ session, onLogout, onNavigate }) {
   const [actionItems, setActionItems] = useState([]);
   const [completedItems, setCompletedItems] = useState([]);
   const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
+  const [lastUpdatedAt, setLastUpdatedAt] = useState("");
 
   const loadItems = async () => {
     try {
@@ -60,6 +61,7 @@ export default function FillSign({ session, onLogout, onNavigate }) {
 
       setActionItems(mapFiles(actionData.contents));
       setCompletedItems(mapFiles(completedData.contents));
+      setLastUpdatedAt(new Date().toISOString());
     } catch (loadError) {
       setError(loadError.message || "Failed to load Fill & Sign documents");
       setActionItems([]);
@@ -113,6 +115,7 @@ export default function FillSign({ session, onLogout, onNavigate }) {
           <div>
             <h1>Fill &amp; Sign</h1>
             <p className="muted">Documents shared by your doctor for filling and signing.</p>
+            {lastUpdatedAt && <p className="muted">Last updated: {new Date(lastUpdatedAt).toLocaleString("en-US")}</p>}
           </div>
           <div className="page-tabs">
             <button
@@ -128,6 +131,9 @@ export default function FillSign({ session, onLogout, onNavigate }) {
               onClick={() => setTab("completed")}
             >
               Completed <span className="tab-count">{completedItems.length}</span>
+            </button>
+            <button className="secondary" type="button" onClick={loadItems} disabled={loading}>
+              Refresh
             </button>
           </div>
         </header>

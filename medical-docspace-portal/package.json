@@ -6,6 +6,7 @@
     "postinstall": "npm --prefix client install",
     "dev": "node server/src/index.js",
     "build": "npm --prefix client run build",
+    "check": "node server/src/check.js",
     "start": "cross-env NODE_ENV=production node server/src/index.js"
   },
   "dependencies": {

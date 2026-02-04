@@ -102,6 +102,8 @@ function saveAppointments(session, items) {
 export default function Appointments({ session, onLogout, onNavigate }) {
 
   const [items, setItems] = useState([]);
+  const submitRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const [form, setForm] = useState({
 
@@ -341,10 +343,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
             };
 
-            console.log("[ticket] templateData", templateData);
-
-
-
             const ticketText = buildTicketText(templateData);
 
             const editorCallback = new Function(
@@ -567,11 +565,16 @@ export default function Appointments({ session, onLogout, onNavigate }) {
   const submit = async (event) => {
 
     event.preventDefault();
+    if (submitRef.current) return;
+    submitRef.current = true;
+    setSubmitting(true);
 
     if (!form.date || !form.time || !form.doctor) {
 
       setMessage("Please fill date, time, and doctor.");
 
+      submitRef.current = false;
+      setSubmitting(false);
       return;
 
     }
@@ -652,6 +655,13 @@ export default function Appointments({ session, onLogout, onNavigate }) {
       setTicketMessage(error?.message || "Ticket not created");
 
     }
+    finally {
+
+      submitRef.current = false;
+
+      setSubmitting(false);
+
+    }
 
   };
 
@@ -726,6 +736,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
               <input
 
                 type="date"
+                lang="en-US"
 
                 value={form.date}
 
@@ -744,6 +755,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
               <input
 
                 type="time"
+                lang="en-US"
 
                 value={form.time}
 
@@ -791,9 +803,9 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
             </label>
 
-            <button className="primary" type="submit">
+            <button className="primary" type="submit" disabled={submitting}>
 
-              Schedule appointment
+              {submitting ? "Scheduling..." : "Schedule appointment"}
 
             </button>
 

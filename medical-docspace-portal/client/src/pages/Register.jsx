@@ -57,7 +57,7 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
             Password
             <input
               type="password"
-              placeholder="Введите пароль"
+              placeholder="Create a password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               required
@@ -67,7 +67,7 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
             {busy ? "Registering..." : "Register"}
           </button>
         </form>
-        {error && <p className="muted">Ошибка регистрации: {error}</p>}
+        {error && <p className="muted">Registration error: {error}</p>}
         <button className="link" onClick={onGoLogin}>
           Already have an account? Sign in
         </button>

@@ -615,6 +615,7 @@ export default function DoctorPortal({ doctor, onExit }) {
   };
 
   const handleFillRequest = async (file) => {
+    if (busy) return;
     if (!selectedRoomId || !file?.id) return;
     setBusy(true);
     setMessage("");
@@ -984,6 +985,14 @@ export default function DoctorPortal({ doctor, onExit }) {
                   >
                     Completed <span className="tab-count">{fillCounts.completed}</span>
                   </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() => selectedRoomId && loadFillItems(selectedRoomId, fillTab)}
+                    disabled={!selectedRoomId || fillLoading}
+                  >
+                    Refresh
+                  </button>
                 </div>
                 {!selectedRoomId && <p className="muted">Select a patient to see their forms.</p>}
                 {fillError && <p className="error-banner">Error: {fillError}</p>}
@@ -1179,6 +1188,7 @@ export default function DoctorPortal({ doctor, onExit }) {
                 Date
                 <input
                   type="date"
+                  lang="en-US"
                   value={recordForm.date}
                   onChange={(e) => setRecordForm({ ...recordForm, date: e.target.value })}
                   required
@@ -1215,6 +1225,7 @@ export default function DoctorPortal({ doctor, onExit }) {
                         key={file.id}
                         className="template-item"
                         type="button"
+                        disabled={busy}
                         onClick={() => handleFillRequest(file)}
                       >
                         <span className="content-icon" />

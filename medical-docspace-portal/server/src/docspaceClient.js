@@ -1034,20 +1034,14 @@ export async function updateMember({
     ...body,
     contacts: body.contacts ? "[redacted]" : undefined
   };
-  console.log("[docspace] updateMember payload", payloadLog);
 
   let data;
-  let raw;
-  let status;
   try {
     const response = await apiRequestRaw(`/api/2.0/people/${userId}`, {
       method: "PUT",
       body
     });
     data = response.data;
-    raw = response.raw;
-    status = response.status;
-    console.log("[docspace] updateMember response", { status });
   } catch (error) {
     if (error?.details && typeof error.details === "object") {
       error.details.request = payloadLog;

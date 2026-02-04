@@ -11,6 +11,7 @@ export default function DoctorTopbar({ title, subtitle, dateFilter, onDateFilter
           <span className="muted">Schedule date</span>
           <input
             type="date"
+            lang="en-US"
             value={dateFilter || today}
             onChange={(e) => onDateFilter(e.target.value)}
           />
