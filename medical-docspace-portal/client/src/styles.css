@@ -1477,6 +1477,38 @@ main {
   font-weight: 700;
 }
 
+.banner-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.activation-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2500;
+  padding: 1.25rem;
+}
+
+.activation-card {
+  width: min(640px, 92vw);
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.25);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.activation-card h3 {
+  margin: 0;
+}
+
 .panel {
   background: #ffffff;
   border-radius: 20px;

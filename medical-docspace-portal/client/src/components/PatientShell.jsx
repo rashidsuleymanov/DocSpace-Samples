@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import PatientHeader from "./PatientHeader.jsx";
+import DocSpaceActivationBanner from "./DocSpaceActivationBanner.jsx";
 
 function countFiles(node) {
   if (!node) return 0;
@@ -55,6 +56,7 @@ export default function PatientShell({
         badgeCounts={mergedBadges}
       />
       <main className="patient-main">
+        <DocSpaceActivationBanner userId={user?.docspaceId} roomId={roomId} />
         {banner}
         {children}
       </main>
