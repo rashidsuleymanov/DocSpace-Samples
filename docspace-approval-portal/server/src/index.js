@@ -7,6 +7,10 @@ import authRoutes from "./routes/auth.js";
 import templatesRoutes from "./routes/templates.js";
 import flowsRoutes from "./routes/flows.js";
 import debugRoutes from "./routes/debug.js";
+import sandboxRoutes from "./routes/sandbox.js";
+import projectsRoutes from "./routes/projects.js";
+import libraryRoutes from "./routes/library.js";
+import draftsRoutes from "./routes/drafts.js";
 import { validateConfig } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +29,11 @@ if (configErrors.length) {
 app.use("/api/auth", authRoutes);
 app.use("/api/templates", templatesRoutes);
 app.use("/api/flows", flowsRoutes);
+app.use("/api/settings", sandboxRoutes);
+app.use("/api/sandbox", sandboxRoutes);
+app.use("/api/projects", projectsRoutes);
+app.use("/api/library", libraryRoutes);
+app.use("/api/drafts", draftsRoutes);
 
 const isProd = process.env.NODE_ENV === "production";
 const debugEnabled = process.env.ENABLE_DEBUG_API === "true" || !isProd;
@@ -79,4 +88,3 @@ async function start() {
 }
 
 start();
-
