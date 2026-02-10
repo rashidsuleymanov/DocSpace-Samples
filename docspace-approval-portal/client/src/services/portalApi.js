@@ -81,11 +81,11 @@ export async function createDraft({ token, title }) {
   return data;
 }
 
-export async function publishDraft({ token, fileId, projectId, activate = true }) {
+export async function publishDraft({ token, fileId, projectId, destination = "project", activate = true }) {
   const response = await fetch("/api/drafts/publish", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: token },
-    body: JSON.stringify({ fileId, projectId, activate })
+    body: JSON.stringify({ fileId, projectId, destination, activate })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -95,6 +95,28 @@ export async function publishDraft({ token, fileId, projectId, activate = true }
     data.warning =
       data.warning ||
       "Copy finished, but the created file was not detected. Check the project room Templates (and In Process) folders.";
+  }
+  return data;
+}
+
+export async function getProjectTemplatesRoom({ token }) {
+  const response = await fetch("/api/drafts/templates-room", {
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Templates room check failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function listSharedTemplates({ token }) {
+  const response = await fetch("/api/drafts/templates-room/templates", {
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Shared templates load failed (${response.status})`));
   }
   return data;
 }
@@ -109,11 +131,11 @@ export async function listFlows({ token }) {
   return data;
 }
 
-export async function createFlowFromTemplate({ token, templateFileId }) {
+export async function createFlowFromTemplate({ token, templateFileId, projectId } = {}) {
   const response = await fetch("/api/flows/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: token },
-    body: JSON.stringify({ templateFileId })
+    body: JSON.stringify({ templateFileId, projectId })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

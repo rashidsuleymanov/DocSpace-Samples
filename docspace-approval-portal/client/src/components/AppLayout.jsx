@@ -11,7 +11,8 @@ function initialsFrom(value) {
 }
 
 const navItems = [
-  { id: "dashboard", label: "Dashboard" },
+  { id: "dashboard", label: "Home" },
+  { id: "requests", label: "Requests" },
   { id: "drafts", label: "Templates" },
   { id: "settings", label: "Settings" }
 ];

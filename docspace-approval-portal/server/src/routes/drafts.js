@@ -2,13 +2,18 @@ import { Router } from "express";
 import {
   copyFilesToFolder,
   createFileInMyDocuments,
+  createRoom,
+  findRoomByCandidates,
   getFileInfo,
   getFolderContents,
   getFormsRoomFolders,
+  getRoomInfo,
+  getSelfProfileWithToken,
   getMyDocuments
 } from "../docspaceClient.js";
 import { getProject } from "../store.js";
-import { updateConfig } from "../config.js";
+import { getConfig, updateConfig } from "../config.js";
+import { shareRoom } from "../docspaceClient.js";
 
 const router = Router();
 
@@ -43,6 +48,59 @@ function requireUserToken(req) {
     throw err;
   }
   return auth;
+}
+
+function projectTemplatesCandidates(cfg) {
+  return [
+    cfg?.projectTemplatesRoomTitle,
+    ...(cfg?.projectTemplatesRoomTitleFallbacks || []),
+    "Projects Templates",
+    "Project Templates"
+  ]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+}
+
+async function ensureProjectTemplatesRoom(auth) {
+  const cfg = getConfig();
+  const configuredId = String(cfg.projectTemplatesRoomId || "").trim();
+  if (configuredId) {
+    const existing = await getRoomInfo(configuredId).catch(() => null);
+    if (existing?.id) {
+      return existing;
+    }
+  }
+
+  const candidates = projectTemplatesCandidates(cfg);
+  const found = await findRoomByCandidates(candidates).catch(() => null);
+  if (found?.id) {
+    await updateConfig({
+      projectTemplatesRoomId: String(found.id),
+      projectTemplatesRoomTitle: String(found.title || found.name || cfg.projectTemplatesRoomTitle || "Projects Templates")
+    }).catch(() => null);
+    return found;
+  }
+
+  const created = await createRoom({ title: cfg.projectTemplatesRoomTitle || "Projects Templates", roomType: 1 });
+  const roomId = created?.id ?? created?.response?.id ?? created?.folder?.id ?? null;
+  if (!roomId) throw new Error("Failed to determine templates room id");
+
+  await updateConfig({
+    projectTemplatesRoomId: String(roomId),
+    projectTemplatesRoomTitle: cfg.projectTemplatesRoomTitle || "Projects Templates"
+  }).catch(() => null);
+
+  return { ...created, id: roomId };
+}
+
+async function ensureUserAccessToTemplatesRoom({ roomId, userId, userEmail } = {}) {
+  const rid = String(roomId || "").trim();
+  const uid = String(userId || "").trim();
+  if (!rid || !uid) return false;
+  const invitations = [{ id: uid, access: "ContentCreator" }];
+  if (userEmail) invitations.push({ email: String(userEmail).trim(), access: "ContentCreator" });
+  const result = await shareRoom({ roomId: rid, invitations, notify: false }).catch(() => null);
+  return Boolean(result);
 }
 
 router.get("/", async (req, res) => {
@@ -91,6 +149,86 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/templates-room", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = String(me?.id || "").trim();
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const room = await ensureProjectTemplatesRoom(auth);
+    const roomId = String(room?.id || "").trim();
+    if (!roomId) return res.status(500).json({ error: "Templates room is missing" });
+
+    let hasAccess = false;
+    const info = await getRoomInfo(roomId, auth).catch(() => null);
+    if (info?.id) hasAccess = true;
+
+    if (!hasAccess) {
+      await ensureUserAccessToTemplatesRoom({
+        roomId,
+        userId: meId,
+        userEmail: String(me?.email || "").trim()
+      }).catch(() => null);
+      const recheck = await getRoomInfo(roomId, auth).catch(() => null);
+      hasAccess = Boolean(recheck?.id);
+    }
+
+    res.json({
+      room: {
+        id: roomId,
+        title: String(room?.title || room?.name || getConfig().projectTemplatesRoomTitle || "Projects Templates"),
+        roomUrl: room?.webUrl || room?.shortWebUrl || info?.webUrl || info?.shortWebUrl || null
+      },
+      hasAccess
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.get("/templates-room/templates", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const room = await ensureProjectTemplatesRoom(auth);
+    const roomId = String(room?.id || "").trim();
+    if (!roomId) return res.status(500).json({ error: "Templates room is missing" });
+
+    const folders =
+      (await getFormsRoomFolders(roomId, auth).catch(() => null)) ||
+      (await getFormsRoomFolders(roomId).catch(() => null)) ||
+      null;
+    const folderId = String(folders?.templates?.id || roomId || "").trim();
+    if (!folderId) return res.status(500).json({ error: "Unable to determine templates folder" });
+
+    const contents =
+      (await getFolderContents(folderId, auth).catch(() => null)) ||
+      (await getFolderContents(folderId).catch(() => null));
+    const items = Array.isArray(contents?.items) ? contents.items : [];
+    const templates = items
+      .filter((item) => item.type === "file" && isPdfEntry(item))
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        fileExst: item.fileExst || null,
+        isForm: item.isForm ?? null,
+        webUrl: item.webUrl || null
+      }));
+
+    res.json({
+      room: {
+        id: roomId,
+        title: String(room?.title || room?.name || getConfig().projectTemplatesRoomTitle || "Projects Templates"),
+        roomUrl: room?.webUrl || room?.shortWebUrl || null
+      },
+      folder: { id: folderId, title: folders?.templates?.title || contents?.title || null },
+      templates
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
 router.post("/", async (req, res) => {
   try {
     const auth = requireUserToken(req);
@@ -108,19 +246,36 @@ router.post("/publish", async (req, res) => {
     const auth = requireUserToken(req);
     const fileId = String(req.body?.fileId || "").trim();
     const projectId = String(req.body?.projectId || "").trim();
+    const destination = String(req.body?.destination || "project").trim();
     const activate = req.body?.activate !== false;
 
     if (!fileId) return res.status(400).json({ error: "fileId is required" });
-    if (!projectId) return res.status(400).json({ error: "projectId is required" });
+    if (destination !== "templatesRoom" && !projectId) return res.status(400).json({ error: "projectId is required" });
 
-    const project = getProject(projectId);
-    if (!project?.roomId) return res.status(404).json({ error: "Project not found" });
+    const project = destination === "templatesRoom" ? null : getProject(projectId);
+    if (destination !== "templatesRoom" && !project?.roomId) return res.status(404).json({ error: "Project not found" });
 
     const info = await getFileInfo(fileId, auth).catch(() => null);
     if (!isPdfFileInfo(info)) return res.status(400).json({ error: "Only .pdf templates can be published" });
 
-    const folders = await getFormsRoomFolders(project.roomId, auth).catch(() => null);
-    const destFolderId = String(folders?.templates?.id || project.roomId || "").trim();
+    let destRoomId = destination === "templatesRoom" ? "" : String(project.roomId || "").trim();
+    let roomMeta = destination === "templatesRoom" ? null : project;
+    if (destination === "templatesRoom") {
+      const me = await getSelfProfileWithToken(auth).catch(() => null);
+      const meId = String(me?.id || "").trim();
+      if (!meId) return res.status(401).json({ error: "Invalid user token" });
+      const room = await ensureProjectTemplatesRoom(auth);
+      destRoomId = String(room?.id || "").trim();
+      roomMeta = { id: "templatesRoom", title: String(room?.title || room?.name || "Projects Templates"), roomId: destRoomId, roomUrl: room?.webUrl || room?.shortWebUrl || null };
+      await ensureUserAccessToTemplatesRoom({ roomId: destRoomId, userId: meId, userEmail: String(me?.email || "").trim() }).catch(() => null);
+    }
+
+    const folders =
+      (await getFormsRoomFolders(destRoomId).catch(() => null)) ||
+      (await getFormsRoomFolders(destRoomId, auth).catch(() => null)) ||
+      null;
+
+    const destFolderId = String(folders?.templates?.id || destRoomId || "").trim();
     if (!destFolderId) return res.status(500).json({ error: "Unable to determine destination folder" });
     const inProcessFolderId = String(folders?.inProcess?.id || "").trim();
 
@@ -163,12 +318,18 @@ router.post("/publish", async (req, res) => {
     }
 
     if (activate) {
-      await updateConfig({ formsRoomId: String(project.roomId), formsRoomTitle: String(project.title || "") }).catch(() => null);
+      if (destination !== "templatesRoom") {
+        await updateConfig({ formsRoomId: String(project.roomId), formsRoomTitle: String(project.title || "") }).catch(() => null);
+      }
     }
 
     res.json({
       ok: true,
-      project: { id: project.id, title: project.title, roomId: project.roomId, roomUrl: project.roomUrl || null },
+      destination,
+      project:
+        destination === "templatesRoom"
+          ? { id: "templatesRoom", title: roomMeta?.title || "Projects Templates", roomId: destRoomId, roomUrl: roomMeta?.roomUrl || null }
+          : { id: project.id, title: project.title, roomId: project.roomId, roomUrl: project.roomUrl || null },
       destFolderId,
       operation,
       createdIn,

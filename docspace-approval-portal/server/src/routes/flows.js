@@ -4,12 +4,14 @@ import {
   ensureExternalLinkAccess,
   getFillOutLink,
   getFileInfo,
+  getRoomInfo,
   getSelfProfileWithToken,
   requireFormsRoom,
   setFileExternalLink
 } from "../docspaceClient.js";
-import { getConfig } from "../config.js";
+import { getConfig, updateConfig } from "../config.js";
 import { createFlow, listFlowsForUser } from "../store.js";
+import { getProject } from "../store.js";
 
 const router = Router();
 
@@ -46,10 +48,13 @@ router.post("/from-template", async (req, res) => {
     }
 
     const cfg = getConfig();
-    if (!String(cfg.formsRoomId || "").trim()) {
+    const targetProjectId = String(req.body?.projectId || "").trim();
+    const configuredRoomId = String(cfg.formsRoomId || "").trim();
+    const targetRoomId = targetProjectId ? String(getProject(targetProjectId)?.roomId || "").trim() : configuredRoomId;
+    if (!targetRoomId) {
       return res.status(400).json({
-        error: "No current project selected",
-        details: "Open Projects and select (or create) a project first."
+        error: "No target project selected",
+        details: "Pick a project (or set a current project in Projects) first."
       });
     }
 
@@ -58,10 +63,11 @@ router.post("/from-template", async (req, res) => {
       return res.status(400).json({ error: "templateFileId is required" });
     }
 
-    const [user, templateInfo, formsRoom] = await Promise.all([
+    const [user, templateInfo, formsRoom, roomAccess] = await Promise.all([
       getSelfProfileWithToken(auth),
       getFileInfo(templateFileId).catch(() => null),
-      requireFormsRoom().catch(() => null)
+      requireFormsRoom().catch(() => null),
+      getRoomInfo(targetRoomId, auth).catch(() => null)
     ]);
 
     if (!templateInfo?.id) {
@@ -69,6 +75,9 @@ router.post("/from-template", async (req, res) => {
     }
     if (!formsRoom?.id) {
       return res.status(404).json({ error: "Forms room not found" });
+    }
+    if (!roomAccess?.id) {
+      return res.status(403).json({ error: "No access to the selected project" });
     }
 
     const displayName =
@@ -92,13 +101,23 @@ router.post("/from-template", async (req, res) => {
       return res.status(500).json({ error: "Unable to obtain fill-out link for the selected template" });
     }
 
+    // Set as current project when explicitly chosen (or when current is missing/outdated).
+    if (targetProjectId && targetRoomId) {
+      const project = getProject(targetProjectId);
+      if (project?.roomId) {
+        await updateConfig({ formsRoomId: String(project.roomId), formsRoomTitle: String(project.title || "") }).catch(() => null);
+      }
+    } else if (!configuredRoomId && targetRoomId) {
+      await updateConfig({ formsRoomId: String(targetRoomId), formsRoomTitle: String(roomAccess?.title || "") }).catch(() => null);
+    }
+
     const flow = createFlow({
       id: randomUUID(),
       templateFileId,
       templateTitle: templateInfo.title || null,
       fileId: String(templateInfo.id),
       fileTitle: templateInfo.title || null,
-      projectRoomId: String(cfg.formsRoomId || "").trim() || null,
+      projectRoomId: targetRoomId || null,
       createdByUserId: user?.id,
       createdByName: displayName || null,
       openUrl: fillLink.shareLink,

@@ -23,9 +23,14 @@ function envDefaults() {
     "";
   const formsRoomId = process.env.DOCSPACE_FORMS_ROOM_ID || "";
   const libraryRoomId = process.env.DOCSPACE_LIBRARY_ROOM_ID || "";
+  const projectTemplatesRoomId = process.env.DOCSPACE_PROJECT_TEMPLATES_ROOM_ID || "";
   const formsRoomTitle = process.env.DOCSPACE_FORMS_ROOM_TITLE || "Forms Room";
+  const projectTemplatesRoomTitle = process.env.DOCSPACE_PROJECT_TEMPLATES_ROOM_TITLE || "Projects Templates";
   const formsRoomTitleFallbacks = normalizeFallbacks(
     process.env.DOCSPACE_FORMS_ROOM_TITLE_FALLBACKS || "Medical Room,Medical Forms"
+  );
+  const projectTemplatesRoomTitleFallbacks = normalizeFallbacks(
+    process.env.DOCSPACE_PROJECT_TEMPLATES_ROOM_TITLE_FALLBACKS || "Project Templates,Templates"
   );
   const formsTemplatesFolderTitle = process.env.DOCSPACE_FORMS_TEMPLATES_FOLDER_TITLE || "Templates";
   return {
@@ -33,8 +38,11 @@ function envDefaults() {
     rawAuthToken,
     formsRoomId,
     libraryRoomId,
+    projectTemplatesRoomId,
     formsRoomTitle,
+    projectTemplatesRoomTitle,
     formsRoomTitleFallbacks,
+    projectTemplatesRoomTitleFallbacks,
     formsTemplatesFolderTitle
   };
 }
@@ -56,8 +64,18 @@ async function loadConfigFile() {
         typeof data.libraryRoomId === "string" || typeof data.libraryRoomId === "number"
           ? String(data.libraryRoomId)
           : runtimeConfig.libraryRoomId,
+      projectTemplatesRoomId:
+        typeof data.projectTemplatesRoomId === "string" || typeof data.projectTemplatesRoomId === "number"
+          ? String(data.projectTemplatesRoomId)
+          : runtimeConfig.projectTemplatesRoomId,
       formsRoomTitle: typeof data.formsRoomTitle === "string" ? data.formsRoomTitle : runtimeConfig.formsRoomTitle,
+      projectTemplatesRoomTitle:
+        typeof data.projectTemplatesRoomTitle === "string"
+          ? data.projectTemplatesRoomTitle
+          : runtimeConfig.projectTemplatesRoomTitle,
       formsRoomTitleFallbacks: normalizeFallbacks(data.formsRoomTitleFallbacks) || runtimeConfig.formsRoomTitleFallbacks,
+      projectTemplatesRoomTitleFallbacks:
+        normalizeFallbacks(data.projectTemplatesRoomTitleFallbacks) || runtimeConfig.projectTemplatesRoomTitleFallbacks,
       formsTemplatesFolderTitle:
         typeof data.formsTemplatesFolderTitle === "string"
           ? data.formsTemplatesFolderTitle
@@ -91,9 +109,19 @@ export async function updateConfig(patch = {}) {
     const rid = String(patch.libraryRoomId || "").trim();
     next.libraryRoomId = rid;
   }
+  if (patch.projectTemplatesRoomId !== undefined) {
+    const rid = String(patch.projectTemplatesRoomId || "").trim();
+    next.projectTemplatesRoomId = rid;
+  }
   if (typeof patch.formsRoomTitle === "string") next.formsRoomTitle = patch.formsRoomTitle.trim() || next.formsRoomTitle;
+  if (typeof patch.projectTemplatesRoomTitle === "string") {
+    next.projectTemplatesRoomTitle = patch.projectTemplatesRoomTitle.trim() || next.projectTemplatesRoomTitle;
+  }
   if (patch.formsRoomTitleFallbacks !== undefined) {
     next.formsRoomTitleFallbacks = normalizeFallbacks(patch.formsRoomTitleFallbacks);
+  }
+  if (patch.projectTemplatesRoomTitleFallbacks !== undefined) {
+    next.projectTemplatesRoomTitleFallbacks = normalizeFallbacks(patch.projectTemplatesRoomTitleFallbacks);
   }
   if (typeof patch.formsTemplatesFolderTitle === "string") {
     next.formsTemplatesFolderTitle = patch.formsTemplatesFolderTitle.trim() || next.formsTemplatesFolderTitle;

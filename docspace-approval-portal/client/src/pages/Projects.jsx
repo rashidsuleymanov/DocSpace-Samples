@@ -263,7 +263,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             </div>
           </div>
 
-          <div className="list">
+          <div className="project-grid">
             {filtered.map((p) => {
               const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
               const disabled = busy || loading;
@@ -272,42 +272,40 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               const inProgress = Number(p?.counts?.inProgress || 0);
               const total = Number(p?.counts?.total || 0);
               return (
-                <div key={p.id} className="list-row">
-                  <div className="list-main">
-                    <strong className="truncate">{p.title}</strong>
-                    <span className="muted truncate">
-                      Room: {p.roomId}{" "}
-                      {isCurrent ? <StatusPill tone="green">current</StatusPill> : null}{" "}
-                      {inProgress ? <StatusPill tone="yellow">{inProgress} in progress</StatusPill> : null}{" "}
-                      <StatusPill tone="gray">{total} total</StatusPill>
-                    </span>
+                <div key={p.id} className="project-card">
+                  <div className="project-card-head">
+                    <div className="project-card-title">
+                      <strong className="truncate">{p.title}</strong>
+                      <span className="muted truncate">Room: {p.roomId}</span>
+                    </div>
+                    <div className="project-card-meta">
+                      {isCurrent ? <StatusPill tone="green">Current</StatusPill> : null}
+                    </div>
                   </div>
-                  <div className="list-actions">
-                    <button
-                      type="button"
-                      onClick={() => onSetCurrent(p)}
-                      disabled={disabled}
-                    >
-                      Set as current
-                    </button>
+
+                  <div className="project-card-meta" style={{ justifyContent: "flex-start" }}>
+                    {inProgress ? <StatusPill tone="yellow">{inProgress} in progress</StatusPill> : <StatusPill tone="gray">0 in progress</StatusPill>}{" "}
+                    <StatusPill tone="gray">{total} total</StatusPill>
+                  </div>
+
+                  <div className="project-card-actions">
                     <button
                       type="button"
                       className="primary"
                       onClick={() => (typeof onOpenProject === "function" ? onOpenProject(p.id) : null)}
                       disabled={disabled}
                     >
-                      Open project
+                      Open
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => openInvite(p)}
-                      disabled={actionsDisabled}
-                    >
-                      Invite people
+                    <button type="button" onClick={() => onSetCurrent(p)} disabled={disabled || isCurrent}>
+                      {isCurrent ? "Selected" : "Make current"}
+                    </button>
+                    <button type="button" onClick={() => openInvite(p)} disabled={actionsDisabled}>
+                      Invite
                     </button>
                     {p.roomUrl ? (
-                      <a className="link" href={p.roomUrl} target="_blank" rel="noreferrer">
-                        Open in DocSpace
+                      <a className="btn" href={p.roomUrl} target="_blank" rel="noreferrer">
+                        DocSpace
                       </a>
                     ) : null}
                     <button type="button" className="danger" onClick={() => openDelete(p)} disabled={actionsDisabled}>

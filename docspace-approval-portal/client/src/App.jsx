@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AppLayout from "./components/AppLayout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import Requests from "./pages/Requests.jsx";
 import Projects from "./pages/Projects.jsx";
 import Project from "./pages/Project.jsx";
 import Login from "./pages/Login.jsx";
@@ -11,11 +12,18 @@ import { clearSession, loadSession, saveSession } from "./services/session.js";
 import {
   createFlowFromTemplate,
   getProjectsSidebar,
+  listDrafts,
   listFlows,
   listTemplates,
   login,
   register
 } from "./services/portalApi.js";
+
+function isPdfFile(item) {
+  const ext = String(item?.fileExst || "").trim().toLowerCase();
+  const title = String(item?.title || "").trim().toLowerCase();
+  return ext === "pdf" || ext === ".pdf" || title.endsWith(".pdf");
+}
 
 export default function App() {
   const [view, setView] = useState("login");
@@ -28,6 +36,11 @@ export default function App() {
   const [projectId, setProjectId] = useState("");
   const [activeRoomId, setActiveRoomId] = useState("");
   const [activeProject, setActiveProject] = useState(null);
+  const [sidebarProjects, setSidebarProjects] = useState([]);
+  const [requestsFilter, setRequestsFilter] = useState("all");
+  const [requestsScope, setRequestsScope] = useState("all");
+  const [draftsPdfCount, setDraftsPdfCount] = useState(0);
+  const [draftsLoaded, setDraftsLoaded] = useState(false);
 
   useEffect(() => {
     const existing = loadSession();
@@ -46,19 +59,12 @@ export default function App() {
       const rid = sidebar?.activeRoomId ? String(sidebar.activeRoomId) : "";
       setActiveRoomId(rid);
       const list = Array.isArray(sidebar?.projects) ? sidebar.projects : [];
+      setSidebarProjects(list);
       const found = rid ? list.find((p) => String(p.roomId) === rid) || null : null;
       setActiveProject(found ? { id: found.id, title: found.title, roomId: found.roomId, roomUrl: found.roomUrl || null } : null);
     },
     [session?.token]
   );
-
-  useEffect(() => {
-    if (!session?.token) return;
-    refreshActiveProject().catch(() => null);
-    const handler = () => refreshActiveProject().catch(() => null);
-    window.addEventListener("portal:projectChanged", handler);
-    return () => window.removeEventListener("portal:projectChanged", handler);
-  }, [refreshActiveProject, session?.token]);
 
   const refreshFlows = useMemo(
     () => async (active) => {
@@ -68,6 +74,35 @@ export default function App() {
     },
     []
   );
+
+  const refreshDraftsSummary = useMemo(
+    () => async (active) => {
+      if (!active?.token) return;
+      try {
+        const data = await listDrafts({ token: active.token });
+        const items = Array.isArray(data?.drafts) ? data.drafts : [];
+        setDraftsPdfCount(items.filter(isPdfFile).length);
+      } catch {
+        setDraftsPdfCount(0);
+      } finally {
+        setDraftsLoaded(true);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!session?.token) return;
+    refreshActiveProject().catch(() => null);
+    const handler = () => refreshActiveProject().catch(() => null);
+    const draftsHandler = () => refreshDraftsSummary(session).catch(() => null);
+    window.addEventListener("portal:projectChanged", handler);
+    window.addEventListener("portal:draftsChanged", draftsHandler);
+    return () => {
+      window.removeEventListener("portal:projectChanged", handler);
+      window.removeEventListener("portal:draftsChanged", draftsHandler);
+    };
+  }, [refreshActiveProject, refreshDraftsSummary, session]);
 
   const loadTemplatesForSession = async (activeSession) => {
     if (!activeSession?.token) return [];
@@ -91,7 +126,17 @@ export default function App() {
     () => ({
       navigate(next) {
         setError("");
+        if (next === "requests") {
+          setRequestsFilter("all");
+          setRequestsScope("all");
+        }
         setView(next);
+      },
+      openRequests(filter = "all", scope = "all") {
+        setError("");
+        setRequestsFilter(String(filter || "all"));
+        setRequestsScope(String(scope || "all"));
+        setView("requests");
       },
       openProject(id) {
         setError("");
@@ -108,6 +153,7 @@ export default function App() {
           setView("dashboard");
           await refreshFlows(next);
           await refreshActiveProject();
+          await refreshDraftsSummary(next);
         } catch (e) {
           setError(e?.message || "Login failed");
         } finally {
@@ -143,6 +189,8 @@ export default function App() {
         setFlows([]);
         setActiveRoomId("");
         setActiveProject(null);
+        setDraftsPdfCount(0);
+        setDraftsLoaded(false);
         setView("login");
       },
       async startFlow(templateFileId) {
@@ -153,7 +201,7 @@ export default function App() {
         try {
           await createFlowFromTemplate({ token: session.token, templateFileId });
           await refreshFlows(session);
-          setView("dashboard");
+          window.dispatchEvent(new CustomEvent("portal:projectChanged"));
         } catch (e) {
           setError(e?.message || "Failed to start request");
         } finally {
@@ -166,8 +214,11 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    if (view === "dashboard" && flows.length === 0) {
+    if ((view === "dashboard" || view === "requests") && flows.length === 0) {
       refreshFlows(session).catch(() => null);
+    }
+    if ((view === "dashboard" || view === "drafts") && !draftsLoaded) {
+      refreshDraftsSummary(session).catch(() => null);
     }
     // Intentionally not depending on flows/templates to avoid over-fetching.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,7 +234,7 @@ export default function App() {
   useEffect(() => {
     if (!session?.token) return;
     if (!String(activeRoomId || "").trim()) return;
-    if (view !== "dashboard") return;
+    if (view !== "dashboard" && view !== "requests") return;
     if (templates.length > 0) return;
     loadTemplatesForSession(session).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,8 +272,37 @@ export default function App() {
             flows={flows}
             activeRoomId={activeRoomId}
             activeProject={activeProject}
+            projectsCount={Array.isArray(sidebarProjects) ? sidebarProjects.length : 0}
+            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
             templates={templates}
-            onRefresh={() => refreshFlows(session)}
+            draftsPdfCount={draftsPdfCount}
+            onRefresh={async () => {
+              await Promise.all([
+                refreshFlows(session).catch(() => null),
+                refreshActiveProject().catch(() => null),
+                refreshDraftsSummary(session).catch(() => null)
+              ]);
+            }}
+            onStartFlow={actions.startFlow}
+            onOpenDrafts={() => actions.navigate("drafts")}
+            onOpenProjects={() => actions.navigate("projects")}
+            onOpenRequests={actions.openRequests}
+            onOpenProject={actions.openProject}
+          />
+        )}
+        {view === "requests" && (
+          <Requests
+            session={session}
+            busy={busy}
+            error={error}
+            flows={flows}
+            activeRoomId={activeRoomId}
+            activeProject={activeProject}
+            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+            templates={templates}
+            initialFilter={requestsFilter}
+            initialScope={requestsScope}
+            onBack={() => actions.navigate("dashboard")}
             onStartFlow={actions.startFlow}
             onOpenDrafts={() => actions.navigate("drafts")}
             onOpenProjects={() => actions.navigate("projects")}
