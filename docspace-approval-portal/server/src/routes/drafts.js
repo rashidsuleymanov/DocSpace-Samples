@@ -2,12 +2,14 @@ import { Router } from "express";
 import {
   copyFilesToFolder,
   createFileInMyDocuments,
+  deleteFile,
   createRoom,
   findRoomByCandidates,
   getFileInfo,
   getFolderContents,
   getFormsRoomFolders,
   getRoomInfo,
+  getRoomSecurityInfo,
   getSelfProfileWithToken,
   getMyDocuments
 } from "../docspaceClient.js";
@@ -103,6 +105,24 @@ async function ensureUserAccessToTemplatesRoom({ roomId, userId, userEmail } = {
   return Boolean(result);
 }
 
+function roomMembersFromSecurityInfo(security) {
+  if (!security) return [];
+  if (Array.isArray(security)) return security;
+  if (Array.isArray(security?.members)) return security.members;
+  if (Array.isArray(security?.response)) return security.response;
+  if (Array.isArray(security?.shared)) return security.shared;
+  if (Array.isArray(security?.items)) return security.items;
+  return [];
+}
+
+function isRoomOwnerFromSecurityInfo(security, userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) return false;
+  const members = roomMembersFromSecurityInfo(security);
+  const me = members.find((m) => String(m?.user?.id || m?.sharedTo?.id || "").trim() === uid) || null;
+  return Boolean(me?.isOwner);
+}
+
 router.get("/", async (req, res) => {
   try {
     const auth = requireUserToken(req);
@@ -174,14 +194,58 @@ router.get("/templates-room", async (req, res) => {
       hasAccess = Boolean(recheck?.id);
     }
 
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    const isOwner = isRoomOwnerFromSecurityInfo(security, meId);
+
     res.json({
       room: {
         id: roomId,
         title: String(room?.title || room?.name || getConfig().projectTemplatesRoomTitle || "Projects Templates"),
         roomUrl: room?.webUrl || room?.shortWebUrl || info?.webUrl || info?.shortWebUrl || null
       },
-      hasAccess
+      hasAccess,
+      isOwner
     });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.delete("/templates-room/templates/:fileId", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = String(me?.id || "").trim();
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const room = await ensureProjectTemplatesRoom(auth);
+    const roomId = String(room?.id || "").trim();
+    if (!roomId) return res.status(500).json({ error: "Templates room is missing" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!isRoomOwnerFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the room owner can delete published templates" });
+    }
+
+    const fileId = String(req.params?.fileId || "").trim();
+    if (!fileId) return res.status(400).json({ error: "fileId is required" });
+
+    const folders =
+      (await getFormsRoomFolders(roomId, auth).catch(() => null)) ||
+      (await getFormsRoomFolders(roomId).catch(() => null)) ||
+      null;
+    const folderId = String(folders?.templates?.id || roomId || "").trim();
+    if (!folderId) return res.status(500).json({ error: "Unable to determine templates folder" });
+
+    const contents =
+      (await getFolderContents(folderId, auth).catch(() => null)) ||
+      (await getFolderContents(folderId).catch(() => null));
+    const items = Array.isArray(contents?.items) ? contents.items : [];
+    const exists = items.some((i) => i.type === "file" && String(i?.id || "") === fileId);
+    if (!exists) return res.status(404).json({ error: "Template file not found in the shared room" });
+
+    const result = await deleteFile(fileId, auth);
+    res.json({ ok: true, result });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message, details: error.details || null });
   }

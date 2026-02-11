@@ -22,9 +22,16 @@ export default function DocSpaceModal({ open, onClose, title = "Document", url }
       <div className="editor-shell">
         <div className="editor-header">
           <strong className="editor-title">{title}</strong>
-          <button className="editor-close" type="button" onClick={onClose} aria-label="Close">
-            Close
-          </button>
+          <div className="editor-actions">
+            {url ? (
+              <a className="btn subtle" href={url} target="_blank" rel="noreferrer">
+                Open in new tab
+              </a>
+            ) : null}
+            <button className="editor-close" type="button" onClick={onClose} aria-label="Close">
+              Close
+            </button>
+          </div>
         </div>
         <div className="editor-frame">
           <iframe
@@ -40,4 +47,3 @@ export default function DocSpaceModal({ open, onClose, title = "Document", url }
     </div>
   );
 }
-

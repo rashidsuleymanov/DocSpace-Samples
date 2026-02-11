@@ -329,6 +329,16 @@ export async function getFileExternalLinks(fileId, auth) {
   return apiRequest(`/api/2.0/files/file/${encodeURIComponent(id)}/links`, { auth });
 }
 
+export async function deleteFile(fileId, auth, { immediately = true } = {}) {
+  const id = String(fileId || "").trim();
+  if (!id) throw new Error("fileId is required");
+  return apiRequest(`/api/2.0/files/file/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    auth,
+    body: { immediately: Boolean(immediately) }
+  });
+}
+
 function normalizeLinkEntry(entry) {
   const shared = entry?.sharedLink || entry?.sharedTo || entry?.shared || entry || {};
   const shareLink = shared?.shareLink || entry?.shareLink || null;

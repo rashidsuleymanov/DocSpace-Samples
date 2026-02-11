@@ -17,7 +17,7 @@ const navItems = [
   { id: "settings", label: "Settings" }
 ];
 
-export default function AppLayout({ session, active, onNavigate, onLogout, children }) {
+export default function AppLayout({ session, active, onNavigate, onOpenProject, onLogout, children }) {
   const displayName = session?.user?.displayName || session?.user?.email || "User";
   const token = session?.token || "";
   const projectsActive = active === "projects" || active === "project";
@@ -27,12 +27,28 @@ export default function AppLayout({ session, active, onNavigate, onLogout, child
   const [projectsError, setProjectsError] = useState("");
   const [projects, setProjects] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState("");
+  const [projectsQuery, setProjectsQuery] = useState("");
 
   const currentProject = useMemo(() => {
     const rid = String(activeRoomId || "").trim();
     if (!rid) return null;
     return projects.find((p) => String(p.roomId) === rid) || null;
   }, [activeRoomId, projects]);
+
+  const filteredProjects = useMemo(() => {
+    const q = String(projectsQuery || "").trim().toLowerCase();
+    const list = Array.isArray(projects) ? projects : [];
+    const items = q ? list.filter((p) => String(p?.title || "").toLowerCase().includes(q)) : list.slice();
+
+    items.sort((a, b) => {
+      const aCur = Boolean(activeRoomId) && String(a?.roomId || "") === String(activeRoomId);
+      const bCur = Boolean(activeRoomId) && String(b?.roomId || "") === String(activeRoomId);
+      if (aCur !== bCur) return aCur ? -1 : 1;
+      return String(a?.title || "").localeCompare(String(b?.title || ""));
+    });
+
+    return items;
+  }, [activeRoomId, projects, projectsQuery]);
 
   const refreshSidebar = async () => {
     if (!token) return;
@@ -88,6 +104,19 @@ export default function AppLayout({ session, active, onNavigate, onLogout, child
           </div>
         </button>
 
+        <nav className="nav">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-item${active === item.id ? " is-active" : ""}`}
+              onClick={() => onNavigate(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
         <section className="projects-nav" aria-label="Projects">
           <div className="projects-nav-head">
             <button
@@ -105,44 +134,67 @@ export default function AppLayout({ session, active, onNavigate, onLogout, child
               aria-label={projectsOpen ? "Collapse project list" : "Expand project list"}
               title={projectsOpen ? "Collapse" : "Expand"}
             >
-              {projectsOpen ? "▾" : "▸"}
+              <svg
+                className={`chevron${projectsOpen ? " is-open" : ""}`}
+                width="18"
+                height="18"
+                viewBox="0 0 20 20"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           </div>
 
           {projectsOpen ? (
             <div className="projects-nav-list">
               {projectsError ? <div className="projects-nav-error">{projectsError}</div> : null}
+              {projects.length ? (
+                <input
+                  className="projects-nav-search"
+                  value={projectsQuery}
+                  onChange={(e) => setProjectsQuery(e.target.value)}
+                  placeholder="Search projects..."
+                  disabled={projectsLoading}
+                />
+              ) : null}
               {!projectsLoading && projects.length === 0 ? (
                 <button type="button" className="projects-nav-item" onClick={() => onNavigate("projects")}>
-                  <span className="truncate">Create your first project</span>
-                  <span className="badge badge-blue">+</span>
+                  <span className="projects-nav-title truncate">Create your first project</span>
+                  <span className="projects-nav-meta muted">Publish templates, then start requests.</span>
+                  <span className="projects-nav-right" aria-hidden="true">
+                    +
+                  </span>
                 </button>
               ) : null}
-              {projects.map((p) => {
+              {filteredProjects.map((p) => {
                 const isCurrent = Boolean(activeRoomId) && String(p.roomId) === String(activeRoomId);
                 const inProgress = Number(p?.counts?.inProgress || 0);
                 const total = Number(p?.counts?.total || 0);
-                const counterLabel = total ? `${inProgress}/${total}` : "0";
-                const counterTitle = total
-                  ? `${inProgress} in progress • ${total} total`
-                  : "No requests yet";
                 return (
                   <button
                     key={p.id}
                     type="button"
                     className={`projects-nav-item${isCurrent ? " is-current" : ""}`}
-                    onClick={() => onPickProject(p)}
+                    onClick={() => {
+                      if (typeof onOpenProject === "function" && p?.id) {
+                        onOpenProject(p.id);
+                        return;
+                      }
+                      onPickProject(p);
+                    }}
                     disabled={projectsLoading}
-                    title={isCurrent ? "Current project" : "Set as current project"}
+                    title={p?.title ? `Open ${p.title}` : "Open project"}
                   >
-                    <span className="truncate">{p.title || "Untitled"}</span>
-                    <span className="projects-nav-badges">
-                      <span
-                        className={`badge${inProgress ? " badge-blue" : " badge-muted"}`}
-                        title={counterTitle}
-                      >
-                        {counterLabel}
-                      </span>
+                    <span className="projects-nav-title truncate">{p.title || "Untitled"}</span>
+                    <span className="projects-nav-meta muted">
+                      {inProgress ? `${inProgress} in progress` : "No active requests"}
+                      {total ? ` • ${total} total` : ""}
+                    </span>
+                    <span className="projects-nav-right" aria-hidden="true">
+                      {isCurrent ? "✓" : ""}
                     </span>
                   </button>
                 );
@@ -150,19 +202,6 @@ export default function AppLayout({ session, active, onNavigate, onLogout, child
             </div>
           ) : null}
         </section>
-
-        <nav className="nav">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item${active === item.id ? " is-active" : ""}`}
-              onClick={() => onNavigate(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
 
         <div className="sidebar-footer">
           <div className="user">

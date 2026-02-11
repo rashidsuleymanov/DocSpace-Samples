@@ -25,14 +25,6 @@ export default function QuickActions({
           tone: "default",
           label: "Open templates",
           onClick: onOpenTemplates
-        },
-        {
-          title: "Current project",
-          description: "Open the current project dashboard and members.",
-          tone: "default",
-          label: "Open project",
-          onClick: onOpenCurrentProject,
-          disabled: typeof onOpenCurrentProject !== "function"
         }
       ]
     : [

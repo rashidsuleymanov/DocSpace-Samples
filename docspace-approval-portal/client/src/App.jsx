@@ -33,6 +33,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [templates, setTemplates] = useState([]);
   const [flows, setFlows] = useState([]);
+  const [flowsRefreshing, setFlowsRefreshing] = useState(false);
+  const [flowsUpdatedAt, setFlowsUpdatedAt] = useState(null);
   const [projectId, setProjectId] = useState("");
   const [activeRoomId, setActiveRoomId] = useState("");
   const [activeProject, setActiveProject] = useState(null);
@@ -69,8 +71,14 @@ export default function App() {
   const refreshFlows = useMemo(
     () => async (active) => {
       if (!active?.token) return;
-      const data = await listFlows({ token: active.token });
-      setFlows(Array.isArray(data?.flows) ? data.flows : []);
+      setFlowsRefreshing(true);
+      try {
+        const data = await listFlows({ token: active.token });
+        setFlows(Array.isArray(data?.flows) ? data.flows : []);
+        setFlowsUpdatedAt(new Date());
+      } finally {
+        setFlowsRefreshing(false);
+      }
     },
     []
   );
@@ -96,11 +104,14 @@ export default function App() {
     refreshActiveProject().catch(() => null);
     const handler = () => refreshActiveProject().catch(() => null);
     const draftsHandler = () => refreshDraftsSummary(session).catch(() => null);
+    const flowsHandler = () => refreshFlows(session).catch(() => null);
     window.addEventListener("portal:projectChanged", handler);
     window.addEventListener("portal:draftsChanged", draftsHandler);
+    window.addEventListener("portal:flowsChanged", flowsHandler);
     return () => {
       window.removeEventListener("portal:projectChanged", handler);
       window.removeEventListener("portal:draftsChanged", draftsHandler);
+      window.removeEventListener("portal:flowsChanged", flowsHandler);
     };
   }, [refreshActiveProject, refreshDraftsSummary, session]);
 
@@ -193,17 +204,19 @@ export default function App() {
         setDraftsLoaded(false);
         setView("login");
       },
-      async startFlow(templateFileId) {
+      async startFlow(templateFileId, projectId, recipientEmails, kind) {
         if (!session?.token) return;
         if (!templateFileId) return;
         setBusy(true);
         setError("");
         try {
-          await createFlowFromTemplate({ token: session.token, templateFileId });
+          const result = await createFlowFromTemplate({ token: session.token, templateFileId, projectId, recipientEmails, kind });
           await refreshFlows(session);
           window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+          return result;
         } catch (e) {
           setError(e?.message || "Failed to start request");
+          return null;
         } finally {
           setBusy(false);
         }
@@ -240,6 +253,29 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId, session?.token, view]);
 
+  useEffect(() => {
+    if (!session?.token) return;
+    if (view !== "dashboard" && view !== "requests") return;
+
+    const intervalMs = 15000;
+
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refreshFlows(session).catch(() => null);
+    };
+
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
+    };
+
+    const timer = setInterval(tick, intervalMs);
+    window.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("visibilitychange", onVis);
+    };
+  }, [refreshFlows, session, view]);
+
   if (booting) {
     return (
       <div className="app-shell auth-shell">
@@ -262,19 +298,22 @@ export default function App() {
         session={session}
         active={view}
         onNavigate={actions.navigate}
+        onOpenProject={actions.openProject}
         onLogout={actions.onLogout}
       >
         {view === "dashboard" && (
           <Dashboard
             session={session}
-            busy={busy}
-            error={error}
-            flows={flows}
-            activeRoomId={activeRoomId}
-            activeProject={activeProject}
-            projectsCount={Array.isArray(sidebarProjects) ? sidebarProjects.length : 0}
-            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-            templates={templates}
+             busy={busy}
+             error={error}
+             flows={flows}
+             flowsRefreshing={flowsRefreshing}
+             flowsUpdatedAt={flowsUpdatedAt}
+             activeRoomId={activeRoomId}
+             activeProject={activeProject}
+             projectsCount={Array.isArray(sidebarProjects) ? sidebarProjects.length : 0}
+             projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+             templates={templates}
             draftsPdfCount={draftsPdfCount}
             onRefresh={async () => {
               await Promise.all([
@@ -293,13 +332,16 @@ export default function App() {
         {view === "requests" && (
           <Requests
             session={session}
-            busy={busy}
-            error={error}
-            flows={flows}
-            activeRoomId={activeRoomId}
-            activeProject={activeProject}
-            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-            templates={templates}
+             busy={busy}
+             error={error}
+             flows={flows}
+             flowsRefreshing={flowsRefreshing}
+             flowsUpdatedAt={flowsUpdatedAt}
+             onRefreshFlows={() => refreshFlows(session)}
+             activeRoomId={activeRoomId}
+             activeProject={activeProject}
+             projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+             templates={templates}
             initialFilter={requestsFilter}
             initialScope={requestsScope}
             onBack={() => actions.navigate("dashboard")}

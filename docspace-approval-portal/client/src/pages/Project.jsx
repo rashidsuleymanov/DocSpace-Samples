@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
+import DocSpaceModal from "../components/DocSpaceModal.jsx";
+import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
-import { activateProject, getProjectMembers, getProjectsSidebar, inviteProject, listTemplates, removeProjectMember } from "../services/portalApi.js";
+import Tabs from "../components/Tabs.jsx";
+import {
+  activateProject,
+  cancelFlow,
+  completeFlow,
+  listDrafts,
+  getProjectMembers,
+  getProjectsSidebar,
+  inviteProject,
+  listProjectFlows,
+  listSharedTemplates,
+  listTemplates,
+  publishDraft,
+  removeProjectMember
+} from "../services/portalApi.js";
 
 function normalize(value) {
   return String(value || "").trim();
@@ -33,16 +49,40 @@ function isPdfTemplate(t) {
   return ext === "pdf" || ext === ".pdf" || title.endsWith(".pdf");
 }
 
+function withFillAction(url) {
+  const raw = String(url || "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set("action", "fill");
+    return parsed.toString();
+  } catch {
+    return raw.includes("?") ? `${raw}&action=fill` : `${raw}?action=fill`;
+  }
+}
+
 export default function Project({ session, busy, projectId, onBack, onStartFlow, onOpenDrafts }) {
   const token = session?.token || "";
   const meId = session?.user?.id ? String(session.user.id) : "";
+  const meEmail = session?.user?.email ? String(session.user.email).trim().toLowerCase() : "";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  const [tab, setTab] = useState("requests");
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const [formsQuery, setFormsQuery] = useState("");
+  const [requestsQuery, setRequestsQuery] = useState("");
+  const [requestsWho, setRequestsWho] = useState("assigned");
+  const [requestsWhoTouched, setRequestsWhoTouched] = useState(false);
+
   const [project, setProject] = useState(null);
   const [members, setMembers] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [projectFlows, setProjectFlows] = useState([]);
+  const [flowsLoading, setFlowsLoading] = useState(false);
+  const [flowsError, setFlowsError] = useState("");
+  const [flowsCanManage, setFlowsCanManage] = useState(false);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [invite, setInvite] = useState({
@@ -53,6 +93,23 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   });
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removeEntry, setRemoveEntry] = useState(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelEntry, setCancelEntry] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completeEntry, setCompleteEntry] = useState(null);
+  const [completeBusy, setCompleteBusy] = useState(false);
+  const [docOpen, setDocOpen] = useState(false);
+  const [docTitle, setDocTitle] = useState("Document");
+  const [docUrl, setDocUrl] = useState("");
+  const [addFormOpen, setAddFormOpen] = useState(false);
+  const [addFormSource, setAddFormSource] = useState("my"); // my | shared
+  const [addFormQuery, setAddFormQuery] = useState("");
+  const [addFormLoading, setAddFormLoading] = useState(false);
+  const [addFormError, setAddFormError] = useState("");
+  const [addFormMyDocs, setAddFormMyDocs] = useState([]);
+  const [addFormShared, setAddFormShared] = useState([]);
+  const [addFormSelected, setAddFormSelected] = useState(null);
 
   const refresh = async () => {
     const pid = normalize(projectId);
@@ -91,10 +148,59 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     }
   };
 
+  const refreshFlows = async () => {
+    const pid = normalize(projectId);
+    const t = normalize(token);
+    if (!pid || !t) {
+      setProjectFlows([]);
+      setFlowsCanManage(false);
+      return;
+    }
+
+    setFlowsLoading(true);
+    setFlowsError("");
+    try {
+      const res = await listProjectFlows({ token: t, projectId: pid });
+      const nextFlows = Array.isArray(res?.flows) ? res.flows : [];
+      const nextCanManage = Boolean(res?.canManage);
+      setProjectFlows(nextFlows);
+      setFlowsCanManage(nextCanManage);
+
+      if (!requestsWhoTouched) {
+        if (nextCanManage) {
+          setRequestsWho("all");
+        } else if (String(requestsWho || "") === "all") {
+          setRequestsWho("assigned");
+        }
+      }
+    } catch (e) {
+      setProjectFlows([]);
+      setFlowsCanManage(false);
+      setFlowsError(e?.message || "Failed to load requests");
+    } finally {
+      setFlowsLoading(false);
+    }
+  };
+
   useEffect(() => {
     refresh().catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, token]);
+
+  useEffect(() => {
+    if (tab !== "requests") return;
+    refreshFlows().catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (tab !== "requests") return;
+      refreshFlows().catch(() => null);
+    };
+    window.addEventListener("portal:flowsChanged", handler);
+    return () => window.removeEventListener("portal:flowsChanged", handler);
+  }, [tab]);
 
   const normalizedMembers = useMemo(() => {
     const items = Array.isArray(members) ? members : [];
@@ -111,6 +217,15 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       }))
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [members]);
+
+  const filteredMembers = useMemo(() => {
+    const q = normalize(peopleQuery).toLowerCase();
+    if (!q) return normalizedMembers;
+    return normalizedMembers.filter((m) => {
+      const hay = `${m.title || ""} ${m.subtitle || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [normalizedMembers, peopleQuery]);
 
   const canManageProject = useMemo(() => {
     if (!meId) return false;
@@ -181,16 +296,256 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   };
 
   const filteredTemplates = useMemo(() => {
+    const q = normalize(formsQuery).toLowerCase();
     const items = Array.isArray(templates) ? templates : [];
-    return items.filter(isPdfTemplate);
-  }, [templates]);
+    const pdf = items.filter(isPdfTemplate);
+    if (!q) return pdf;
+    return pdf.filter((t) => String(t?.title || t?.id || "").toLowerCase().includes(q));
+  }, [formsQuery, templates]);
+
+  const whoTabs = useMemo(() => {
+    const items = [
+      { id: "assigned", label: "Assigned to me" },
+      { id: "created", label: "Created by me" }
+    ];
+    if (flowsCanManage) items.push({ id: "all", label: "All requests" });
+    return items;
+  }, [flowsCanManage]);
+
+  const filteredFlows = useMemo(() => {
+    const items = Array.isArray(projectFlows) ? projectFlows : [];
+    const who = String(requestsWho || "assigned");
+    const byWho =
+      who === "all" && flowsCanManage
+        ? items
+        : who === "created"
+          ? items.filter((f) => String(f?.createdByUserId || "") === String(meId || ""))
+          : !meEmail
+            ? []
+            : items.filter((f) => {
+                const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
+                return recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+              });
+
+    const q = normalize(requestsQuery).toLowerCase();
+    if (!q) return byWho;
+    return byWho.filter((f) => {
+      const hay = `${f?.fileTitle || ""} ${f?.templateTitle || ""} ${(Array.isArray(f?.recipientEmails) ? f.recipientEmails.join(" ") : "")}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [flowsCanManage, meEmail, meId, projectFlows, requestsQuery, requestsWho]);
+
+  const groupedRequests = useMemo(() => {
+    const items = Array.isArray(filteredFlows) ? filteredFlows : [];
+    const byId = new Map();
+    for (const flow of items) {
+      if (!flow?.id) continue;
+      const gid = String(flow?.groupId || flow.id).trim() || String(flow.id);
+      const existing = byId.get(gid) || { id: gid, flows: [] };
+      existing.flows.push(flow);
+      byId.set(gid, existing);
+    }
+
+    const groups = Array.from(byId.values()).map((g) => {
+      const flows = (g.flows || []).slice().sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+      const first = flows[0] || null;
+      const total = flows.length;
+      const completed = flows.filter((f) => String(f?.status || "") === "Completed").length;
+      const canceled = flows.filter((f) => String(f?.status || "") === "Canceled").length;
+      const status =
+        total > 0 && completed === total ? "Completed" : total > 0 && canceled === total ? "Canceled" : "InProgress";
+
+      const recipients = Array.from(
+        new Set(
+          flows
+            .flatMap((f) => (Array.isArray(f?.recipientEmails) ? f.recipientEmails : []))
+            .map((e) => String(e || "").trim().toLowerCase())
+            .filter(Boolean)
+        )
+      );
+      const assignedFlow =
+        meEmail && recipients.includes(meEmail)
+          ? flows.find((f) => Array.isArray(f?.recipientEmails) && f.recipientEmails.map((x) => String(x || "").trim().toLowerCase()).includes(meEmail)) ||
+            null
+          : null;
+      const primaryFlow = assignedFlow || flows.find((f) => String(f?.status || "") !== "Canceled") || first;
+
+      return {
+        id: g.id,
+        flows,
+        primaryFlow,
+        status,
+        counts: { total, completed, canceled },
+        createdAt: first?.createdAt || null
+      };
+    });
+
+    groups.sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+    return groups;
+  }, [filteredFlows, meEmail]);
+
+  const tabItems = useMemo(
+    () => [
+      { id: "requests", label: "Requests" },
+      { id: "forms", label: "Forms" },
+      { id: "people", label: "People" }
+    ],
+    []
+  );
+
+  const addFormTabs = useMemo(
+    () => [
+      { id: "my", label: "My documents" },
+      { id: "shared", label: "Shared templates" }
+    ],
+    []
+  );
+
+  const loadAddFormSources = async () => {
+    if (!token) return;
+    setAddFormLoading(true);
+    setAddFormError("");
+    try {
+      const [draftsRes, sharedRes] = await Promise.all([
+        listDrafts({ token }).catch((e) => ({ __error: e })),
+        listSharedTemplates({ token }).catch((e) => ({ __error: e }))
+      ]);
+
+      if (draftsRes?.__error) {
+        throw draftsRes.__error;
+      }
+      setAddFormMyDocs(Array.isArray(draftsRes?.drafts) ? draftsRes.drafts : []);
+
+      if (sharedRes?.__error) {
+        // Shared room might not be configured yet; keep it as an empty list and show error only when user opens that tab.
+        setAddFormShared([]);
+      } else {
+        setAddFormShared(Array.isArray(sharedRes?.templates) ? sharedRes.templates : []);
+      }
+    } catch (e) {
+      setAddFormError(e?.message || "Failed to load forms");
+      setAddFormMyDocs([]);
+      setAddFormShared([]);
+    } finally {
+      setAddFormLoading(false);
+    }
+  };
+
+  const filteredAddForms = useMemo(() => {
+    const q = normalize(addFormQuery).toLowerCase();
+    const items = addFormSource === "shared" ? addFormShared : addFormMyDocs;
+    const pdfOnly = (Array.isArray(items) ? items : []).filter(isPdfTemplate);
+    if (!q) return pdfOnly;
+    return pdfOnly.filter((t) => String(t?.title || t?.id || "").toLowerCase().includes(q));
+  }, [addFormMyDocs, addFormQuery, addFormShared, addFormSource]);
+
+  const openAddForm = async () => {
+    setAddFormOpen(true);
+    setAddFormSource("my");
+    setAddFormQuery("");
+    setAddFormSelected(null);
+    await loadAddFormSources().catch(() => null);
+  };
+
+  const onAddForm = async () => {
+    const pid = normalize(project?.id);
+    const fileId = normalize(addFormSelected?.id);
+    if (!pid || !fileId || !token) return;
+    setAddFormLoading(true);
+    setAddFormError("");
+    setError("");
+    setNotice("");
+    try {
+      await publishDraft({ token, fileId, projectId: pid, destination: "project", activate: true });
+      const templatesRes = await listTemplates({ token }).catch(() => null);
+      setTemplates(Array.isArray(templatesRes?.templates) ? templatesRes.templates : []);
+      setNotice("Form added to this project.");
+      setAddFormOpen(false);
+      setAddFormSelected(null);
+    } catch (e) {
+      setAddFormError(e?.message || "Add form failed");
+    } finally {
+      setAddFormLoading(false);
+    }
+  };
+
+  const onOpenCancel = (group) => {
+    setCancelEntry(group || null);
+    setCancelOpen(true);
+    setError("");
+    setNotice("");
+  };
+
+  const onCancel = async () => {
+    const items = Array.isArray(cancelEntry?.flows) ? cancelEntry.flows : [];
+    const ids = items.map((f) => normalize(f?.id)).filter(Boolean);
+    if (!ids.length) return;
+    setCancelBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await cancelFlow({ token, flowId: id }).catch(() => null);
+      }
+      setCancelOpen(false);
+      setCancelEntry(null);
+      setNotice("Request canceled.");
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      await refreshFlows();
+    } catch (e) {
+      setError(e?.message || "Cancel failed");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  const onOpenComplete = (group) => {
+    setCompleteEntry(group || null);
+    setCompleteOpen(true);
+    setError("");
+    setNotice("");
+  };
+
+  const onComplete = async () => {
+    const items = Array.isArray(completeEntry?.flows) ? completeEntry.flows : [];
+    const flow = items[0] || null;
+    const id = normalize(flow?.id);
+    if (!id) return;
+    setCompleteBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await completeFlow({ token, flowId: id });
+      setCompleteOpen(false);
+      setCompleteEntry(null);
+      setNotice("Request completed.");
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      await refreshFlows();
+    } catch (e) {
+      setError(e?.message || "Complete failed");
+    } finally {
+      setCompleteBusy(false);
+    }
+  };
+
+  const openFlow = (flow, urlOverride = "") => {
+    if (String(flow?.status || "") === "Canceled") return;
+    const status = String(flow?.status || "");
+    const url = String((status === "Completed" ? flow?.resultFileUrl || urlOverride || flow?.openUrl : urlOverride || flow?.openUrl) || "").trim();
+    if (!url) return;
+    const kind = String(flow?.kind || "approval").toLowerCase();
+    setDocTitle(flow?.fileTitle || flow?.templateTitle || "Document");
+    setDocUrl((kind === "fillsign" || kind === "sharedsign") && status !== "Completed" ? withFillAction(url) : url);
+    setDocOpen(true);
+  };
 
   return (
     <div className="page-shell">
       <header className="topbar">
         <div>
           <h2>{project?.title || "Project"}</h2>
-          <p className="muted">Members and access are managed on the DocSpace room.</p>
+          <p className="muted">Manage people and forms for this project.</p>
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={onBack} disabled={busy || loading}>
@@ -213,7 +568,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             Invite people
           </button>
           {project?.roomUrl ? (
-            <a className="link" href={project.roomUrl} target="_blank" rel="noreferrer">
+            <a className="btn subtle" href={project.roomUrl} target="_blank" rel="noreferrer">
               Open in DocSpace
             </a>
           ) : null}
@@ -223,22 +578,47 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
 
-      <section className="card">
-        <div className="card-header">
-          <h3>People</h3>
-          <p className="muted">Members and roles are managed on the DocSpace room.</p>
-        </div>
+        <section className="card compact templates-switch">
+          <div className="templates-switch-row">
+            <Tabs value={tab} onChange={setTab} items={tabItems} ariaLabel="Project view" />
+            <input
+              value={tab === "people" ? peopleQuery : tab === "requests" ? requestsQuery : formsQuery}
+              onChange={(e) =>
+                tab === "people"
+                  ? setPeopleQuery(e.target.value)
+                  : tab === "requests"
+                    ? setRequestsQuery(e.target.value)
+                    : setFormsQuery(e.target.value)
+              }
+              placeholder={tab === "people" ? "Search people..." : tab === "requests" ? "Search requests..." : "Search forms..."}
+              disabled={busy || loading}
+              className="templates-search"
+            />
+          </div>
+        </section>
 
-        <div className="list">
-          {!normalizedMembers.length ? (
-            <div className="empty">
-              <strong>No members data</strong>
-              <p className="muted" style={{ margin: "6px 0 0" }}>
-                Invite someone or open the room to manage access in DocSpace.
-              </p>
+      {tab === "people" ? (
+        <section className="card">
+          <div className="card-header compact">
+            <div>
+              <h3>People</h3>
+              <p className="muted">Invite teammates and manage access.</p>
             </div>
-          ) : (
-            normalizedMembers.map((m) => (
+            <div className="card-header-actions">
+              <span className="muted">{filteredMembers.length} shown</span>
+            </div>
+          </div>
+
+          <div className="list">
+            {!normalizedMembers.length ? (
+              <EmptyState
+                title="No members data"
+                description="Invite someone, or open the room in DocSpace to manage access."
+              />
+            ) : filteredMembers.length === 0 ? (
+              <EmptyState title="No matches" description="Try a different search." />
+            ) : (
+              filteredMembers.map((m) => (
               <div key={m.key} className="list-row">
                 <div className="list-main">
                   <strong className="truncate">{m.title}</strong>
@@ -268,37 +648,139 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             ))
           )}
         </div>
-      </section>
-
-      <section className="card">
-        <div className="card-header">
-          <h3>Forms</h3>
-          <p className="muted">Forms available in this project.</p>
-        </div>
-
-        <div className="list">
-          {!filteredTemplates.length ? (
-            <div className="empty">
-              <strong>No forms found</strong>
-              <p className="muted" style={{ margin: "6px 0 0" }}>
-                Publish a template to this project to make it available here.
-              </p>
-              {typeof onOpenDrafts === "function" ? (
-                <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
-                  <button type="button" className="primary" onClick={onOpenDrafts} disabled={busy || loading}>
-                    Open Templates
-                  </button>
-                </div>
-              ) : null}
+        </section>
+      ) : tab === "requests" ? (
+        <section className="card">
+          <div className="card-header compact">
+            <div>
+              <h3>Requests</h3>
+              <p className="muted">Requests in this project.</p>
             </div>
-          ) : (
-            filteredTemplates.map((t) => (
+            <div className="card-header-actions">
+              <Tabs
+                value={requestsWho}
+                onChange={(value) => {
+                  setRequestsWhoTouched(true);
+                  setRequestsWho(value);
+                }}
+                items={whoTabs}
+                ariaLabel="Requests view"
+              />
+              <span className="muted">{groupedRequests.length} shown</span>
+              <button type="button" onClick={refreshFlows} disabled={busy || loading || flowsLoading || !normalize(token)}>
+                {flowsLoading ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {flowsError ? <p className="error">{flowsError}</p> : null}
+
+          <div className="list">
+            {!normalize(token) ? (
+              <EmptyState title="Sign in to view requests" description="Log in to load project requests." />
+            ) : flowsLoading ? (
+              <EmptyState title="Loading requests" description="Just a moment." />
+            ) : groupedRequests.length === 0 ? (
+              <EmptyState title="No requests yet" description="Create a request from a form template to get started." />
+            ) : (
+              groupedRequests.map((g) => {
+                const f = g.primaryFlow || g.flows?.[0] || {};
+                const title = String(f?.fileTitle || f?.templateTitle || "Request").trim();
+                const status = String(g?.status || f?.status || "InProgress");
+                const kind = String(f?.kind || "approval");
+                const baseUrl = String(f?.openUrl || "");
+                const openUrl = kind === "fillSign" || kind === "sharedSign" ? withFillAction(baseUrl) : baseUrl;
+                const statusTone = status === "Completed" ? "green" : status === "Canceled" ? "red" : status === "InProgress" ? "yellow" : "gray";
+                const counts = g?.counts || { total: 1, completed: 0 };
+                const meta = counts.total > 1 ? `${counts.completed || 0}/${counts.total} completed` : "";
+                const canCancel = flowsCanManage && status !== "Completed" && status !== "Canceled";
+                const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
+                const isAssigned = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+                const canComplete =
+                  String(f?.kind || "").toLowerCase() === "sharedsign" &&
+                  status !== "Completed" &&
+                  status !== "Canceled" &&
+                  (flowsCanManage || isAssigned);
+
+                return (
+                  <div key={g.id} className="list-row">
+                    <div className="list-main">
+                      <strong className="truncate">{title}</strong>
+                      <span className="muted truncate">
+                        <StatusPill tone={statusTone}>{status === "InProgress" ? "In progress" : status}</StatusPill>{" "}
+                        {meta ? <StatusPill tone="gray">{meta}</StatusPill> : null}{" "}
+                        {kind === "fillSign" ? <StatusPill tone="blue">Fill & Sign</StatusPill> : null}
+                        {Array.isArray(f?.recipientEmails) && f.recipientEmails.length ? ` · To: ${f.recipientEmails.join(", ")}` : ""}
+                      </span>
+                    </div>
+                    <div className="list-actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={!openUrl || status === "Canceled"}
+                        onClick={() => openFlow(f, openUrl)}
+                      >
+                        Open
+                      </button>
+                      {canComplete ? (
+                        <button type="button" onClick={() => onOpenComplete(g)} disabled={busy || loading || completeBusy}>
+                          Complete
+                        </button>
+                      ) : null}
+                      {canCancel ? (
+                        <button type="button" className="danger" onClick={() => onOpenCancel(g)} disabled={busy || loading || cancelBusy}>
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+      ) : (
+        <section className="card">
+          <div className="card-header compact">
+            <div>
+              <h3>Forms</h3>
+              <p className="muted">Templates published to this project.</p>
+            </div>
+            <div className="card-header-actions">
+              <span className="muted">{filteredTemplates.length} shown</span>
+              <button
+                type="button"
+                className="primary"
+                onClick={openAddForm}
+                disabled={busy || loading || !token || !project?.id || !canManageProject}
+                title={!canManageProject ? "Only the project admin can add forms" : ""}
+              >
+                Add form
+              </button>
+            </div>
+          </div>
+
+          <div className="list">
+            {!filteredTemplates.length ? (
+              <EmptyState
+                title="No forms found"
+                description="Publish a template to this project to make it available here."
+                actions={
+                  typeof onOpenDrafts === "function" ? (
+                    <button type="button" className="primary" onClick={onOpenDrafts} disabled={busy || loading}>
+                      Open Templates
+                    </button>
+                  ) : null
+                }
+              />
+            ) : (
+              filteredTemplates.map((t) => (
               <div key={t.id} className="list-row">
                 <div className="list-main">
                   <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                   <span className="muted truncate">
-                    <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : "File"}</StatusPill> ID: {t.id}
-                    {t.fileExst ? ` - ${t.fileExst}` : ""}
+                    <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : "File"}</StatusPill>{" "}
+                    ID: {t.id}
                   </span>
                 </div>
                 <div className="list-actions">
@@ -306,8 +788,8 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                     Create request
                   </button>
                   {t.webUrl ? (
-                    <a className="btn" href={t.webUrl} target="_blank" rel="noreferrer">
-                      New tab
+                    <a className="btn subtle" href={t.webUrl} target="_blank" rel="noreferrer">
+                      Open in new tab
                     </a>
                   ) : null}
                 </div>
@@ -315,7 +797,8 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             ))
           )}
         </div>
-      </section>
+        </section>
+      )}
 
       <Modal
         open={inviteOpen}
@@ -373,6 +856,155 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       </Modal>
 
       <Modal
+        open={addFormOpen}
+        title="Add form to project"
+        onClose={() => {
+          if (addFormLoading) return;
+          setAddFormOpen(false);
+        }}
+        footer={
+          <>
+            <button type="button" onClick={() => setAddFormOpen(false)} disabled={busy || loading || addFormLoading}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={onAddForm}
+              disabled={busy || loading || addFormLoading || !addFormSelected?.id || !canManageProject}
+              title={!canManageProject ? "Only the project admin can add forms" : ""}
+            >
+              {addFormLoading ? "Working..." : "Add to project"}
+            </button>
+          </>
+        }
+      >
+        <div className="request-wizard" style={{ gap: 12 }}>
+          <div className="wizard-section">
+            <div className="wizard-head">
+              <strong>Source</strong>
+              <span className="muted">Pick a PDF from your DocSpace.</span>
+            </div>
+            <Tabs value={addFormSource} onChange={(v) => setAddFormSource(v)} items={addFormTabs} ariaLabel="Form source" />
+          </div>
+
+          <div className="wizard-section">
+            <div className="auth-form" style={{ marginTop: 0 }}>
+              <label>
+                <span>Search</span>
+                <input
+                  value={addFormQuery}
+                  onChange={(e) => setAddFormQuery(e.target.value)}
+                  placeholder={addFormSource === "shared" ? "Search shared templates..." : "Search My documents..."}
+                  disabled={busy || loading || addFormLoading}
+                />
+              </label>
+            </div>
+
+            {addFormError ? <p className="error" style={{ margin: 0 }}>{addFormError}</p> : null}
+
+            {addFormLoading ? (
+              <EmptyState title="Loading…" description="Just a moment." />
+            ) : addFormSource === "shared" && addFormShared.length === 0 ? (
+              <EmptyState
+                title="No shared templates"
+                description="Publish a PDF to the shared templates room first (Templates page), then add it to this project."
+              />
+            ) : filteredAddForms.length === 0 ? (
+              <EmptyState title="No forms found" description="Try a different search." />
+            ) : (
+              <div className="list" style={{ marginTop: 0 }}>
+                {filteredAddForms.slice(0, 12).map((t) => {
+                  const selected = String(addFormSelected?.id || "") === String(t.id || "");
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`select-row${selected ? " is-selected" : ""}`}
+                      onClick={() => setAddFormSelected(t)}
+                      disabled={busy || loading || addFormLoading}
+                    >
+                      <div className="select-row-main">
+                        <strong className="truncate">{t.title || `File ${t.id}`}</strong>
+                        <span className="muted truncate">ID: {t.id}</span>
+                      </div>
+                      <span className="select-row-right" aria-hidden="true">{selected ? "✓" : "›"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <p className="muted" style={{ margin: 0 }}>
+              Copies the PDF into this project’s Forms folder.
+            </p>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={completeOpen}
+        title="Mark as complete?"
+        onClose={() => {
+          if (completeBusy) return;
+          setCompleteOpen(false);
+        }}
+        footer={
+          <>
+            <button type="button" onClick={() => setCompleteOpen(false)} disabled={busy || loading || completeBusy}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={onComplete}
+              disabled={busy || loading || completeBusy || !(Array.isArray(completeEntry?.flows) && completeEntry.flows.length)}
+            >
+              {completeBusy ? "Working..." : "Complete"}
+            </button>
+          </>
+        }
+      >
+        <div className="empty" style={{ marginTop: 0 }}>
+          <strong>This will mark the request as completed in the portal.</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            Use this when the shared signing is done.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={cancelOpen}
+        title="Cancel request?"
+        onClose={() => {
+          if (cancelBusy) return;
+          setCancelOpen(false);
+        }}
+        footer={
+          <>
+            <button type="button" onClick={() => setCancelOpen(false)} disabled={busy || loading || cancelBusy}>
+              Keep
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={onCancel}
+              disabled={busy || loading || cancelBusy || !(Array.isArray(cancelEntry?.flows) && cancelEntry.flows.length)}
+            >
+              {cancelBusy ? "Working..." : "Cancel request"}
+            </button>
+          </>
+        }
+      >
+        <div className="empty" style={{ marginTop: 0 }}>
+          <strong>This will stop the request in the portal.</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            It will not delete any files in DocSpace.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
         open={removeOpen}
         title={removeEntry?.title ? `Remove ${removeEntry.title}?` : "Remove member?"}
         onClose={() => {
@@ -397,6 +1029,8 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </p>
         </div>
       </Modal>
+
+      <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
     </div>
   );
 }

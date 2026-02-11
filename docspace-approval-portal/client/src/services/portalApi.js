@@ -121,6 +121,20 @@ export async function listSharedTemplates({ token }) {
   return data;
 }
 
+export async function deleteSharedTemplate({ token, fileId }) {
+  const fid = String(fileId || "").trim();
+  if (!fid) throw new Error("fileId is required");
+  const response = await fetch(`/api/drafts/templates-room/templates/${encodeURIComponent(fid)}`, {
+    method: "DELETE",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Delete failed (${response.status})`));
+  }
+  return data;
+}
+
 export async function listFlows({ token }) {
   if (!String(token || "").trim()) throw new Error("Authorization token is required");
   const response = await fetch("/api/flows", { headers: { Authorization: token } });
@@ -131,11 +145,52 @@ export async function listFlows({ token }) {
   return data;
 }
 
-export async function createFlowFromTemplate({ token, templateFileId, projectId } = {}) {
+export async function listProjectFlows({ token, projectId }) {
+  const t = String(token || "").trim();
+  if (!t) throw new Error("Authorization token is required");
+  const pid = String(projectId || "").trim();
+  if (!pid) throw new Error("projectId is required");
+  const response = await fetch(`/api/flows/project/${encodeURIComponent(pid)}`, { headers: { Authorization: t } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Project flows load failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function cancelFlow({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Cancel failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function completeFlow({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Complete failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function createFlowFromTemplate({ token, templateFileId, projectId, recipientEmails, kind } = {}) {
   const response = await fetch("/api/flows/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: token },
-    body: JSON.stringify({ templateFileId, projectId })
+    body: JSON.stringify({ templateFileId, projectId, recipientEmails, kind })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

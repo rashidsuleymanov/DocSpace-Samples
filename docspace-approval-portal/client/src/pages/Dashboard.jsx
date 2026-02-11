@@ -4,6 +4,7 @@ import Modal from "../components/Modal.jsx";
 import QuickActions from "../components/QuickActions.jsx";
 import StatCard from "../components/StatCard.jsx";
 import StatusPill from "../components/StatusPill.jsx";
+import StepsCard from "../components/StepsCard.jsx";
 
 function isPdfTemplate(t) {
   const ext = String(t?.fileExst || "").trim().toLowerCase();
@@ -11,11 +12,25 @@ function isPdfTemplate(t) {
   return ext === "pdf" || ext === ".pdf" || title.endsWith(".pdf");
 }
 
+function withFillAction(url) {
+  const raw = String(url || "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set("action", "fill");
+    return parsed.toString();
+  } catch {
+    return raw.includes("?") ? `${raw}&action=fill` : `${raw}?action=fill`;
+  }
+}
+
 export default function Dashboard({
   session,
   busy,
   error,
   flows,
+  flowsRefreshing = false,
+  flowsUpdatedAt = null,
   activeRoomId,
   activeProject,
   projectsCount = 0,
@@ -30,20 +45,30 @@ export default function Dashboard({
   onOpenProject
 }) {
   const userLabel = session?.user?.displayName || session?.user?.email || "DocSpace user";
+  const meEmail = session?.user?.email ? String(session.user.email).trim().toLowerCase() : "";
 
   const hasCurrentProject = Boolean(String(activeRoomId || "").trim());
   const currentProjectTitle = activeProject?.title || "";
   const currentProjectUrl = activeProject?.roomUrl ? String(activeProject.roomUrl) : "";
   const currentProjectId = activeProject?.id ? String(activeProject.id) : "";
+  const updatedLabel = flowsUpdatedAt instanceof Date ? flowsUpdatedAt.toLocaleTimeString() : "";
 
   const allFlows = useMemo(() => (Array.isArray(flows) ? flows : []), [flows]);
 
+  const assignedFlows = useMemo(() => {
+    if (!meEmail) return [];
+    return allFlows.filter((f) => {
+      const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
+      return recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+    });
+  }, [allFlows, meEmail]);
+
   const stats = useMemo(() => {
-    const inProgress = allFlows.filter((f) => f.status === "InProgress").length;
-    const completed = allFlows.filter((f) => f.status === "Completed").length;
-    const other = allFlows.length - inProgress - completed;
-    return { total: allFlows.length, inProgress, completed, other };
-  }, [allFlows]);
+    const inProgress = assignedFlows.filter((f) => f.status === "InProgress").length;
+    const completed = assignedFlows.filter((f) => f.status === "Completed").length;
+    const other = assignedFlows.length - inProgress - completed;
+    return { total: assignedFlows.length, inProgress, completed, other };
+  }, [assignedFlows]);
 
   const roomTitleById = useMemo(() => {
     const list = Array.isArray(projects) ? projects : [];
@@ -57,9 +82,25 @@ export default function Dashboard({
   }, [projects]);
 
   const recentRequests = useMemo(() => {
-    const sorted = [...allFlows].sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
-    return sorted.slice(0, 5);
-  }, [allFlows]);
+    const items = Array.isArray(assignedFlows) ? assignedFlows : [];
+    const byId = new Map();
+    for (const flow of items) {
+      if (!flow?.id) continue;
+      const gid = String(flow?.groupId || flow.id).trim() || String(flow.id);
+      const existing = byId.get(gid) || { id: gid, flows: [] };
+      existing.flows.push(flow);
+      byId.set(gid, existing);
+    }
+
+    const groups = Array.from(byId.values()).map((g) => {
+      const flows = (g.flows || []).slice().sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+      const first = flows[0] || null;
+      return { id: g.id, flows, primaryFlow: first, createdAt: first?.createdAt || null };
+    });
+
+    groups.sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+    return groups.slice(0, 3);
+  }, [assignedFlows]);
 
   const pdfTemplateCount = useMemo(() => {
     const list = Array.isArray(templates) ? templates : [];
@@ -81,10 +122,12 @@ export default function Dashboard({
   const [docUrl, setDocUrl] = useState("");
 
   const openFlow = (flow) => {
-    const url = String(flow?.openUrl || "").trim();
+    const status = String(flow?.status || "");
+    const url = String((status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || "").trim();
     if (!url) return;
+    const kind = String(flow?.kind || "approval").toLowerCase();
     setDocTitle(flow?.fileTitle || flow?.templateTitle || "Document");
-    setDocUrl(url);
+    setDocUrl((kind === "fillsign" || kind === "sharedsign") && status !== "Completed" ? withFillAction(url) : url);
     setDocOpen(true);
   };
 
@@ -101,6 +144,66 @@ export default function Dashboard({
     setSendOpen(true);
   };
 
+  const quickStartSteps = useMemo(() => {
+    const steps = [];
+    if (!projectsCount) {
+      steps.push({
+        title: "Create your first project",
+        description: "Projects keep your templates and requests organized.",
+        actionLabel: "Create project",
+        actionTone: "primary",
+        onAction: onOpenProjects
+      });
+      steps.push({
+        title: "Create a template",
+        description: "Templates are PDF forms used to generate requests.",
+        actionLabel: "Open Templates",
+        onAction: onOpenDrafts
+      });
+      return steps;
+    }
+
+    if (!hasCurrentProject) {
+      steps.push({
+        title: "Choose a project",
+        description: "Select a project to publish templates and create requests.",
+        actionLabel: "Open Projects",
+        actionTone: "primary",
+        onAction: onOpenProjects
+      });
+    }
+
+    if (!draftsPdfCount) {
+      steps.push({
+        title: "Create a template",
+        description: "Make a PDF template in your DocSpace My documents.",
+        actionLabel: "New template",
+        onAction: onOpenDrafts
+      });
+    }
+
+    if (hasCurrentProject && pdfTemplateCount === 0) {
+      steps.push({
+        title: "Publish a template to this project",
+        description: "Publishing copies the PDF into the project so it can be used for requests.",
+        actionLabel: "Open Templates",
+        onAction: onOpenDrafts
+      });
+    }
+
+    steps.push({
+      title: "Create your first request",
+      description: "Pick a published template, then share the link and track progress.",
+      actionLabel: hasCurrentProject ? "New request" : "Choose project",
+      actionTone: "primary",
+      onAction: onNewRequest
+    });
+
+    return steps.slice(0, 4);
+  }, [draftsPdfCount, hasCurrentProject, onNewRequest, onOpenDrafts, onOpenProjects, pdfTemplateCount, projectsCount]);
+
+  const showQuickStart = quickStartSteps.length > 0 && (flows?.length === 0 || !hasCurrentProject || pdfTemplateCount === 0 || !draftsPdfCount);
+
   return (
     <div className="page-shell">
       <header className="topbar">
@@ -108,10 +211,18 @@ export default function Dashboard({
           <h2>Home</h2>
           <p className="muted">
             Signed in as {userLabel}
-            {hasCurrentProject && currentProjectTitle ? ` — Current project: ${currentProjectTitle}` : ""}
           </p>
         </div>
         <div className="topbar-actions">
+          {flowsRefreshing ? (
+            <span className="muted" style={{ fontSize: 12 }}>
+              Updating…
+            </span>
+          ) : updatedLabel ? (
+            <span className="muted" style={{ fontSize: 12 }}>
+              Updated {updatedLabel}
+            </span>
+          ) : null}
           <button type="button" onClick={onRefresh} disabled={busy}>
             Refresh
           </button>
@@ -127,19 +238,26 @@ export default function Dashboard({
 
       <div className="dashboard-grid">
         <div className="dashboard-main">
+          {showQuickStart ? (
+            <StepsCard
+              title="Quick start"
+              subtitle="Follow these steps to create your first approval flow."
+              steps={quickStartSteps}
+            />
+          ) : null}
           <section className="stats-grid">
             <StatCard title="Projects" value={projectsCount} meta="Project rooms you can access" onClick={onOpenProjects} />
             <StatCard title="Templates" value={draftsPdfCount} meta="PDF templates in My documents" onClick={onOpenDrafts} />
-            <StatCard title="In progress" value={stats.inProgress} meta="Requests across all projects" onClick={() => openRequests("inProgress")} />
-            <StatCard title="Completed" value={stats.completed} meta="Requests across all projects" onClick={() => openRequests("completed")} />
-            <StatCard title="Total" value={stats.total} meta="Requests across all projects" onClick={() => openRequests("all")} />
+            <StatCard title="In progress" value={stats.inProgress} meta="Requests assigned to you" onClick={() => openRequests("inProgress")} />
+            <StatCard title="Completed" value={stats.completed} meta="Requests assigned to you" onClick={() => openRequests("completed")} />
+            <StatCard className="stat-total" title="Total" value={stats.total} meta="Requests assigned to you" onClick={() => openRequests("all")} />
           </section>
 
           <section className="card">
             <div className="card-header compact">
               <div>
                 <h3>Recent requests</h3>
-                <p className="muted">Latest requests across all projects.</p>
+                <p className="muted">Requests assigned to you.</p>
               </div>
               <div className="card-header-actions">
                 <button type="button" onClick={() => openRequests("all")} disabled={busy}>
@@ -148,24 +266,28 @@ export default function Dashboard({
               </div>
             </div>
 
-            <div className="list">
+            <div className="list recent-list">
               {!recentRequests.length ? (
                 <div className="empty">
-                  <strong>No requests yet</strong>
+                  <strong>No assigned requests yet</strong>
                   <p className="muted" style={{ margin: "6px 0 0" }}>
-                    Select a project and create your first request from a published template.
+                    When someone assigns you a request, it will show up here.
                   </p>
                 </div>
               ) : (
-                recentRequests.map((flow) => {
+                recentRequests.map((group) => {
+                  const flow = group?.primaryFlow || group?.flows?.[0] || null;
+                  if (!flow?.id) return null;
                   const roomId = String(flow?.projectRoomId || "").trim();
                   const roomTitle = roomId ? roomTitleById.get(roomId) || "Project" : "Unassigned";
                   return (
-                    <div key={flow.id} className="list-row">
+                    <div key={group.id} className="list-row">
                       <div className="list-main">
                         <strong>{flow.fileTitle || flow.templateTitle || `Template ${flow.templateFileId}`}</strong>
                         <span className="muted">
-                          {flow.status === "InProgress" ? (
+                          {flow.status === "Canceled" ? (
+                            <StatusPill tone="red">Canceled</StatusPill>
+                          ) : flow.status === "InProgress" ? (
                             <StatusPill tone="yellow">In progress</StatusPill>
                           ) : flow.status === "Completed" ? (
                             <StatusPill tone="green">Completed</StatusPill>
@@ -177,14 +299,18 @@ export default function Dashboard({
                         </span>
                       </div>
                       <div className="list-actions">
-                        <button type="button" onClick={() => openFlow(flow)} disabled={!flow.openUrl || busy}>
+                        <button
+                          type="button"
+                          onClick={() => openFlow(flow)}
+                          disabled={
+                            !(String(flow?.status || "") === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) ||
+                            busy ||
+                            String(flow?.status || "") === "Canceled"
+                          }
+                          title={String(flow?.status || "") === "Canceled" ? "Canceled requests cannot be opened" : ""}
+                        >
                           Open
                         </button>
-                        {flow.openUrl ? (
-                          <a className="btn" href={flow.openUrl} target="_blank" rel="noreferrer">
-                            New tab
-                          </a>
-                        ) : null}
                       </div>
                     </div>
                   );
@@ -266,7 +392,7 @@ export default function Dashboard({
 
       <Modal
         open={sendOpen}
-        title={currentProjectTitle ? `New request — ${currentProjectTitle}` : "New request"}
+        title={currentProjectTitle ? `New request \u2014 ${currentProjectTitle}` : "New request"}
         onClose={() => setSendOpen(false)}
         footer={
           <>

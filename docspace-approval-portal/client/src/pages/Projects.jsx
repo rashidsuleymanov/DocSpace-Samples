@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import {
@@ -29,6 +30,9 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
 
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsProjectEntry, setActionsProjectEntry] = useState(null);
+
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteProjectEntry, setInviteProjectEntry] = useState(null);
   const [invite, setInvite] = useState({
@@ -44,8 +48,14 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
   const filtered = useMemo(() => {
     const q = normalizeTitle(query).toLowerCase();
     const list = Array.isArray(projects) ? projects : [];
-    if (!q) return list;
-    return list.filter((p) => String(p.title || "").toLowerCase().includes(q));
+    const items = q ? list.filter((p) => String(p.title || "").toLowerCase().includes(q)) : list.slice();
+    items.sort((a, b) => {
+      const aCur = activeRoomId && String(a?.roomId || "") === String(activeRoomId);
+      const bCur = activeRoomId && String(b?.roomId || "") === String(activeRoomId);
+      if (aCur !== bCur) return aCur ? -1 : 1;
+      return String(a?.title || "").localeCompare(String(b?.title || ""));
+    });
+    return items;
   }, [projects, query]);
 
   const refresh = useCallback(async () => {
@@ -108,6 +118,13 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     setInviteProjectEntry(project || null);
     setInvite((s) => ({ ...s, emails: "", message: "" }));
     setInviteOpen(true);
+    setError("");
+    setNotice("");
+  };
+
+  const openActions = (project) => {
+    setActionsProjectEntry(project || null);
+    setActionsOpen(true);
     setError("");
     setNotice("");
   };
@@ -185,20 +202,23 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell projects-page">
       <header className="topbar">
         <div>
           <h2>Projects</h2>
           <p className="muted">Create a project room, select it as current, then invite people.</p>
         </div>
-        <div className="topbar-actions">
+        <div className="topbar-actions projects-topbar-actions">
           <input
+            className="projects-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects..."
             disabled={busy || loading}
-            style={{ maxWidth: 280 }}
           />
+          <button type="button" onClick={refresh} disabled={busy || loading}>
+            Refresh
+          </button>
           {typeof onOpenDrafts === "function" ? (
             <button type="button" onClick={onOpenDrafts} disabled={busy || loading}>
               Templates
@@ -213,82 +233,71 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
 
-      <section className="stats-grid">
-        <div className="stat-card">
-          <span className="muted">Projects</span>
-          <h3>{Array.isArray(projects) ? projects.length : 0}</h3>
-          <p className="muted">Project rooms in this portal</p>
-        </div>
-        <div className="stat-card">
-          <span className="muted">In progress</span>
-          <h3>{counts.inProgress}</h3>
-          <p className="muted">Requests started by you</p>
-        </div>
-        <div className="stat-card">
-          <span className="muted">Total requests</span>
-          <h3>{counts.total}</h3>
-          <p className="muted">Across all projects</p>
-        </div>
-        <div className="stat-card">
-          <span className="muted">Current</span>
-          <h3>{activeRoomId ? 1 : 0}</h3>
-          <p className="muted">{activeRoomId ? "Selected" : "Not selected"}</p>
-        </div>
-      </section>
-
       {!filtered.length ? (
         <section className="card">
-          <div className="empty">
-            <strong>No projects</strong>
-            <p className="muted" style={{ margin: "6px 0 0" }}>
-              Create a project to get a DocSpace room for forms.
-            </p>
-            <div className="topbar-actions" style={{ marginTop: 10 }}>
+          <EmptyState
+            title="No projects yet"
+            description="Create a project to publish templates and start approval requests."
+            actions={
               <button type="button" className="primary" onClick={() => setCreateOpen(true)} disabled={busy || loading}>
                 Create project
               </button>
-            </div>
-          </div>
+            }
+          />
         </section>
       ) : (
         <section className="card">
-          <div className="card-header">
-            <h3>Project rooms</h3>
-            <p className="muted">Open a project to manage members and access.</p>
-            <div className="row-actions" style={{ justifyContent: "space-between" }}>
-              <button type="button" onClick={refresh} disabled={busy || loading}>
-                Refresh
-              </button>
-              <span className="muted">Shown: {filtered.length}</span>
+          <div className="card-header compact">
+            <div>
+              <h3>Project rooms</h3>
+              <p className="muted">Open a project to manage members, templates, and requests.</p>
+            </div>
+            <div className="card-header-actions">
+              <span className="muted">{filtered.length} shown</span>
             </div>
           </div>
 
-          <div className="project-grid">
+          <div className="projects-kpis" aria-label="Projects summary">
+            <div className="projects-kpi">
+              <span className="muted">Projects</span>
+              <strong>{Array.isArray(projects) ? projects.length : 0}</strong>
+            </div>
+            <div className="projects-kpi">
+              <span className="muted">In progress</span>
+              <strong>{counts.inProgress}</strong>
+            </div>
+            <div className="projects-kpi">
+              <span className="muted">Total requests</span>
+              <strong>{counts.total}</strong>
+            </div>
+            <div className="projects-kpi">
+              <span className="muted">Current</span>
+              <strong>{activeRoomId ? "Selected" : "None"}</strong>
+            </div>
+          </div>
+
+          <div className="projects-room-list">
             {filtered.map((p) => {
               const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
               const disabled = busy || loading;
               const canManage = Boolean(permissions?.[String(p.id)]);
-              const actionsDisabled = disabled || !canManage;
               const inProgress = Number(p?.counts?.inProgress || 0);
               const total = Number(p?.counts?.total || 0);
               return (
-                <div key={p.id} className="project-card">
-                  <div className="project-card-head">
-                    <div className="project-card-title">
-                      <strong className="truncate">{p.title}</strong>
-                      <span className="muted truncate">Room: {p.roomId}</span>
-                    </div>
-                    <div className="project-card-meta">
+                <div key={p.id} className={`project-tile${isCurrent ? " is-current" : ""}`}>
+                  <div className="project-tile-main">
+                    <div className="project-tile-title-row">
+                      <strong className="truncate">{p.title || "Untitled"}</strong>
                       {isCurrent ? <StatusPill tone="green">Current</StatusPill> : null}
+                      {!canManage ? <StatusPill tone="gray">View-only</StatusPill> : null}
+                    </div>
+                    <div className="project-tile-meta">
+                      <StatusPill tone={inProgress ? "yellow" : "gray"}>{inProgress} in progress</StatusPill>
+                      <StatusPill tone="gray">{total} total</StatusPill>
                     </div>
                   </div>
 
-                  <div className="project-card-meta" style={{ justifyContent: "flex-start" }}>
-                    {inProgress ? <StatusPill tone="yellow">{inProgress} in progress</StatusPill> : <StatusPill tone="gray">0 in progress</StatusPill>}{" "}
-                    <StatusPill tone="gray">{total} total</StatusPill>
-                  </div>
-
-                  <div className="project-card-actions">
+                  <div className="project-tile-actions">
                     <button
                       type="button"
                       className="primary"
@@ -297,19 +306,20 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                     >
                       Open
                     </button>
-                    <button type="button" onClick={() => onSetCurrent(p)} disabled={disabled || isCurrent}>
-                      {isCurrent ? "Selected" : "Make current"}
-                    </button>
-                    <button type="button" onClick={() => openInvite(p)} disabled={actionsDisabled}>
-                      Invite
-                    </button>
-                    {p.roomUrl ? (
-                      <a className="btn" href={p.roomUrl} target="_blank" rel="noreferrer">
-                        DocSpace
-                      </a>
-                    ) : null}
-                    <button type="button" className="danger" onClick={() => openDelete(p)} disabled={actionsDisabled}>
-                      Remove
+                    <button
+                      type="button"
+                      className="icon-button projects-more"
+                      onClick={() => openActions(p)}
+                      disabled={disabled}
+                      aria-label="More actions"
+                      title="More actions"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path
+                          d="M5 10a1.6 1.6 0 1 1-3.2 0A1.6 1.6 0 0 1 5 10Zm6.6 0a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 0 1 3.2 0Zm6.6 0a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 0 1 3.2 0Z"
+                          fill="currentColor"
+                        />
+                      </svg>
                     </button>
                   </div>
                 </div>
@@ -318,6 +328,112 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           </div>
         </section>
       )}
+
+      <Modal
+        open={actionsOpen}
+        title={actionsProjectEntry?.title ? `${actionsProjectEntry.title}` : "Project"}
+        size="sm"
+        onClose={() => {
+          if (loading) return;
+          setActionsOpen(false);
+          setActionsProjectEntry(null);
+        }}
+      >
+        {(() => {
+          const p = actionsProjectEntry;
+          if (!p?.id) return null;
+          const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
+          const canManage = Boolean(permissions?.[String(p.id)]);
+          const disabled = busy || loading;
+          return (
+            <div className="modal-actions">
+              <div className="action-list" role="menu" aria-label="Project actions">
+                <button
+                  type="button"
+                  className="action-item primary"
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setActionsProjectEntry(null);
+                    if (typeof onOpenProject === "function") onOpenProject(p.id);
+                  }}
+                  disabled={disabled}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>Open project</strong>
+                    <span className="muted">Manage people and forms.</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">›</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`action-item${isCurrent ? " is-disabled" : ""}`}
+                  onClick={async () => {
+                    setActionsOpen(false);
+                    setActionsProjectEntry(null);
+                    await onSetCurrent(p);
+                  }}
+                  disabled={disabled || isCurrent}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>{isCurrent ? "Current project" : "Set as current"}</strong>
+                    <span className="muted">{isCurrent ? "This project is already selected." : "Use this project for new requests."}</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">{isCurrent ? "✓" : "›"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="action-item"
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setActionsProjectEntry(null);
+                    openInvite(p);
+                  }}
+                  disabled={disabled || !canManage}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>Invite people</strong>
+                    <span className="muted">{canManage ? "Add people to this project." : "Only the project admin can invite."}</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">›</span>
+                </button>
+
+                {p.roomUrl ? (
+                  <a className="action-item" href={p.roomUrl} target="_blank" rel="noreferrer" role="menuitem">
+                    <div className="action-item-text">
+                      <strong>Open in DocSpace</strong>
+                      <span className="muted">Manage the room and permissions.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">↗</span>
+                  </a>
+                ) : null}
+
+                <button
+                  type="button"
+                  className="action-item danger"
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setActionsProjectEntry(null);
+                    openDelete(p);
+                  }}
+                  disabled={disabled || !canManage}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>Remove from portal</strong>
+                    <span className="muted">{canManage ? "This does not delete the DocSpace room." : "Only the project admin can remove."}</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">›</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal
         open={createOpen}

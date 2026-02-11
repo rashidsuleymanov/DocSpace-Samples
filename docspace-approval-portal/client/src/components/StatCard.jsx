@@ -1,8 +1,8 @@
-export default function StatCard({ title, value, meta, onClick }) {
+export default function StatCard({ title, value, meta, onClick, className = "" }) {
   const clickable = typeof onClick === "function";
   return (
     <div
-      className={`stat-card${clickable ? " is-clickable" : ""}`}
+      className={`stat-card${clickable ? " is-clickable" : ""}${className ? ` ${className}` : ""}`}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? onClick : undefined}
