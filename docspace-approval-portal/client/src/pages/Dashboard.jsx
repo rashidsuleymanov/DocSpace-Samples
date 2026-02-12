@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import Modal from "../components/Modal.jsx";
 import QuickActions from "../components/QuickActions.jsx";
+import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatCard from "../components/StatCard.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import StepsCard from "../components/StepsCard.jsx";
@@ -120,6 +121,8 @@ export default function Dashboard({
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Document");
   const [docUrl, setDocUrl] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsGroup, setDetailsGroup] = useState(null);
 
   const openFlow = (flow) => {
     const status = String(flow?.status || "");
@@ -129,6 +132,16 @@ export default function Dashboard({
     setDocTitle(flow?.fileTitle || flow?.templateTitle || "Document");
     setDocUrl((kind === "fillsign" || kind === "sharedsign") && status !== "Completed" ? withFillAction(url) : url);
     setDocOpen(true);
+  };
+
+  const onCopyLink = async (url) => {
+    const value = String(url || "").trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // ignore; user can copy from input in Details modal
+    }
   };
 
   const openRequests = (filter = "all") => {
@@ -152,7 +165,7 @@ export default function Dashboard({
         description: "Projects keep your templates and requests organized.",
         actionLabel: "Create project",
         actionTone: "primary",
-        onAction: onOpenProjects
+        onAction: () => onOpenProjects?.({ create: true })
       });
       steps.push({
         title: "Create a template",
@@ -280,6 +293,12 @@ export default function Dashboard({
                   if (!flow?.id) return null;
                   const roomId = String(flow?.projectRoomId || "").trim();
                   const roomTitle = roomId ? roomTitleById.get(roomId) || "Project" : "Unassigned";
+                  const dueDate =
+                    String(flow?.dueDate || "").trim() ||
+                    String((Array.isArray(group?.flows) ? group.flows.find((f) => String(f?.dueDate || "").trim())?.dueDate : "") || "").trim();
+                  const todayIso = new Date().toISOString().slice(0, 10);
+                  const isOverdue =
+                    String(flow?.status || "") === "InProgress" && dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && dueDate < todayIso;
                   return (
                     <div key={group.id} className="list-row">
                       <div className="list-main">
@@ -295,6 +314,7 @@ export default function Dashboard({
                             <StatusPill tone="gray">{flow.status || "-"}</StatusPill>
                           )}{" "}
                           <StatusPill tone="gray">{roomTitle}</StatusPill>{" "}
+                          {dueDate ? <StatusPill tone={isOverdue ? "red" : "gray"}>{isOverdue ? `Overdue: ${dueDate}` : `Due: ${dueDate}`}</StatusPill> : null}{" "}
                           {(flow.createdAt || "").slice(0, 19).replace("T", " ")}
                         </span>
                       </div>
@@ -310,6 +330,16 @@ export default function Dashboard({
                           title={String(flow?.status || "") === "Canceled" ? "Canceled requests cannot be opened" : ""}
                         >
                           Open
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetailsGroup(group);
+                            setDetailsOpen(true);
+                          }}
+                          disabled={busy}
+                        >
+                          Details
                         </button>
                       </div>
                     </div>
@@ -423,7 +453,6 @@ export default function Dashboard({
                 <div key={t.id} className="list-row">
                   <div className="list-main">
                     <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                    <span className="muted truncate">ID: {t.id}</span>
                   </div>
                   <div className="list-actions">
                     <button
@@ -447,6 +476,21 @@ export default function Dashboard({
       </Modal>
 
       <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
+      <RequestDetailsModal
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          setDetailsGroup(null);
+        }}
+        busy={busy}
+        group={detailsGroup}
+        roomTitleById={roomTitleById}
+        onOpen={(flow) => {
+          setDetailsOpen(false);
+          openFlow(flow);
+        }}
+        onCopyLink={(url) => onCopyLink(url)}
+      />
     </div>
   );
 }

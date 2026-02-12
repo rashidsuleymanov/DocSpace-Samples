@@ -281,6 +281,7 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   font-weight: 800;
   color: #ffffff;
 }
+.brand-mark img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 
 .brand-text { display: grid; gap: 2px; }
 .brand-text span { font-size: 12px; }
@@ -685,6 +686,9 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
 .wizard-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .wizard-divider { height: 1px; background: rgba(15, 23, 42, 0.10); }
 
+.request-due { display: grid; gap: 10px; }
+.request-due input[type="date"] { max-width: 240px; }
+
 .select-row {
   width: 100%;
   text-align: left;
@@ -706,6 +710,44 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
 .select-row-main { display: grid; gap: 2px; min-width: 0; }
 .select-row-right { color: var(--muted); font-weight: 900; }
 
+/* Request details */
+.request-details { display: grid; gap: 14px; }
+.request-details-title { display: grid; gap: 8px; min-width: 0; }
+.request-details-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.request-details-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.75);
+}
+.request-meta-item { display: grid; gap: 4px; min-width: 0; }
+.request-meta-item .muted { font-size: 12px; }
+.request-meta-item strong { font-size: 13px; }
+
+@media (max-width: 720px) {
+  .request-details-meta { grid-template-columns: 1fr; }
+}
+
+.request-details-section { display: grid; gap: 10px; }
+.request-details-section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.request-details-recipients { display: grid; gap: 8px; }
+.request-recipient-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+}
+.request-recipient-chip > span.truncate { flex: 1 1 auto; }
+.request-details-link { display: flex; gap: 10px; align-items: center; }
+.request-details-link input { flex: 1 1 auto; }
+
 .recipient-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -726,6 +768,26 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
 .check-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.08); background: #ffffff; }
 .check-row:hover { border-color: rgba(15, 23, 42, 0.14); background: #fafafa; }
 
+.order-block {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.7);
+}
+.order-list { display: grid; gap: 8px; }
+.order-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+}
+.order-row select { width: 120px; }
+
 @media (max-width: 980px) {
   .recipient-grid { grid-template-columns: 1fr; }
 }
@@ -739,6 +801,7 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   border: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.03);
 }
+.pill.truncate { min-width: 0; max-width: 320px; }
 .pill-green { border-color: rgba(22, 163, 74, 0.25); background: rgba(22, 163, 74, 0.12); color: rgba(22, 163, 74, 0.95); }
 .pill-yellow { border-color: rgba(217, 119, 6, 0.25); background: rgba(217, 119, 6, 0.12); color: rgba(217, 119, 6, 0.95); }
 .pill-red { border-color: rgba(180, 35, 24, 0.25); background: rgba(180, 35, 24, 0.10); color: rgba(180, 35, 24, 0.95); }
@@ -989,6 +1052,11 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
 .editor-actions { display: flex; align-items: center; gap: 10px; }
 .editor-frame { height: 100%; }
 .docspace-embed { width: 100%; height: 100%; border: 0; background: #fff; }
+
+.audit-list { display: grid; gap: 10px; }
+.audit-row { border: 1px solid rgba(15, 23, 42, 0.10); border-radius: var(--radius-lg); background: #fff; padding: 10px 12px; }
+.audit-main { display: grid; gap: 4px; }
+.audit-title { font-size: 13px; }
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }

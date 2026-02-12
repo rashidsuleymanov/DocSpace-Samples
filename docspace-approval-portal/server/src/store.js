@@ -32,6 +32,9 @@ async function hydrateStore() {
     if (flow.resultFileId === undefined) flow.resultFileId = null;
     if (flow.resultFileTitle === undefined) flow.resultFileTitle = null;
     if (flow.resultFileUrl === undefined) flow.resultFileUrl = null;
+    if (flow.stageIndex === undefined) flow.stageIndex = null;
+    if (flow.dueDate === undefined) flow.dueDate = null;
+    if (!Array.isArray(flow.events)) flow.events = [];
   }
 
   for (const project of projects) {
@@ -51,6 +54,22 @@ function scheduleSave() {
 
 await hydrateStore();
 
+function normalize(value) {
+  return String(value || "").trim();
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function withEvent(flow, event) {
+  const current = flow && typeof flow === "object" ? flow : {};
+  const ts = normalize(event?.ts) || new Date().toISOString();
+  const entry = { ts, ...(event && typeof event === "object" ? event : {}) };
+  const next = [...safeArray(current.events), entry].slice(-200);
+  return next;
+}
+
 export function createFlow({
   id,
   groupId,
@@ -62,6 +81,8 @@ export function createFlow({
   resultFileId,
   resultFileTitle,
   resultFileUrl,
+  stageIndex,
+  dueDate,
   projectRoomId,
   documentRoomId,
   documentRoomTitle,
@@ -80,6 +101,8 @@ export function createFlow({
   const uid = String(createdByUserId || "").trim();
   if (!flowId || !fid || !uid) return null;
 
+  const now = new Date().toISOString();
+
   const entry = {
     id: flowId,
     groupId: String(groupId || flowId).trim() || flowId,
@@ -91,6 +114,8 @@ export function createFlow({
     resultFileId: resultFileId ? String(resultFileId) : null,
     resultFileTitle: resultFileTitle ? String(resultFileTitle) : null,
     resultFileUrl: resultFileUrl ? String(resultFileUrl) : null,
+    stageIndex: Number.isFinite(Number(stageIndex)) ? Number(stageIndex) : null,
+    dueDate: dueDate ? String(dueDate) : null,
     projectRoomId: projectRoomId ? String(projectRoomId) : null,
     documentRoomId: documentRoomId ? String(documentRoomId) : null,
     documentRoomTitle: documentRoomTitle ? String(documentRoomTitle) : null,
@@ -111,8 +136,20 @@ export function createFlow({
     openUrl: openUrl ? String(openUrl) : null,
     linkRequestToken: linkRequestToken ? String(linkRequestToken) : null,
     status,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: now,
+    updatedAt: now,
+    events: [
+      {
+        ts: now,
+        type: "created",
+        actorUserId: uid,
+        actorName: createdByName ? String(createdByName) : null,
+        kind: String(kind || "approval").trim() || "approval",
+        templateFileId: fid,
+        projectRoomId: projectRoomId ? String(projectRoomId) : null,
+        recipientEmails: Array.isArray(recipientEmails) ? recipientEmails : []
+      }
+    ]
   };
 
   flows.unshift(entry);
@@ -138,6 +175,7 @@ export function updateFlow(flowId, patch = {}) {
     ...patch,
     id: current.id,
     createdAt: current.createdAt,
+    events: safeArray(patch?.events).length ? safeArray(patch.events) : safeArray(current.events),
     updatedAt: new Date().toISOString()
   };
   flows[index] = next;
@@ -153,11 +191,56 @@ export function cancelFlow(flowId, { canceledByUserId, canceledByName } = {}) {
   if (String(current.status || "") === "Completed") return current;
   if (String(current.status || "") === "Canceled") return current;
 
+  const now = new Date().toISOString();
   return updateFlow(id, {
     status: "Canceled",
-    canceledAt: new Date().toISOString(),
+    canceledAt: now,
     canceledByUserId: canceledByUserId ? String(canceledByUserId) : null,
-    canceledByName: canceledByName ? String(canceledByName) : null
+    canceledByName: canceledByName ? String(canceledByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "canceled",
+      actorUserId: canceledByUserId ? String(canceledByUserId) : null,
+      actorName: canceledByName ? String(canceledByName) : null
+    })
+  });
+}
+
+export function completeFlow(
+  flowId,
+  {
+    completedByUserId = null,
+    completedByName = null,
+    method = "manual",
+    resultFileId = null,
+    resultFileTitle = null,
+    resultFileUrl = null
+  } = {}
+) {
+  const id = normalize(flowId);
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+  if (String(current.status || "") === "Canceled") return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    status: "Completed",
+    completedAt: current.completedAt || now,
+    completedByUserId: completedByUserId ? String(completedByUserId) : current.completedByUserId || null,
+    completedByName: completedByName ? String(completedByName) : current.completedByName || null,
+    resultFileId: resultFileId ? String(resultFileId) : current.resultFileId || null,
+    resultFileTitle: resultFileTitle ? String(resultFileTitle) : current.resultFileTitle || null,
+    resultFileUrl: resultFileUrl ? String(resultFileUrl) : current.resultFileUrl || null,
+    events: withEvent(current, {
+      ts: now,
+      type: "completed",
+      method: String(method || "manual"),
+      actorUserId: completedByUserId ? String(completedByUserId) : null,
+      actorName: completedByName ? String(completedByName) : null,
+      resultFileId: resultFileId ? String(resultFileId) : null,
+      resultFileTitle: resultFileTitle ? String(resultFileTitle) : null
+    })
   });
 }
 
@@ -184,6 +267,18 @@ export function listFlowsForRoom(roomId) {
   return flows
     .filter((flow) => String(flow?.projectRoomId || "").trim() === rid)
     .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+export function listAllFlows() {
+  return flows.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+export function listFlowsForGroup(groupId) {
+  const gid = String(groupId || "").trim();
+  if (!gid) return [];
+  return flows
+    .filter((flow) => String(flow?.groupId || flow?.id || "").trim() === gid)
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
 }
 
 export function createProject({ id, title, roomId, roomUrl } = {}) {

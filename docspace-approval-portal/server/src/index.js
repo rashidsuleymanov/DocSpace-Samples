@@ -11,6 +11,7 @@ import sandboxRoutes from "./routes/sandbox.js";
 import projectsRoutes from "./routes/projects.js";
 import libraryRoutes from "./routes/library.js";
 import draftsRoutes from "./routes/drafts.js";
+import webhooksRoutes from "./routes/webhooks.js";
 import { validateConfig } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,7 +19,13 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 
 const configErrors = validateConfig({ requiresAuth: true });
 if (configErrors.length) {
@@ -34,12 +41,11 @@ app.use("/api/sandbox", sandboxRoutes);
 app.use("/api/projects", projectsRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/drafts", draftsRoutes);
+app.use("/api/webhooks", webhooksRoutes);
 
 const isProd = process.env.NODE_ENV === "production";
-const debugEnabled = process.env.ENABLE_DEBUG_API === "true" || !isProd;
-if (debugEnabled) {
-  app.use("/api/debug", debugRoutes);
-}
+const debugEnabled = process.env.ENABLE_DEBUG_API === "true";
+if (debugEnabled) app.use("/api/debug", debugRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

@@ -12,6 +12,7 @@ import { clearSession, loadSession, saveSession } from "./services/session.js";
 import {
   createFlowFromTemplate,
   getProjectsSidebar,
+  getSettingsConfig,
   listDrafts,
   listFlows,
   listTemplates,
@@ -31,6 +32,12 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [branding, setBranding] = useState({
+    portalName: "DocSpace Approval Portal",
+    portalTagline: "Approval portal",
+    portalLogoUrl: "",
+    portalAccent: ""
+  });
   const [templates, setTemplates] = useState([]);
   const [flows, setFlows] = useState([]);
   const [flowsRefreshing, setFlowsRefreshing] = useState(false);
@@ -52,6 +59,43 @@ export default function App() {
     }
     setBooting(false);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const cfg = await getSettingsConfig().catch(() => null);
+      if (!cfg || cancelled) return;
+      setBranding((prev) => ({
+        ...prev,
+        portalName: cfg.portalName || prev.portalName,
+        portalTagline: cfg.portalTagline || prev.portalTagline,
+        portalLogoUrl: cfg.portalLogoUrl || prev.portalLogoUrl,
+        portalAccent: cfg.portalAccent || prev.portalAccent
+      }));
+    };
+    run();
+    const handler = () => run();
+    window.addEventListener("portal:brandingChanged", handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("portal:brandingChanged", handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const name = String(branding?.portalName || "").trim() || "DocSpace Approval Portal";
+    if (typeof document !== "undefined") document.title = name;
+
+    const accent = String(branding?.portalAccent || "").trim();
+    const root = typeof document !== "undefined" ? document.documentElement : null;
+    if (!root) return;
+    const isHex = /^#([a-fA-F0-9]{6}|[a-fA-F0-9]{3})$/.test(accent);
+    if (!isHex) return;
+    root.style.setProperty("--accent", accent);
+    root.style.setProperty("--accentHover", accent);
+    root.style.setProperty("--primary", accent);
+    root.style.setProperty("--primaryHover", accent);
+  }, [branding?.portalAccent, branding?.portalName]);
 
   const refreshActiveProject = useMemo(
     () => async () => {
@@ -143,6 +187,15 @@ export default function App() {
         }
         setView(next);
       },
+      openProjects(opts = {}) {
+        setError("");
+        setView("projects");
+        if (opts?.create) {
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("portal:projectsCreate"));
+          }, 0);
+        }
+      },
       openRequests(filter = "all", scope = "all") {
         setError("");
         setRequestsFilter(String(filter || "all"));
@@ -204,13 +257,21 @@ export default function App() {
         setDraftsLoaded(false);
         setView("login");
       },
-      async startFlow(templateFileId, projectId, recipientEmails, kind) {
+      async startFlow(templateFileId, projectId, recipientEmails, kind, recipientLevels, dueDate) {
         if (!session?.token) return;
         if (!templateFileId) return;
         setBusy(true);
         setError("");
         try {
-          const result = await createFlowFromTemplate({ token: session.token, templateFileId, projectId, recipientEmails, kind });
+          const result = await createFlowFromTemplate({
+            token: session.token,
+            templateFileId,
+            projectId,
+            recipientEmails,
+            recipientLevels,
+            dueDate,
+            kind
+          });
           await refreshFlows(session);
           window.dispatchEvent(new CustomEvent("portal:projectChanged"));
           return result;
@@ -296,6 +357,7 @@ export default function App() {
     <div className="app-shell">
       <AppLayout
         session={session}
+        branding={branding}
         active={view}
         onNavigate={actions.navigate}
         onOpenProject={actions.openProject}
@@ -324,7 +386,7 @@ export default function App() {
             }}
             onStartFlow={actions.startFlow}
             onOpenDrafts={() => actions.navigate("drafts")}
-            onOpenProjects={() => actions.navigate("projects")}
+            onOpenProjects={(opts) => actions.openProjects(opts)}
             onOpenRequests={actions.openRequests}
             onOpenProject={actions.openProject}
           />
@@ -347,7 +409,7 @@ export default function App() {
             onBack={() => actions.navigate("dashboard")}
             onStartFlow={actions.startFlow}
             onOpenDrafts={() => actions.navigate("drafts")}
-            onOpenProjects={() => actions.navigate("projects")}
+            onOpenProjects={(opts) => actions.openProjects(opts)}
           />
         )}
         {view === "projects" && (
@@ -363,7 +425,7 @@ export default function App() {
             session={session}
             busy={busy}
             onOpenProject={actions.openProject}
-            onOpenProjects={() => actions.navigate("projects")}
+            onOpenProjects={(opts) => actions.openProjects(opts)}
           />
         )}
         {view === "project" && (

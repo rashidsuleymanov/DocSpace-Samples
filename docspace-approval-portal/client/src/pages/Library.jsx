@@ -133,9 +133,13 @@ export default function Library({ session, busy }) {
         ) : (
           <div className="empty">
             <strong>Library room configured</strong>
-            <p className="muted" style={{ margin: "6px 0 0" }}>
-              Room ID: {status.libraryRoomId}
-            </p>
+            <p className="muted" style={{ margin: "6px 0 0" }}>Ready to use.</p>
+            <details style={{ marginTop: 10 }}>
+              <summary className="muted" style={{ cursor: "pointer" }}>Advanced</summary>
+              <p className="muted" style={{ margin: "8px 0 0" }}>
+                Room ID: {status.libraryRoomId}
+              </p>
+            </details>
           </div>
         )}
       </section>
@@ -185,7 +189,7 @@ export default function Library({ session, busy }) {
                 <div className="list-main">
                   <strong>{f.title || `File ${f.id}`}</strong>
                   <span className="muted">
-                    <StatusPill tone={f.isForm ? "green" : "gray"}>{f.isForm ? "Form" : "File"}</StatusPill> ID: {f.id}
+                    <StatusPill tone={f.isForm ? "green" : "gray"}>{f.isForm ? "Form" : "File"}</StatusPill>
                     {f.fileExst ? ` - ${f.fileExst}` : ""}
                   </span>
                 </div>

@@ -64,6 +64,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
   const [requestProjects, setRequestProjects] = useState([]);
   const [requestActiveRoomId, setRequestActiveRoomId] = useState("");
   const [requestProjectId, setRequestProjectId] = useState("");
+  const [requestDueDate, setRequestDueDate] = useState("");
   const [requestBusy, setRequestBusy] = useState(false);
 
   const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
@@ -253,6 +254,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
     setRequestTemplate(template);
     setRequestOpen(true);
     setRequestBusy(true);
+    setRequestDueDate("");
     setError("");
     setNotice("");
     try {
@@ -281,10 +283,16 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
     setNotice("");
     try {
       if (!token) throw new Error("Authorization token is required");
-      const result = await createFlowFromTemplate({ token, templateFileId: templateId, projectId });
+      const result = await createFlowFromTemplate({
+        token,
+        templateFileId: templateId,
+        projectId,
+        dueDate: normalize(requestDueDate) || undefined,
+      });
       const flow = result?.flow || null;
       setRequestOpen(false);
       setRequestTemplate(null);
+      setRequestDueDate("");
       setNotice(flow ? `Request created: ${flow.fileTitle || flow.templateTitle || flow.id}` : "Request created.");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
     } catch (e) {
@@ -391,8 +399,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                     <div className="list-main">
                       <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                       <span className="muted truncate">
-                        <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : t.fileExst || "File"}</StatusPill>{" "}
-                        ID: {t.id}
+                        <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : t.fileExst || "File"}</StatusPill>
                       </span>
                     </div>
                     <div className="list-actions">
@@ -491,8 +498,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                     <div className="list-main">
                       <strong className="truncate">{d.title || `File ${d.id}`}</strong>
                       <span className="muted truncate">
-                        <StatusPill tone={d.isForm ? "green" : "gray"}>{d.isForm ? "Form" : d.fileExst || "File"}</StatusPill>{" "}
-                        ID: {d.id}
+                        <StatusPill tone={d.isForm ? "green" : "gray"}>{d.isForm ? "Form" : d.fileExst || "File"}</StatusPill>
                       </span>
                     </div>
                     <div className="list-actions">
@@ -644,11 +650,12 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
 
       <Modal
         open={requestOpen}
-        title={requestTemplate?.title ? `Create request — ${requestTemplate.title}` : "Create request"}
+        title={requestTemplate?.title ? `Create request: ${requestTemplate.title}` : "Create request"}
         onClose={() => {
           if (requestBusy) return;
           setRequestOpen(false);
           setRequestTemplate(null);
+          setRequestDueDate("");
         }}
         footer={
           <>
@@ -657,6 +664,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               onClick={() => {
                 setRequestOpen(false);
                 setRequestTemplate(null);
+                setRequestDueDate("");
               }}
               disabled={busy || requestBusy}
             >
@@ -681,28 +689,81 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                 Create a project first, then try again.
               </p>
               <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
-                <button type="button" className="primary" onClick={onOpenProjects} disabled={busy || requestBusy}>
-                  Open Projects
+                <button type="button" className="primary" onClick={() => onOpenProjects?.({ create: true })} disabled={busy || requestBusy}>
+                  Create project
                 </button>
               </div>
             </div>
           ) : (
-            <label>
-              <span>Project</span>
-              <select
-                value={requestProjectId}
-                onChange={(e) => setRequestProjectId(e.target.value)}
-                disabled={busy || requestBusy}
-              >
-                <option value="">Select a project...</option>
-                {(requestProjects || []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title}
-                    {requestActiveRoomId && String(p.roomId) === String(requestActiveRoomId) ? " (current)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <>
+              <label>
+                <span>Project</span>
+                <select
+                  value={requestProjectId}
+                  onChange={(e) => setRequestProjectId(e.target.value)}
+                  disabled={busy || requestBusy}
+                >
+                  <option value="">Select a project...</option>
+                  {(requestProjects || []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title}
+                      {requestActiveRoomId && String(p.roomId) === String(requestActiveRoomId) ? " (current)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+                  <strong>Due date (optional)</strong>
+                  <span className="muted">Helps track overdue requests.</span>
+                </div>
+                <div className="request-due">
+                  <input
+                    type="date"
+                    value={requestDueDate}
+                    onChange={(e) => setRequestDueDate(e.target.value)}
+                    disabled={busy || requestBusy}
+                  />
+                  <div className="chip-row">
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 1);
+                        setRequestDueDate(d.toISOString().slice(0, 10));
+                      }}
+                      disabled={busy || requestBusy}
+                    >
+                      Tomorrow
+                    </button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 7);
+                        setRequestDueDate(d.toISOString().slice(0, 10));
+                      }}
+                      disabled={busy || requestBusy}
+                    >
+                      7 days
+                    </button>
+                    {requestDueDate ? (
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => setRequestDueDate("")}
+                        disabled={busy || requestBusy}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
           <p className="muted" style={{ marginTop: 0 }}>
             We will create a fill-out link for this template and track the request in the selected project.

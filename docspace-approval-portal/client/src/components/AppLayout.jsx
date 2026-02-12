@@ -17,10 +17,15 @@ const navItems = [
   { id: "settings", label: "Settings" }
 ];
 
-export default function AppLayout({ session, active, onNavigate, onOpenProject, onLogout, children }) {
+export default function AppLayout({ session, branding, active, onNavigate, onOpenProject, onLogout, children }) {
   const displayName = session?.user?.displayName || session?.user?.email || "User";
   const token = session?.token || "";
   const projectsActive = active === "projects" || active === "project";
+
+  const portalName = String(branding?.portalName || "DocSpace Approval Portal").trim() || "DocSpace Approval Portal";
+  const portalTagline = String(branding?.portalTagline || "Approval portal").trim() || "Approval portal";
+  const portalLogoUrl = String(branding?.portalLogoUrl || "").trim();
+  const brandMark = initialsFrom(portalName.replace(/portal$/i, "").trim() || portalName);
 
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -96,11 +101,11 @@ export default function AppLayout({ session, active, onNavigate, onOpenProject, 
       <aside className="sidebar">
         <button type="button" className="brand" onClick={() => onNavigate("dashboard")}>
           <div className="brand-mark" aria-hidden="true">
-            DS
+            {portalLogoUrl ? <img src={portalLogoUrl} alt="" /> : brandMark}
           </div>
           <div className="brand-text">
-            <strong>DocSpace</strong>
-            <span className="muted">Approval portal</span>
+            <strong>{portalName}</strong>
+            <span className="muted">{portalTagline}</span>
           </div>
         </button>
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
+import AuditModal from "../components/AuditModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
+import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
 import {
@@ -61,10 +63,26 @@ function withFillAction(url) {
   }
 }
 
+function formatRecipients(value) {
+  const list = Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map((e) => String(e || "").trim())
+            .filter(Boolean)
+        )
+      )
+    : [];
+  if (!list.length) return { count: 0, short: "", full: "" };
+  if (list.length === 1) return { count: 1, short: list[0], full: list[0] };
+  return { count: list.length, short: `${list[0]} +${list.length - 1}`, full: list.join(", ") };
+}
+
 export default function Project({ session, busy, projectId, onBack, onStartFlow, onOpenDrafts }) {
   const token = session?.token || "";
   const meId = session?.user?.id ? String(session.user.id) : "";
   const meEmail = session?.user?.email ? String(session.user.email).trim().toLowerCase() : "";
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -102,6 +120,11 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Document");
   const [docUrl, setDocUrl] = useState("");
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditFlow, setAuditFlow] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsGroup, setDetailsGroup] = useState(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [addFormOpen, setAddFormOpen] = useState(false);
   const [addFormSource, setAddFormSource] = useState("my"); // my | shared
   const [addFormQuery, setAddFormQuery] = useState("");
@@ -194,6 +217,21 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   }, [tab]);
 
   useEffect(() => {
+    if (!autoRefresh) return;
+    if (tab !== "requests") return;
+    if (!normalize(token)) return;
+    if (!projectFlows.some((f) => String(f?.status || "") === "InProgress")) return;
+
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (busy || loading || flowsLoading) return;
+      refreshFlows().catch(() => null);
+    }, 25000);
+
+    return () => clearInterval(id);
+  }, [autoRefresh, busy, flowsLoading, loading, projectFlows, refreshFlows, tab, token]);
+
+  useEffect(() => {
     const handler = () => {
       if (tab !== "requests") return;
       refreshFlows().catch(() => null);
@@ -239,6 +277,19 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     const access = String(me?.access || "").toLowerCase();
     if (/^\\d+$/.test(access)) return Number(access) >= 7;
     return access === "roommanager" || access === "roomadmin";
+  }, [members, meId]);
+
+  const myRoleLabel = useMemo(() => {
+    if (!meId) return "Member";
+    const items = Array.isArray(members) ? members : [];
+    const me = items.find((m) => m?.user?.id && String(m.user.id) === meId) || null;
+    if (!me) return "Member";
+    if (me?.isOwner) return "Project admin";
+    if (typeof me?.access === "number" && me.access >= 7) return "Project admin";
+    const access = String(me?.access || "").toLowerCase();
+    if (/^\\d+$/.test(access) && Number(access) >= 7) return "Project admin";
+    if (access === "roommanager" || access === "roomadmin") return "Project admin";
+    return accessLabel(me?.access);
   }, [members, meId]);
 
   const onInvite = async () => {
@@ -540,11 +591,95 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     setDocOpen(true);
   };
 
+  const roomTitleById = useMemo(() => {
+    const map = new Map();
+    const rid = normalize(project?.roomId);
+    if (rid) map.set(rid, String(project?.title || "").trim() || "Project");
+    return map;
+  }, [project?.roomId, project?.title]);
+
+  const onCopyLink = async (url) => {
+    const value = String(url || "").trim();
+    if (!value) return;
+    setError("");
+    setNotice("");
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice("Link copied.");
+    } catch {
+      setError("Copy failed. Please copy the link manually.");
+    }
+  };
+
+  const notifyGroup = async (group, { reminder = false } = {}) => {
+    if (!flowsCanManage) return;
+    const pid = normalize(project?.id);
+    if (!pid || !token) return;
+
+    const flow = group?.primaryFlow || group?.flows?.[0] || null;
+    if (!flow) return;
+
+    const stageEmails = Array.from(
+      new Set(
+        (Array.isArray(group?.flows) ? group.flows : [])
+          .filter((f) => String(f?.status || "") === "InProgress")
+          .flatMap((f) => (Array.isArray(f?.recipientEmails) ? f.recipientEmails : []))
+          .map((e) => String(e || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const allEmails = Array.from(
+      new Set(
+        (Array.isArray(group?.flows) ? group.flows : [])
+          .flatMap((f) => (Array.isArray(f?.recipientEmails) ? f.recipientEmails : []))
+          .map((e) => String(e || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const emails = stageEmails.length ? stageEmails : allEmails;
+    if (!emails.length) return;
+
+    const kind = String(flow?.kind || "").toLowerCase();
+    const title = flow?.fileTitle || flow?.templateTitle || "Request";
+    const portalUrl = typeof window !== "undefined" ? String(window.location?.origin || "").trim() : "";
+    const link = String(flow?.openUrl || "").trim();
+
+    const base =
+      kind === "fillsign"
+        ? `Please fill and sign: ${title}.`
+        : kind === "sharedsign"
+          ? `Please review and sign: ${title}.`
+          : `You have a new approval request: ${title}.`;
+
+    const message = `${reminder ? "Reminder: " : ""}${base}${link ? `\n\nOpen: ${link}` : portalUrl ? `\n\nOpen: ${portalUrl}` : ""}`;
+
+    setError("");
+    setNotice("");
+    try {
+      await inviteProject({
+        token,
+        projectId: pid,
+        emails: emails.join(","),
+        access: "FillForms",
+        notify: true,
+        message
+      });
+      setNotice(reminder ? "Reminder sent." : "Notification sent.");
+    } catch (e) {
+      setError(e?.message || "Notify failed");
+    }
+  };
+
   return (
     <div className="page-shell">
       <header className="topbar">
         <div>
-          <h2>{project?.title || "Project"}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0 }}>{project?.title || "Project"}</h2>
+            <StatusPill tone={canManageProject ? "blue" : "gray"}>{myRoleLabel}</StatusPill>
+          </div>
           <p className="muted">Manage people and forms for this project.</p>
         </div>
         <div className="topbar-actions">
@@ -670,6 +805,15 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               <button type="button" onClick={refreshFlows} disabled={busy || loading || flowsLoading || !normalize(token)}>
                 {flowsLoading ? "Loading..." : "Refresh"}
               </button>
+              <label className="inline-check" style={{ marginLeft: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(autoRefresh)}
+                  onChange={(e) => setAutoRefresh(Boolean(e.target.checked))}
+                  disabled={busy || loading || !normalize(token)}
+                />
+                <span>Auto-refresh</span>
+              </label>
             </div>
           </div>
 
@@ -693,9 +837,14 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                 const statusTone = status === "Completed" ? "green" : status === "Canceled" ? "red" : status === "InProgress" ? "yellow" : "gray";
                 const counts = g?.counts || { total: 1, completed: 0 };
                 const meta = counts.total > 1 ? `${counts.completed || 0}/${counts.total} completed` : "";
+                const dueDate =
+                  String(f?.dueDate || "").trim() ||
+                  String((Array.isArray(g?.flows) ? g.flows.find((x) => String(x?.dueDate || "").trim())?.dueDate : "") || "").trim();
+                const isOverdue = Boolean(status === "InProgress" && dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && dueDate < todayIso);
                 const canCancel = flowsCanManage && status !== "Completed" && status !== "Canceled";
                 const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
                 const isAssigned = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+                const recipientsLabel = formatRecipients(recipients);
                 const canComplete =
                   String(f?.kind || "").toLowerCase() === "sharedsign" &&
                   status !== "Completed" &&
@@ -710,7 +859,12 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                         <StatusPill tone={statusTone}>{status === "InProgress" ? "In progress" : status}</StatusPill>{" "}
                         {meta ? <StatusPill tone="gray">{meta}</StatusPill> : null}{" "}
                         {kind === "fillSign" ? <StatusPill tone="blue">Fill & Sign</StatusPill> : null}
-                        {Array.isArray(f?.recipientEmails) && f.recipientEmails.length ? ` · To: ${f.recipientEmails.join(", ")}` : ""}
+                        {dueDate ? <StatusPill tone={isOverdue ? "red" : "gray"}>{isOverdue ? `Overdue: ${dueDate}` : `Due: ${dueDate}`}</StatusPill> : null}
+                        {recipientsLabel.count ? (
+                          <StatusPill tone="gray" title={recipientsLabel.full} style={{ marginLeft: 6 }}>
+                            Recipients: {recipientsLabel.count}
+                          </StatusPill>
+                        ) : null}
                       </span>
                     </div>
                     <div className="list-actions">
@@ -721,6 +875,26 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                         onClick={() => openFlow(f, openUrl)}
                       >
                         Open
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsGroup(g);
+                          setDetailsOpen(true);
+                        }}
+                        disabled={busy || loading}
+                      >
+                        Details
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuditFlow(f);
+                          setAuditOpen(true);
+                        }}
+                        disabled={busy || loading || !f?.id}
+                      >
+                        Activity
                       </button>
                       {canComplete ? (
                         <button type="button" onClick={() => onOpenComplete(g)} disabled={busy || loading || completeBusy}>
@@ -779,8 +953,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                 <div className="list-main">
                   <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                   <span className="muted truncate">
-                    <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : "File"}</StatusPill>{" "}
-                    ID: {t.id}
+                    <StatusPill tone={t.isForm ? "green" : "gray"}>{t.isForm ? "Form" : "File"}</StatusPill>
                   </span>
                 </div>
                 <div className="list-actions">
@@ -926,7 +1099,6 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                     >
                       <div className="select-row-main">
                         <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                        <span className="muted truncate">ID: {t.id}</span>
                       </div>
                       <span className="select-row-right" aria-hidden="true">{selected ? "✓" : "›"}</span>
                     </button>
@@ -1030,7 +1202,64 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         </div>
       </Modal>
 
+      <RequestDetailsModal
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          setDetailsGroup(null);
+        }}
+        busy={busy || loading || cancelBusy || completeBusy}
+        group={detailsGroup}
+        roomTitleById={roomTitleById}
+        onOpen={(flow) => {
+          setDetailsOpen(false);
+          openFlow(flow);
+        }}
+        onCopyLink={(url) => onCopyLink(url)}
+        onNotify={flowsCanManage ? (group) => notifyGroup(group, { reminder: false }) : null}
+        onRemind={flowsCanManage ? (group) => notifyGroup(group, { reminder: true }) : null}
+        onActivity={(flow) => {
+          if (!flow?.id) return;
+          setDetailsOpen(false);
+          setAuditFlow(flow);
+          setAuditOpen(true);
+        }}
+        onCancel={(group) => {
+          setDetailsOpen(false);
+          onOpenCancel(group);
+        }}
+        onComplete={() => {
+          if (!detailsGroup) return;
+          setDetailsOpen(false);
+          onOpenComplete(detailsGroup);
+        }}
+        canCancel={(() => {
+          const f = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          const status = String(detailsGroup?.status || f?.status || "");
+          return Boolean(flowsCanManage && status !== "Completed" && status !== "Canceled");
+        })()}
+        canComplete={(() => {
+          const f = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          const status = String(detailsGroup?.status || f?.status || "");
+          const kind = String(f?.kind || "").toLowerCase();
+          const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
+          const isAssigned = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+          return Boolean(kind === "sharedsign" && status !== "Completed" && status !== "Canceled" && (flowsCanManage || isAssigned));
+        })()}
+      />
+
       <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
+
+      <AuditModal
+        open={auditOpen}
+        onClose={() => {
+          setAuditOpen(false);
+          setAuditFlow(null);
+        }}
+        token={token}
+        flowId={auditFlow?.id}
+        title={auditFlow?.fileTitle || auditFlow?.templateTitle ? `Activity — ${auditFlow?.fileTitle || auditFlow?.templateTitle}` : "Activity"}
+      />
     </div>
   );
 }

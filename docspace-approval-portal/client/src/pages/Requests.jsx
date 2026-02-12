@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
+import AuditModal from "../components/AuditModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
+import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
 import { cancelFlow, completeFlow, getProjectMembers, getProjectsPermissions, inviteProject } from "../services/portalApi.js";
@@ -61,7 +63,17 @@ export default function Requests({
   const token = String(session?.token || "").trim();
   const meId = session?.user?.id ? String(session.user.id) : "";
   const meEmail = session?.user?.email ? String(session.user.email).trim().toLowerCase() : "";
+  const hasAnyProjects = Array.isArray(projects) && projects.length > 0;
   const updatedLabel = flowsUpdatedAt instanceof Date ? flowsUpdatedAt.toLocaleTimeString() : "";
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const isOverdueFlow = useCallback((flow) => {
+    const due = String(flow?.dueDate || "").trim();
+    if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return false;
+    const status = String(flow?.status || "");
+    if (status !== "InProgress") return false;
+    return due < todayIso;
+  }, [todayIso]);
 
   const [localError, setLocalError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
@@ -77,10 +89,14 @@ export default function Requests({
   const [sendFlow, setSendFlow] = useState(null);
   const [sendFlows, setSendFlows] = useState([]);
   const [sendKind, setSendKind] = useState("approval");
+  const [sendDueDate, setSendDueDate] = useState("");
   const [sendWarning, setSendWarning] = useState("");
   const [sendStep, setSendStep] = useState("setup"); // setup | recipients
   const [sendAdvanced, setSendAdvanced] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
+  const [orderEnabled, setOrderEnabled] = useState(false);
+  const [orderMap, setOrderMap] = useState({});
+  const [orderMaxStep, setOrderMaxStep] = useState(2);
 
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
@@ -102,6 +118,10 @@ export default function Requests({
   const [actionsGroup, setActionsGroup] = useState(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsGroup, setDetailsGroup] = useState(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const hasProject = Boolean(String(activeRoomId || "").trim());
   const projectTitle = activeProject?.title || "";
@@ -221,6 +241,21 @@ export default function Requests({
     return groups;
   }, [filteredByWho, meEmail]);
 
+  useEffect(() => {
+    if (!autoRefresh) return;
+    if (!token) return;
+    const hasActive = grouped.some((g) => String(g?.status || "") === "InProgress");
+    if (!hasActive) return;
+
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (busy || flowsRefreshing) return;
+      if (typeof onRefreshFlows === "function") onRefreshFlows();
+    }, 25000);
+
+    return () => clearInterval(id);
+  }, [autoRefresh, busy, flowsRefreshing, grouped, onRefreshFlows, token]);
+
   const filteredGroups = useMemo(() => {
     const q = String(query || "").trim().toLowerCase();
     const byStatus =
@@ -228,6 +263,8 @@ export default function Requests({
         ? grouped.filter((g) => g.status === "InProgress")
         : statusFilter === "completed"
           ? grouped.filter((g) => g.status === "Completed")
+          : statusFilter === "overdue"
+            ? grouped.filter((g) => (Array.isArray(g.flows) ? g.flows : []).some((f) => isOverdueFlow(f)))
           : statusFilter === "other"
             ? grouped.filter((g) => g.status !== "InProgress" && g.status !== "Completed")
             : grouped;
@@ -247,7 +284,7 @@ export default function Requests({
       const hay = `${flow.fileTitle || flow.templateTitle || flow.templateFileId || ""} ${recipients.join(" ")}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [grouped, query, statusFilter]);
+  }, [grouped, isOverdueFlow, query, statusFilter]);
 
   const scopeTabs = useMemo(
     () => [
@@ -317,16 +354,43 @@ export default function Requests({
 
   useEffect(() => {
     if (!sendOpen) return;
+    if (!orderEnabled) return;
+    const emails = allRecipientEmails || [];
+    setOrderMap((prev) => {
+      const next = { ...(prev || {}) };
+      // Ensure all current recipients have a step.
+      for (const email of emails) {
+        const key = String(email || "").trim().toLowerCase();
+        if (!key) continue;
+        const value = Number(next[key]);
+        if (!Number.isFinite(value) || value < 1) next[key] = 1;
+      }
+      // Drop removed recipients.
+      for (const key of Object.keys(next)) {
+        if (!emails.map((e) => String(e || "").trim().toLowerCase()).includes(key)) {
+          delete next[key];
+        }
+      }
+      return next;
+    });
+  }, [allRecipientEmails, orderEnabled, sendOpen]);
+
+  useEffect(() => {
+    if (!sendOpen) return;
 
     setSendSelectedId("");
     setSendSelectedTitle("");
     setSendFlow(null);
     setSendFlows([]);
     setSendKind("approval");
+    setSendDueDate("");
     setSendWarning("");
     setSendStep("setup");
     setSendAdvanced(false);
     setMemberQuery("");
+    setOrderEnabled(false);
+    setOrderMap({});
+    setOrderMaxStep(2);
     setSendQuery("");
     setPickedMemberIds(new Set());
     setInviteEmails("");
@@ -452,7 +516,22 @@ export default function Requests({
     const templateFileId = String(sendSelectedId || "").trim();
     if (!templateFileId) return;
     if (!hasProject) return;
-    const result = await onStartFlow?.(templateFileId, projectId, allRecipientEmails, sendKind);
+    let recipientLevels = null;
+    if ((sendKind === "sharedSign" || sendKind === "approval") && orderEnabled) {
+      const emails = (allRecipientEmails || []).map((e) => String(e || "").trim().toLowerCase()).filter(Boolean);
+      const map = orderMap && typeof orderMap === "object" ? orderMap : {};
+      const maxStep = Math.max(1, Number(orderMaxStep) || 1);
+      const levels = Array.from({ length: maxStep }, () => []);
+      for (const email of emails) {
+        const step = Number(map[email] || 1);
+        const idx = Number.isFinite(step) && step >= 1 ? Math.min(step, maxStep) - 1 : 0;
+        levels[idx].push(email);
+      }
+      recipientLevels = levels.filter((lvl) => lvl.length);
+    }
+
+    const dueDate = String(sendDueDate || "").trim() || null;
+    const result = await onStartFlow?.(templateFileId, projectId, allRecipientEmails, sendKind, recipientLevels, dueDate);
     const flows = Array.isArray(result?.flows) ? result.flows : result?.flow ? [result.flow] : [];
     setSendFlows(flows);
     setSendFlow(flows[0] || null);
@@ -464,7 +543,13 @@ export default function Requests({
     if (!projectId || !token) return;
     if (!canManageProject) return;
 
-    const emails = allRecipientEmails;
+    const emails = (() => {
+      const list = allRecipientEmails;
+      if (!orderEnabled || (sendKind !== "sharedSign" && sendKind !== "approval")) return list;
+      const map = orderMap && typeof orderMap === "object" ? orderMap : {};
+      const stage0 = list.filter((e) => Number(map[String(e || "").trim().toLowerCase()] || 1) === 1);
+      return stage0.length ? stage0 : list;
+    })();
     if (!emails.length) return;
 
     setNotifyBusy(true);
@@ -501,13 +586,81 @@ export default function Requests({
     }
   };
 
+  const notifyGroup = async (group, { reminder = false } = {}) => {
+    const flow = group?.primaryFlow || group?.flows?.[0] || null;
+    const rid = String(flow?.projectRoomId || "").trim();
+    const pid = rid ? projectIdByRoomId.get(rid) : "";
+    const canManage = flow ? canManageFlow(flow) : false;
+    if (!pid || !token || !canManage) return;
+
+    const stageEmails = Array.from(
+      new Set(
+        (Array.isArray(group?.flows) ? group.flows : [])
+          .filter((f) => String(f?.status || "") === "InProgress")
+          .flatMap((f) => (Array.isArray(f?.recipientEmails) ? f.recipientEmails : []))
+          .map((e) => String(e || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const allEmails = Array.from(
+      new Set(
+        (Array.isArray(group?.flows) ? group.flows : [])
+          .flatMap((f) => (Array.isArray(f?.recipientEmails) ? f.recipientEmails : []))
+          .map((e) => String(e || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const emails = stageEmails.length ? stageEmails : allEmails;
+    if (!emails.length) return;
+
+    const kind = normalizeKind(flow?.kind);
+    const title = flow?.fileTitle || flow?.templateTitle || "Request";
+    const portalUrl = typeof window !== "undefined" ? String(window.location?.origin || "").trim() : "";
+    const link = String(flow?.openUrl || "").trim();
+
+    const base =
+      kind === "fillSign"
+        ? `Please fill and sign: ${title}.`
+        : kind === "sharedSign"
+          ? `Please review and sign: ${title}.`
+          : `You have a new approval request: ${title}.`;
+
+    const message = `${reminder ? "Reminder: " : ""}${base}${link ? `\n\nOpen: ${link}` : portalUrl ? `\n\nOpen: ${portalUrl}` : ""}`;
+
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      await inviteProject({
+        token,
+        projectId: pid,
+        emails: emails.join(","),
+        access: "FillForms",
+        notify: true,
+        message
+      });
+    } catch (e) {
+      setLocalError(e?.message || "Notify failed");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   return (
     <div className="page-shell">
       <header className="topbar">
         <div>
           <h2>Requests</h2>
           <p className="muted">
-            {hasProject ? `Tracking requests in “${projectTitle || "Current project"}”.` : "Pick a project to create and track requests."}
+            {hasProject ? (
+              <>
+                Tracking requests in “{projectTitle || "Current project"}”.{" "}
+                <StatusPill tone={canManageProject ? "blue" : "gray"}>{canManageProject ? "Admin" : "View-only"}</StatusPill>
+              </>
+            ) : (
+              "Pick a project to create and track requests."
+            )}
           </p>
         </div>
         <div className="topbar-actions">
@@ -556,6 +709,15 @@ export default function Requests({
             >
               Refresh
             </button>
+            <label className="inline-check" style={{ marginLeft: 6 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(autoRefresh)}
+                onChange={(e) => setAutoRefresh(Boolean(e.target.checked))}
+                disabled={busy || !token}
+              />
+              <span>Auto-refresh</span>
+            </label>
           </div>
         </div>
 
@@ -581,6 +743,14 @@ export default function Requests({
             </button>
             <button
               type="button"
+              className={`chip${statusFilter === "overdue" ? " is-active" : ""}`}
+              onClick={() => setStatusFilter("overdue")}
+              disabled={busy}
+            >
+              Overdue
+            </button>
+            <button
+              type="button"
               className={`chip${statusFilter === "completed" ? " is-active" : ""}`}
               onClick={() => setStatusFilter("completed")}
               disabled={busy}
@@ -601,11 +771,16 @@ export default function Requests({
         <div className="list">
           {scope === "current" && !hasProject ? (
             <EmptyState
-              title="No project selected"
-              description="Pick a project to see its requests."
+              title={hasAnyProjects ? "No project selected" : "No projects yet"}
+              description={hasAnyProjects ? "Pick a project to see its requests." : "Create a project to publish templates and start requests."}
               actions={
-                <button type="button" className="primary" onClick={onOpenProjects} disabled={busy}>
-                  Open Projects
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onOpenProjects?.({ create: !hasAnyProjects })}
+                  disabled={busy}
+                >
+                  {hasAnyProjects ? "Open Projects" : "Create project"}
                 </button>
               }
             />
@@ -641,6 +816,10 @@ export default function Requests({
               const status = String(group.status || flow.status || "");
               const counts = group?.counts || { total: 1, completed: 0 };
               const meta = counts.total > 1 ? `${counts.completed || 0}/${counts.total} completed` : "";
+              const dueDate =
+                String(flow?.dueDate || "").trim() ||
+                String((Array.isArray(group?.flows) ? group.flows.find((f) => String(f?.dueDate || "").trim())?.dueDate : "") || "").trim();
+              const isOverdue = (Array.isArray(group?.flows) ? group.flows : []).some((f) => isOverdueFlow(f));
 
               return (
               <div key={group.id} className="list-row request-row">
@@ -659,6 +838,9 @@ export default function Requests({
                       <StatusPill tone="gray">{status || "-"}</StatusPill>
                     )}{" "}
                     {meta ? <StatusPill tone="gray">{meta}</StatusPill> : null}{" "}
+                    {dueDate ? (
+                      <StatusPill tone={isOverdue ? "red" : "gray"}>{isOverdue ? `Overdue: ${dueDate}` : `Due: ${dueDate}`}</StatusPill>
+                    ) : null}{" "}
                     {scope !== "current" ? (
                       <StatusPill tone="gray">
                         {(() => {
@@ -680,6 +862,16 @@ export default function Requests({
                     title={status === "Canceled" ? "Canceled requests cannot be opened" : ""}
                   >
                     Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailsGroup(group);
+                      setDetailsOpen(true);
+                    }}
+                    disabled={busy}
+                  >
+                    Details
                   </button>
                   {(canManageFlow(flow) || (String(flow?.kind || "").toLowerCase() === "sharedsign" && isAssignedToMe(flow))) &&
                   status !== "Completed" &&
@@ -840,6 +1032,69 @@ export default function Requests({
                   Contract (one document)
                 </button>
               </div>
+
+              <div className="wizard-divider" aria-hidden="true" />
+
+              <div className="wizard-section">
+                <div className="wizard-head">
+                  <strong>Due date (optional)</strong>
+                  <span className="muted">Helps track overdue requests.</span>
+                </div>
+                <div className="request-due">
+                  <input
+                    type="date"
+                    value={sendDueDate}
+                    onChange={(e) => setSendDueDate(e.target.value)}
+                    disabled={busy}
+                  />
+                  <div className="chip-row">
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 1);
+                        setSendDueDate(d.toISOString().slice(0, 10));
+                      }}
+                      disabled={busy}
+                    >
+                      Tomorrow
+                    </button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 3);
+                        setSendDueDate(d.toISOString().slice(0, 10));
+                      }}
+                      disabled={busy}
+                    >
+                      3 days
+                    </button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 7);
+                        setSendDueDate(d.toISOString().slice(0, 10));
+                      }}
+                      disabled={busy}
+                    >
+                      7 days
+                    </button>
+                    {sendDueDate ? (
+                      <button type="button" className="link" onClick={() => setSendDueDate("")} disabled={busy}>
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="muted" style={{ margin: 0 }}>
+                  Only in-progress requests can become overdue.
+                </p>
+              </div>
               <p className="muted" style={{ margin: "10px 0 0" }}>
                 {sendKind === "fillSign"
                   ? "Creates a signing request for each selected recipient. Each person signs their own copy."
@@ -880,7 +1135,6 @@ export default function Requests({
                     >
                       <div className="select-row-main">
                         <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                        <span className="muted truncate">ID: {t.id}</span>
                       </div>
                       <span className="select-row-right" aria-hidden="true">{selected ? "✓" : "›"}</span>
                     </button>
@@ -1035,6 +1289,80 @@ export default function Requests({
                     ) : null}
                   </div>
                 )}
+
+                {(sendKind === "sharedSign" || sendKind === "approval") && allRecipientEmails.length > 1 ? (
+                  <div className="order-block">
+                    <label className="inline-check" style={{ marginTop: 2 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(orderEnabled)}
+                        onChange={(e) => {
+                          const checked = Boolean(e.target.checked);
+                          setOrderEnabled(checked);
+                          if (checked && (Number(orderMaxStep) || 0) < 2) setOrderMaxStep(2);
+                        }}
+                        disabled={busy}
+                      />
+                      <span>{sendKind === "sharedSign" ? "Signing order (steps)" : "Approval order (steps)"}</span>
+                    </label>
+                    <p className="muted" style={{ margin: "0 0 10px" }}>
+                      {sendKind === "sharedSign"
+                        ? "Step 1 signs first. When everyone in a step completes, the next step gets the document."
+                        : "Step 1 approves first. When everyone in a step completes, the next step starts."}
+                    </p>
+
+                    {orderEnabled ? (
+                      <>
+                        <div className="order-list">
+                          {allRecipientEmails.map((raw) => {
+                            const email = String(raw || "").trim();
+                            const key = email.toLowerCase();
+                            const value = Number(orderMap?.[key] || 1);
+                            return (
+                              <div key={key} className="order-row">
+                                <span className="truncate" title={email}>{email}</span>
+                                <select
+                                  value={Number.isFinite(value) ? value : 1}
+                                  onChange={(e) => {
+                                    const next = Number(e.target.value) || 1;
+                                    setOrderMap((prev) => ({ ...(prev || {}), [key]: next }));
+                                  }}
+                                  disabled={busy}
+                                >
+                                  {Array.from({ length: Math.max(2, Number(orderMaxStep) || 2) }, (_, i) => i + 1).map((n) => (
+                                    <option key={n} value={n}>
+                                      Step {n}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="row-actions" style={{ justifyContent: "space-between", marginTop: 10 }}>
+                          <button
+                            type="button"
+                            onClick={() => setOrderMaxStep((v) => Math.min(6, Math.max(2, Number(v) || 2) + 1))}
+                            disabled={busy || Number(orderMaxStep) >= 6}
+                          >
+                            Add step
+                          </button>
+                          <button
+                            type="button"
+                            className="link"
+                            onClick={() => {
+                              setOrderMaxStep(2);
+                              setOrderMap({});
+                            }}
+                            disabled={busy}
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -1132,7 +1460,7 @@ export default function Requests({
         title={(() => {
           const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
           const title = flow?.fileTitle || flow?.templateTitle || "";
-          return title ? `Request actions — ${title}` : "Request actions";
+          return title ? `Request actions: ${title}` : "Request actions";
         })()}
         onClose={() => {
           setActionsOpen(false);
@@ -1157,6 +1485,27 @@ export default function Requests({
             }
           >
             Open
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAuditOpen(true);
+              setActionsOpen(false);
+            }}
+            disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
+          >
+            Activity
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDetailsGroup(actionsGroup);
+              setDetailsOpen(true);
+              setActionsOpen(false);
+            }}
+            disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
+          >
+            Details
           </button>
           {(() => {
             const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
@@ -1204,6 +1553,18 @@ export default function Requests({
           })()}
         </div>
       </Modal>
+
+      <AuditModal
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        token={token}
+        flowId={(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
+        title={(() => {
+          const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
+          const t = flow?.fileTitle || flow?.templateTitle || "";
+          return t ? `Activity: ${t}` : "Activity";
+        })()}
+      />
 
       <Modal
         open={completeOpen}
@@ -1272,6 +1633,63 @@ export default function Requests({
           </p>
         </div>
       </Modal>
+
+      <RequestDetailsModal
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          setDetailsGroup(null);
+        }}
+        busy={busy || actionBusy}
+        group={detailsGroup}
+        roomTitleById={roomTitleById}
+        onOpen={(flow) => openFlow(flow)}
+        onCopyLink={(url) => onCopyLink(url)}
+        onNotify={(() => {
+          const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          return flow && canManageFlow(flow) ? (group) => notifyGroup(group, { reminder: false }) : null;
+        })()}
+        onRemind={(() => {
+          const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          return flow && canManageFlow(flow) ? (group) => notifyGroup(group, { reminder: true }) : null;
+        })()}
+        onActivity={() => {
+          const gid = detailsGroup;
+          const flow = gid?.primaryFlow || gid?.flows?.[0] || null;
+          if (!flow?.id) return;
+          setActionsGroup(gid);
+          setDetailsOpen(false);
+          setAuditOpen(true);
+        }}
+        onCancel={(group) => {
+          setActionsGroup(group);
+          setDetailsOpen(false);
+          setCancelOpen(true);
+        }}
+        onComplete={(flow) => {
+          const gid = detailsGroup;
+          if (!flow?.id || !gid) return;
+          setActionsGroup(gid);
+          setDetailsOpen(false);
+          setCompleteOpen(true);
+        }}
+        canCancel={(() => {
+          const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          const status = String(detailsGroup?.status || flow?.status || "");
+          return Boolean(canManageFlow(flow) && status !== "Completed" && status !== "Canceled");
+        })()}
+        canComplete={(() => {
+          const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
+          const kind = String(flow?.kind || "").toLowerCase();
+          const status = String(detailsGroup?.status || flow?.status || "");
+          return (
+            kind === "sharedsign" &&
+            status !== "Completed" &&
+            status !== "Canceled" &&
+            Boolean((flow && isAssignedToMe(flow)) || canManageFlow(flow))
+          );
+        })()}
+      />
 
       <DocSpaceModal open={modalOpen} title={modalTitle} url={modalUrl} onClose={() => setModalOpen(false)} />
     </div>

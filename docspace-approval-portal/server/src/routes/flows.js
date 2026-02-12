@@ -19,7 +19,7 @@ import {
   createFileFromTemplateToFolder
 } from "../docspaceClient.js";
 import { getConfig, updateConfig } from "../config.js";
-import { cancelFlow, createFlow, getFlow, listFlowsForRoom, listFlowsForUser, updateFlow, updateProject } from "../store.js";
+import { cancelFlow, completeFlow, createFlow, getFlow, listFlowsForGroup, listFlowsForRoom, listFlowsForUser, updateFlow, updateProject } from "../store.js";
 import { getProject } from "../store.js";
 
 const router = Router();
@@ -68,6 +68,45 @@ function includesNeedle(hay, needle) {
 
 function normalizeName(value) {
   return normalize(value).replace(/\s+/g, " ");
+}
+
+function normalizeEmailList(value) {
+  const raw = Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const v of raw) {
+    const parts = String(v || "")
+      .split(/[\n,;]+/g)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    for (const p of parts) out.push(p);
+  }
+  return Array.from(new Set(out));
+}
+
+function normalizeRecipientLevels(levels, fallbackEmails) {
+  const result = [];
+  if (Array.isArray(levels)) {
+    for (const level of levels) {
+      const emails = normalizeEmailList(Array.isArray(level) ? level : []);
+      if (emails.length) result.push(emails);
+    }
+  }
+  if (!result.length) {
+    const emails = normalizeEmailList(fallbackEmails);
+    if (emails.length) result.push(emails);
+  }
+  return result;
+}
+
+function normalizeDueDate(value) {
+  const v = normalize(value);
+  if (!v) return null;
+  // Expect YYYY-MM-DD from <input type="date">.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  // Accept ISO-like string and keep date part.
+  const m = v.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  return null;
 }
 
 function candidateUserIdFromInfo(info) {
@@ -214,6 +253,7 @@ async function resolveFlows(rawFlows, auth) {
     (rawFlows || []).map(async (flow) => {
       const status = String(flow?.status || "");
       if (status === "Canceled") return flow;
+      if (status === "Queued") return flow;
 
       if (normalizeKind(flow?.kind) === "sharedSign") {
         // For shared-signing, completion is tracked per recipient in the portal (manual "Complete").
@@ -275,13 +315,25 @@ async function resolveFlows(rawFlows, auth) {
         fileInfoCache
       });
       if (completedMatch?.id) {
-        return {
-          ...flow,
-          status: "Completed",
-          resultFileId: completedMatch.id,
-          resultFileTitle: completedMatch.title || null,
-          resultFileUrl: completedMatch.webUrl || null
-        };
+        const shouldPersist =
+          !isAlreadyCompleted ||
+          normalize(flow?.resultFileId) !== normalize(completedMatch.id) ||
+          normalize(flow?.resultFileUrl) !== normalize(completedMatch.webUrl);
+        if (shouldPersist) {
+          const updated = completeFlow(flow?.id, {
+            method: "auto",
+            resultFileId: completedMatch.id,
+            resultFileTitle: completedMatch.title || null,
+            resultFileUrl: completedMatch.webUrl || null
+          });
+          if (updated?.id) {
+            if (normalizeKind(updated?.kind) === "approval") {
+              await advanceApprovalGroupIfReady({ groupId: updated?.groupId, auth }).catch(() => null);
+            }
+            return updated;
+          }
+        }
+        return { ...flow, status: "Completed", resultFileId: completedMatch.id, resultFileTitle: completedMatch.title || null, resultFileUrl: completedMatch.webUrl || null };
       }
 
       const inProcessMatch = await findLatestInstanceMatch({
@@ -296,13 +348,25 @@ async function resolveFlows(rawFlows, auth) {
         fileInfoCache
       });
       if (inProcessMatch?.info && isFlowCompleted(inProcessMatch.info)) {
-        return {
-          ...flow,
-          status: "Completed",
-          resultFileId: inProcessMatch.id,
-          resultFileTitle: inProcessMatch.title || null,
-          resultFileUrl: inProcessMatch.webUrl || null
-        };
+        const shouldPersist =
+          !isAlreadyCompleted ||
+          normalize(flow?.resultFileId) !== normalize(inProcessMatch.id) ||
+          normalize(flow?.resultFileUrl) !== normalize(inProcessMatch.webUrl);
+        if (shouldPersist) {
+          const updated = completeFlow(flow?.id, {
+            method: "auto",
+            resultFileId: inProcessMatch.id,
+            resultFileTitle: inProcessMatch.title || null,
+            resultFileUrl: inProcessMatch.webUrl || null
+          });
+          if (updated?.id) {
+            if (normalizeKind(updated?.kind) === "approval") {
+              await advanceApprovalGroupIfReady({ groupId: updated?.groupId, auth }).catch(() => null);
+            }
+            return updated;
+          }
+        }
+        return { ...flow, status: "Completed", resultFileId: inProcessMatch.id, resultFileTitle: inProcessMatch.title || null, resultFileUrl: inProcessMatch.webUrl || null };
       }
 
       if (isAlreadyCompleted) return flow;
@@ -312,6 +376,122 @@ async function resolveFlows(rawFlows, auth) {
   );
 
   return flows;
+}
+
+export async function resolveFlowsStatus(rawFlows, auth) {
+  return resolveFlows(rawFlows, auth);
+}
+
+async function shareSigningRoomForRecipients({ roomId, recipientEmails, auth }) {
+  const rid = normalize(roomId);
+  const emails = normalizeEmailList(recipientEmails);
+  if (!rid || !emails.length) return;
+  const invitations = emails.map((email) => ({ email, access: "ReadWrite" }));
+  let shareResult = await shareRoom({ roomId: rid, invitations, notify: false }, auth).catch((e) => e);
+  if (shareResult instanceof Error) {
+    await shareRoom({ roomId: rid, invitations, notify: false }).catch(() => null);
+  }
+}
+
+async function advanceApprovalGroupIfReady({ groupId }) {
+  const gid = normalize(groupId);
+  if (!gid) return null;
+  const flows = listFlowsForGroup(gid);
+  if (!flows.length) return null;
+
+  // Only applies to staged approval groups (Queued stage(s)).
+  if (!flows.some((f) => String(f?.status || "") === "Queued")) return null;
+  if (flows.some((f) => normalizeKind(f?.kind) !== "approval")) return null;
+  if (flows.some((f) => String(f?.status || "") === "Canceled")) return null;
+
+  const stageOf = (f) => (Number.isFinite(Number(f?.stageIndex)) ? Number(f.stageIndex) : 0);
+  const queuedStages = Array.from(
+    new Set(
+      flows
+        .filter((f) => String(f?.status || "") === "Queued")
+        .map((f) => stageOf(f))
+        .filter((n) => Number.isFinite(n))
+    )
+  ).sort((a, b) => a - b);
+
+  const nextStage = queuedStages.length ? queuedStages[0] : null;
+  if (nextStage === null) return null;
+  if (nextStage <= 0) return null;
+
+  const prevStage = nextStage - 1;
+  const prevFlows = flows.filter((f) => stageOf(f) === prevStage);
+  if (!prevFlows.length) return null;
+  if (!prevFlows.every((f) => String(f?.status || "") === "Completed")) return null;
+
+  const nextFlows = flows.filter((f) => stageOf(f) === nextStage);
+  if (!nextFlows.length) return null;
+
+  for (const f of nextFlows) {
+    if (!f?.id) continue;
+    if (String(f.status || "") !== "Queued") continue;
+    const now = new Date().toISOString();
+    const events = Array.isArray(f.events) ? f.events : [];
+    updateFlow(f.id, {
+      status: "InProgress",
+      events: [...events, { ts: now, type: "stage_started", stageIndex: nextStage, method: "auto" }]
+    });
+  }
+
+  return { stageStarted: nextStage };
+}
+
+async function advanceSharedSignGroupIfReady({ groupId, auth }) {
+  const gid = normalize(groupId);
+  if (!gid) return null;
+  const flows = listFlowsForGroup(gid);
+  if (!flows.length) return null;
+  if (flows.some((f) => String(f?.status || "") === "Canceled")) return null;
+
+  const stageOf = (f) => (Number.isFinite(Number(f?.stageIndex)) ? Number(f.stageIndex) : 0);
+  const queuedStages = Array.from(
+    new Set(
+      flows
+        .filter((f) => String(f?.status || "") === "Queued")
+        .map((f) => stageOf(f))
+        .filter((n) => Number.isFinite(n))
+    )
+  ).sort((a, b) => a - b);
+
+  const nextStage = queuedStages.length ? queuedStages[0] : null;
+  if (nextStage === null) return null;
+  if (nextStage <= 0) return null;
+
+  const prevStage = nextStage - 1;
+  const prevFlows = flows.filter((f) => stageOf(f) === prevStage);
+  if (!prevFlows.length) return null;
+  if (!prevFlows.every((f) => String(f?.status || "") === "Completed")) return null;
+
+  const nextFlows = flows.filter((f) => stageOf(f) === nextStage);
+  if (!nextFlows.length) return null;
+
+  const recipients = [];
+  for (const f of nextFlows) {
+    const email = Array.isArray(f?.recipientEmails) && f.recipientEmails.length === 1 ? normalize(f.recipientEmails[0]).toLowerCase() : "";
+    if (email) recipients.push(email);
+  }
+
+  for (const f of nextFlows) {
+    if (!f?.id) continue;
+    if (String(f.status || "") !== "Queued") continue;
+    const now = new Date().toISOString();
+    const events = Array.isArray(f.events) ? f.events : [];
+    updateFlow(f.id, {
+      status: "InProgress",
+      events: [...events, { ts: now, type: "stage_started", stageIndex: nextStage, method: "auto" }]
+    });
+  }
+
+  const roomId = normalize(nextFlows[0]?.documentRoomId);
+  if (roomId) {
+    await shareSigningRoomForRecipients({ roomId, recipientEmails: recipients, auth }).catch(() => null);
+  }
+
+  return { stageStarted: nextStage, recipients };
 }
 
 router.get("/", async (req, res) => {
@@ -325,7 +505,9 @@ router.get("/", async (req, res) => {
     const rawFlows = listFlowsForUser({ userId, userEmail });
     const flows = await resolveFlows(rawFlows, auth);
 
-    res.json({ flows });
+    // Hide queued requests from recipients until their stage starts.
+    const filtered = (flows || []).filter((f) => String(f?.status || "") !== "Queued" || String(f?.createdByUserId || "") === userId);
+    res.json({ flows: filtered });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message,
@@ -361,7 +543,8 @@ router.get("/project/:projectId", async (req, res) => {
       : listFlowsForUser({ userId, userEmail }).filter((f) => normalize(f?.projectRoomId) === roomId);
 
     const flows = await resolveFlows(rawFlows, auth);
-    res.json({ flows, canManage });
+    const filtered = canManage ? flows : (flows || []).filter((f) => String(f?.status || "") !== "Queued" || String(f?.createdByUserId || "") === userId);
+    res.json({ flows: filtered, canManage });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message,
@@ -459,15 +642,67 @@ router.post("/:flowId/complete", async (req, res) => {
       me?.email ||
       "User";
 
-    const updated = updateFlow(flowId, {
-      status: "Completed",
-      completedAt: new Date().toISOString(),
+    const updated = completeFlow(flowId, {
       completedByUserId: meId || null,
-      completedByName: displayName || null
+      completedByName: displayName || null,
+      method: "manual"
     });
 
     if (!updated) return res.status(500).json({ error: "Failed to complete request" });
+    await advanceSharedSignGroupIfReady({ groupId: updated?.groupId || flow?.groupId, auth }).catch(() => null);
     return res.json({ ok: true, flow: updated });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/:flowId/audit", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+    const meEmail = String(me?.email || "").trim().toLowerCase();
+
+    const recipients = Array.isArray(flow?.recipientEmails) ? flow.recipientEmails : [];
+    const isRecipient = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
+    const isCreator = String(flow?.createdByUserId || "").trim() === meId;
+
+    let canManage = false;
+    const roomId = normalize(flow?.projectRoomId);
+    if (roomId) {
+      const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+      canManage = canManageRoomFromSecurityInfo(security, meId);
+    }
+
+    if (!isRecipient && !isCreator && !canManage) {
+      return res.status(403).json({ error: "No access to this request activity" });
+    }
+
+    const events = Array.isArray(flow?.events) ? flow.events : [];
+    res.json({
+      flow: {
+        id: flow.id,
+        groupId: flow.groupId || flow.id,
+        kind: flow.kind || "approval",
+        status: flow.status || "InProgress",
+        templateTitle: flow.templateTitle || null,
+        fileTitle: flow.fileTitle || null,
+        projectRoomId: flow.projectRoomId || null,
+        createdAt: flow.createdAt || null,
+        updatedAt: flow.updatedAt || null
+      },
+      events
+    });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message,
@@ -503,6 +738,7 @@ router.post("/from-template", async (req, res) => {
       : [];
 
     const kind = normalizeKind(req.body?.kind);
+    const dueDate = normalizeDueDate(req.body?.dueDate);
 
     const [user, templateInfo, formsRoom, roomAccess] = await Promise.all([
       getSelfProfileWithToken(auth),
@@ -629,55 +865,57 @@ router.post("/from-template", async (req, res) => {
       if (!hasPublicLink) {
         warning =
           "Public signing link is unavailable for this document. The portal will use an authenticated DocSpace link instead (recipients must have DocSpace access).";
-
-        // Best-effort: grant recipients access to the signing room so they can open it in DocSpace.
-        const invitations = recipientEmails.map((email) => ({ email, access: "ReadWrite" }));
-        if (invitations.length) {
-          let shareResult = await shareRoom({ roomId: signingRoomId, invitations, notify: false }, auth).catch((e) => e);
-          if (shareResult instanceof Error) {
-            await shareRoom({ roomId: signingRoomId, invitations, notify: false }).catch(() => null);
-          }
-        }
       }
+
+      const recipientLevels = normalizeRecipientLevels(req.body?.recipientLevels, recipientEmails);
+      const stage0 = recipientLevels[0] || [];
+
+      // Share signing room only with the first stage. Next stages get access after previous stage completes.
+      await shareSigningRoomForRecipients({ roomId: signingRoomId, recipientEmails: stage0, auth }).catch(() => null);
 
       // Create one assignment per recipient, but all point to the same shared file.
       const groupId = randomUUID();
       const created = [];
-      for (const emailRaw of recipientEmails) {
-        const email = normalize(emailRaw).toLowerCase();
-        if (!email) continue;
+      for (let stageIndex = 0; stageIndex < recipientLevels.length; stageIndex += 1) {
+        const level = recipientLevels[stageIndex] || [];
+        for (const emailRaw of level) {
+          const email = normalize(emailRaw).toLowerCase();
+          if (!email) continue;
 
-        const userByEmail = await getUserByEmail(email, auth).catch(() => null);
-        const recipientUserId = normalize(userByEmail?.id);
-        const recipientName =
-          userByEmail?.displayName ||
-          [userByEmail?.firstName, userByEmail?.lastName].filter(Boolean).join(" ") ||
-          userByEmail?.userName ||
-          userByEmail?.email ||
-          email;
+          const userByEmail = await getUserByEmail(email, auth).catch(() => null);
+          const recipientUserId = normalize(userByEmail?.id);
+          const recipientName =
+            userByEmail?.displayName ||
+            [userByEmail?.firstName, userByEmail?.lastName].filter(Boolean).join(" ") ||
+            userByEmail?.userName ||
+            userByEmail?.email ||
+            email;
 
-        const flow = createFlow({
-          id: randomUUID(),
-          groupId,
-          kind: "sharedSign",
-          templateFileId,
-          templateTitle: templateInfo.title || null,
-          fileId: createdFileId,
-          fileTitle: createdFile?.title || templateInfo.title || null,
-          projectRoomId: targetRoomId || null,
-          documentRoomId: signingRoomId,
-          documentRoomTitle: signingRoomInfo?.title || null,
-          documentRoomUrl: signingRoomInfo?.webUrl || signingRoomInfo?.shortWebUrl || null,
-          createdByUserId: user?.id,
-          recipientEmails: [email],
-          recipientUserId: recipientUserId || null,
-          recipientName: recipientName || null,
-          createdByName: displayName || null,
-          openUrl,
-          linkRequestToken: signLink.requestToken || null,
-          status: "InProgress"
-        });
-        if (flow) created.push(flow);
+          const flow = createFlow({
+            id: randomUUID(),
+            groupId,
+            kind: "sharedSign",
+            dueDate,
+            templateFileId,
+            templateTitle: templateInfo.title || null,
+            fileId: createdFileId,
+            fileTitle: createdFile?.title || templateInfo.title || null,
+            projectRoomId: targetRoomId || null,
+            documentRoomId: signingRoomId,
+            documentRoomTitle: signingRoomInfo?.title || null,
+            documentRoomUrl: signingRoomInfo?.webUrl || signingRoomInfo?.shortWebUrl || null,
+            createdByUserId: user?.id,
+            recipientEmails: [email],
+            recipientUserId: recipientUserId || null,
+            recipientName: recipientName || null,
+            createdByName: displayName || null,
+            openUrl,
+            linkRequestToken: signLink.requestToken || null,
+            stageIndex,
+            status: stageIndex === 0 ? "InProgress" : "Queued"
+          });
+          if (flow) created.push(flow);
+        }
       }
 
       return res.json({
@@ -704,40 +942,52 @@ router.post("/from-template", async (req, res) => {
     if (kind !== "fillSign") {
       // If recipients are provided, create one flow per recipient (DocSpace creates one instance per opener anyway).
       if (recipientEmails.length) {
+        const stagedApprovalLevels =
+          kind === "approval" ? normalizeRecipientLevels(req.body?.recipientLevels, recipientEmails) : null;
+        const stagedApproval =
+          kind === "approval" && Array.isArray(stagedApprovalLevels) && stagedApprovalLevels.length > 1;
+
         const groupId = randomUUID();
         const created = [];
-        for (const emailRaw of recipientEmails) {
-          const email = normalize(emailRaw).toLowerCase();
-          if (!email) continue;
 
-          const userByEmail = await getUserByEmail(email, auth).catch(() => null);
-          const recipientUserId = normalize(userByEmail?.id);
-          const recipientName =
-            userByEmail?.displayName ||
-            [userByEmail?.firstName, userByEmail?.lastName].filter(Boolean).join(" ") ||
-            userByEmail?.userName ||
-            userByEmail?.email ||
-            email;
+        const levels = stagedApproval ? stagedApprovalLevels : [normalizeEmailList(recipientEmails)];
+        for (let stageIndex = 0; stageIndex < levels.length; stageIndex += 1) {
+          const level = Array.isArray(levels[stageIndex]) ? levels[stageIndex] : [];
+          for (const emailRaw of level) {
+            const email = normalize(emailRaw).toLowerCase();
+            if (!email) continue;
 
-          const flow = createFlow({
-            id: randomUUID(),
-            groupId,
-            kind,
-            templateFileId,
-            templateTitle: templateInfo.title || null,
-            fileId: String(templateInfo.id),
-            fileTitle: templateInfo.title || null,
-            projectRoomId: targetRoomId || null,
-            createdByUserId: user?.id,
-            recipientEmails: [email],
-            recipientUserId: recipientUserId || null,
-            recipientName: recipientName || null,
-            createdByName: displayName || null,
-            openUrl: fillLink.shareLink,
-            linkRequestToken: fillLink?.requestToken || null,
-            status: "InProgress"
-          });
-          if (flow) created.push(flow);
+            const userByEmail = await getUserByEmail(email, auth).catch(() => null);
+            const recipientUserId = normalize(userByEmail?.id);
+            const recipientName =
+              userByEmail?.displayName ||
+              [userByEmail?.firstName, userByEmail?.lastName].filter(Boolean).join(" ") ||
+              userByEmail?.userName ||
+              userByEmail?.email ||
+              email;
+
+            const flow = createFlow({
+              id: randomUUID(),
+              groupId,
+              kind,
+              stageIndex: stagedApproval ? stageIndex : null,
+              dueDate,
+              templateFileId,
+              templateTitle: templateInfo.title || null,
+              fileId: String(templateInfo.id),
+              fileTitle: templateInfo.title || null,
+              projectRoomId: targetRoomId || null,
+              createdByUserId: user?.id,
+              recipientEmails: [email],
+              recipientUserId: recipientUserId || null,
+              recipientName: recipientName || null,
+              createdByName: displayName || null,
+              openUrl: fillLink.shareLink,
+              linkRequestToken: fillLink?.requestToken || null,
+              status: stagedApproval && stageIndex > 0 ? "Queued" : "InProgress"
+            });
+            if (flow) created.push(flow);
+          }
         }
 
         return res.json({ groupId, flow: created[0] || null, flows: created });
@@ -746,6 +996,7 @@ router.post("/from-template", async (req, res) => {
       const flow = createFlow({
         id: randomUUID(),
         kind,
+        dueDate,
         templateFileId,
         templateTitle: templateInfo.title || null,
         fileId: String(templateInfo.id),
@@ -802,6 +1053,7 @@ router.post("/from-template", async (req, res) => {
         id: randomUUID(),
         groupId,
         kind: "fillSign",
+        dueDate,
         templateFileId,
         templateTitle: templateInfo.title || null,
         fileId: String(templateInfo.id),

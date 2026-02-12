@@ -97,6 +97,12 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     return () => window.removeEventListener("portal:projectChanged", handler);
   }, [refresh]);
 
+  useEffect(() => {
+    const onCreate = () => setCreateOpen(true);
+    window.addEventListener("portal:projectsCreate", onCreate);
+    return () => window.removeEventListener("portal:projectsCreate", onCreate);
+  }, []);
+
   const onSetCurrent = async (project) => {
     if (!project?.id) return;
     setLoading(true);
@@ -289,7 +295,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                     <div className="project-tile-title-row">
                       <strong className="truncate">{p.title || "Untitled"}</strong>
                       {isCurrent ? <StatusPill tone="green">Current</StatusPill> : null}
-                      {!canManage ? <StatusPill tone="gray">View-only</StatusPill> : null}
+                      {canManage ? <StatusPill tone="blue">Admin</StatusPill> : <StatusPill tone="gray">View-only</StatusPill>}
                     </div>
                     <div className="project-tile-meta">
                       <StatusPill tone={inProgress ? "yellow" : "gray"}>{inProgress} in progress</StatusPill>
@@ -500,12 +506,21 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           <label>
             <span>Role</span>
             <select value={invite.access} onChange={(e) => setInvite((s) => ({ ...s, access: e.target.value }))}>
-              <option value="FillForms">Fill forms</option>
-              <option value="Read">Read</option>
-              <option value="ReadWrite">Read & write</option>
-              <option value="RoomManager">Room manager</option>
+              <option value="FillForms">Form respondent</option>
+              <option value="Read">Project viewer</option>
+              <option value="ReadWrite">Project editor</option>
+              <option value="RoomManager">Project admin</option>
             </select>
           </label>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {invite.access === "RoomManager"
+              ? "Admins can invite people and cancel requests."
+              : invite.access === "ReadWrite"
+                ? "Editors can work with files in DocSpace (if allowed by the room)."
+                : invite.access === "Read"
+                  ? "Viewers can open project files and track requests."
+                  : "Respondents can fill forms and complete requests assigned to them."}
+          </p>
           <label>
             <span>
               <input

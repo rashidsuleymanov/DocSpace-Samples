@@ -186,11 +186,22 @@ export async function completeFlow({ token, flowId }) {
   return data;
 }
 
-export async function createFlowFromTemplate({ token, templateFileId, projectId, recipientEmails, kind } = {}) {
+export async function getFlowAudit({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/audit`, { headers: { Authorization: token } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Audit load failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function createFlowFromTemplate({ token, templateFileId, projectId, recipientEmails, recipientLevels, dueDate, kind } = {}) {
   const response = await fetch("/api/flows/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: token },
-    body: JSON.stringify({ templateFileId, projectId, recipientEmails, kind })
+    body: JSON.stringify({ templateFileId, projectId, recipientEmails, recipientLevels, dueDate, kind })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -275,6 +286,26 @@ export async function createSettingsRoom({ title, roomType = 1, select = true } 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Room creation failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function listRequiredRooms() {
+  const response = await fetch("/api/settings/required-rooms");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Required rooms load failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function createRequiredRoom(key) {
+  const k = String(key || "").trim();
+  if (!k) throw new Error("key is required");
+  const response = await fetch(`/api/settings/required-rooms/${encodeURIComponent(k)}/create`, { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Create room failed (${response.status})`));
   }
   return data;
 }

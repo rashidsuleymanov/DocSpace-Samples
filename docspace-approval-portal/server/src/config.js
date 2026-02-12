@@ -21,6 +21,11 @@ function envDefaults() {
     process.env.DOCSPACE_AUTH_TOKEN ||
     process.env.DOCSPACE_API_KEY ||
     "";
+  const webhookSecret =
+    process.env.DOCSPACE_WEBHOOK_SECRET ||
+    process.env.DOCSPACE_WEBHOOK_SECRET_KEY ||
+    process.env.DOCSPACE_WEBHOOK_KEY ||
+    "";
   const formsRoomId = process.env.DOCSPACE_FORMS_ROOM_ID || "";
   const libraryRoomId = process.env.DOCSPACE_LIBRARY_ROOM_ID || "";
   const projectTemplatesRoomId = process.env.DOCSPACE_PROJECT_TEMPLATES_ROOM_ID || "";
@@ -33,9 +38,15 @@ function envDefaults() {
     process.env.DOCSPACE_PROJECT_TEMPLATES_ROOM_TITLE_FALLBACKS || "Project Templates,Templates"
   );
   const formsTemplatesFolderTitle = process.env.DOCSPACE_FORMS_TEMPLATES_FOLDER_TITLE || "Templates";
+
+  const portalName = process.env.PORTAL_NAME || "DocSpace Approval Portal";
+  const portalTagline = process.env.PORTAL_TAGLINE || "Approval portal";
+  const portalLogoUrl = process.env.PORTAL_LOGO_URL || "";
+  const portalAccent = process.env.PORTAL_ACCENT || "";
   return {
     baseUrl,
     rawAuthToken,
+    webhookSecret,
     formsRoomId,
     libraryRoomId,
     projectTemplatesRoomId,
@@ -44,6 +55,11 @@ function envDefaults() {
     formsRoomTitleFallbacks,
     projectTemplatesRoomTitleFallbacks,
     formsTemplatesFolderTitle
+    ,
+    portalName,
+    portalTagline,
+    portalLogoUrl,
+    portalAccent
   };
 }
 
@@ -59,6 +75,7 @@ async function loadConfigFile() {
       ...runtimeConfig,
       baseUrl: typeof data.baseUrl === "string" ? data.baseUrl : runtimeConfig.baseUrl,
       rawAuthToken: typeof data.rawAuthToken === "string" ? data.rawAuthToken : runtimeConfig.rawAuthToken,
+      webhookSecret: typeof data.webhookSecret === "string" ? data.webhookSecret : runtimeConfig.webhookSecret,
       formsRoomId: typeof data.formsRoomId === "string" || typeof data.formsRoomId === "number" ? String(data.formsRoomId) : runtimeConfig.formsRoomId,
       libraryRoomId:
         typeof data.libraryRoomId === "string" || typeof data.libraryRoomId === "number"
@@ -80,6 +97,11 @@ async function loadConfigFile() {
         typeof data.formsTemplatesFolderTitle === "string"
           ? data.formsTemplatesFolderTitle
           : runtimeConfig.formsTemplatesFolderTitle
+      ,
+      portalName: typeof data.portalName === "string" ? data.portalName : runtimeConfig.portalName,
+      portalTagline: typeof data.portalTagline === "string" ? data.portalTagline : runtimeConfig.portalTagline,
+      portalLogoUrl: typeof data.portalLogoUrl === "string" ? data.portalLogoUrl : runtimeConfig.portalLogoUrl,
+      portalAccent: typeof data.portalAccent === "string" ? data.portalAccent : runtimeConfig.portalAccent
     };
   } catch (e) {
     if (e?.code === "ENOENT") return;
@@ -100,6 +122,11 @@ export async function updateConfig(patch = {}) {
     const token = patch.rawAuthToken.trim();
     if (token) next.rawAuthToken = token;
     if (!token && patch.clearAuthToken === true) next.rawAuthToken = "";
+  }
+  if (typeof patch.rawWebhookSecret === "string") {
+    const value = patch.rawWebhookSecret.trim();
+    if (value) next.webhookSecret = value;
+    if (!value && patch.clearWebhookSecret === true) next.webhookSecret = "";
   }
   if (patch.formsRoomId !== undefined) {
     const rid = String(patch.formsRoomId || "").trim();
@@ -126,6 +153,10 @@ export async function updateConfig(patch = {}) {
   if (typeof patch.formsTemplatesFolderTitle === "string") {
     next.formsTemplatesFolderTitle = patch.formsTemplatesFolderTitle.trim() || next.formsTemplatesFolderTitle;
   }
+  if (typeof patch.portalName === "string") next.portalName = patch.portalName.trim() || next.portalName;
+  if (typeof patch.portalTagline === "string") next.portalTagline = patch.portalTagline.trim() || next.portalTagline;
+  if (typeof patch.portalLogoUrl === "string") next.portalLogoUrl = patch.portalLogoUrl.trim();
+  if (typeof patch.portalAccent === "string") next.portalAccent = patch.portalAccent.trim();
 
   runtimeConfig = next;
   await persistConfig();
