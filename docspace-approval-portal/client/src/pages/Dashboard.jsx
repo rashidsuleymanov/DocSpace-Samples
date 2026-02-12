@@ -229,7 +229,7 @@ export default function Dashboard({
         <div className="topbar-actions">
           {flowsRefreshing ? (
             <span className="muted" style={{ fontSize: 12 }}>
-              Updating…
+              Updating...
             </span>
           ) : updatedLabel ? (
             <span className="muted" style={{ fontSize: 12 }}>

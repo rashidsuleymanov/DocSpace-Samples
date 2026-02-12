@@ -166,6 +166,32 @@ export async function createRoom({ title, roomType } = {}) {
   });
 }
 
+async function tryRoomAction(path, { auth } = {}) {
+  const methods = ["PUT", "POST"];
+  let lastError = null;
+  for (const method of methods) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await apiRequest(path, { method, auth });
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("Room action failed");
+}
+
+export async function archiveRoom(roomId, auth) {
+  const rid = String(roomId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  return tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, { auth });
+}
+
+export async function unarchiveRoom(roomId, auth) {
+  const rid = String(roomId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  return tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/unarchive`, { auth });
+}
+
 export async function findRoomByCandidates(candidates, auth) {
   const list = await listRooms(auth);
   const normalized = (candidates || [])

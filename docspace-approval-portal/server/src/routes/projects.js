@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import { createProject, deleteProject, getProject, listFlowsForUser, listProjects } from "../store.js";
-import { createRoom, getRoomInfo, getRoomSecurityInfo, getSelfProfileWithToken, listRooms, shareRoom } from "../docspaceClient.js";
+import { cancelFlow, createProject, deleteProject, getProject, listFlowsForRoom, listFlowsForUser, listProjects, updateProject } from "../store.js";
+import { archiveRoom, createRoom, getRoomInfo, getRoomSecurityInfo, getSelfProfileWithToken, listRooms, shareRoom, unarchiveRoom } from "../docspaceClient.js";
 import { getConfig, updateConfig } from "../config.js";
 
 const router = Router();
@@ -124,13 +124,14 @@ router.get("/active", (_req, res) => {
   res.status(501).json({ error: "Use /sidebar with Authorization token" });
 });
 
-router.get("/sidebar", (req, res) => {
+router.get("/list", (req, res) => {
   (async () => {
     try {
       const auth = requireUserToken(req);
       const user = await getSelfProfileWithToken(auth);
       const userId = String(user?.id || "").trim();
       if (!userId) return res.status(401).json({ error: "Invalid user token" });
+      const userEmail = String(user?.email || "").trim().toLowerCase();
 
       const rooms = await listRooms(auth).catch(() => []);
       const accessibleRoomIds = new Set((rooms || []).map((r) => String(r?.id || "").trim()).filter(Boolean));
@@ -153,7 +154,7 @@ router.get("/sidebar", (req, res) => {
       const configuredActiveRoomId = String(cfg.formsRoomId || "").trim();
       const activeRoomId = configuredActiveRoomId && accessibleRoomIds.has(configuredActiveRoomId) ? configuredActiveRoomId : "";
 
-      const flows = listFlowsForUser(userId);
+      const flows = listFlowsForUser({ userId, userEmail });
       const countsByRoomId = new Map();
       for (const flow of flows) {
         const roomId = String(flow?.projectRoomId || "").trim();
@@ -177,6 +178,75 @@ router.get("/sidebar", (req, res) => {
             title: p.title,
             roomId: p.roomId,
             roomUrl: p.roomUrl || null,
+            archivedAt: p.archivedAt || null,
+            archivedByName: p.archivedByName || null,
+            isCurrent: activeRoomId && String(p.roomId) === activeRoomId,
+            counts: counts || { total: 0, inProgress: 0, completed: 0, other: 0 }
+          };
+        });
+
+      res.json({ activeRoomId: activeRoomId || null, projects });
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+    }
+  })();
+});
+
+router.get("/sidebar", (req, res) => {
+  (async () => {
+    try {
+      const auth = requireUserToken(req);
+      const user = await getSelfProfileWithToken(auth);
+      const userId = String(user?.id || "").trim();
+      if (!userId) return res.status(401).json({ error: "Invalid user token" });
+      const userEmail = String(user?.email || "").trim().toLowerCase();
+
+      const rooms = await listRooms(auth).catch(() => []);
+      const accessibleRoomIds = new Set((rooms || []).map((r) => String(r?.id || "").trim()).filter(Boolean));
+      if (!accessibleRoomIds.size) {
+        const projects = listProjects();
+        const checks = await Promise.all(
+          projects.map(async (p) => {
+            const roomId = String(p?.roomId || "").trim();
+            if (!roomId) return null;
+            const room = await getRoomInfo(roomId, auth).catch(() => null);
+            return room?.id ? String(room.id) : null;
+          })
+        );
+        for (const rid of checks) {
+          if (rid) accessibleRoomIds.add(String(rid).trim());
+        }
+      }
+
+      const cfg = getConfig();
+      const configuredActiveRoomId = String(cfg.formsRoomId || "").trim();
+      const activeRoomId = configuredActiveRoomId && accessibleRoomIds.has(configuredActiveRoomId) ? configuredActiveRoomId : "";
+
+      const flows = listFlowsForUser({ userId, userEmail });
+      const countsByRoomId = new Map();
+      for (const flow of flows) {
+        const roomId = String(flow?.projectRoomId || "").trim();
+        if (!roomId) continue;
+        if (!accessibleRoomIds.has(roomId)) continue;
+        const entry = countsByRoomId.get(roomId) || { total: 0, inProgress: 0, completed: 0, other: 0 };
+        entry.total += 1;
+        if (flow.status === "InProgress") entry.inProgress += 1;
+        else if (flow.status === "Completed") entry.completed += 1;
+        else entry.other += 1;
+        countsByRoomId.set(roomId, entry);
+      }
+
+      const projects = listProjects()
+        .filter((p) => accessibleRoomIds.has(String(p?.roomId || "").trim()))
+        .map((p) => {
+          const roomId = String(p.roomId || "").trim();
+          const counts = roomId ? countsByRoomId.get(roomId) : null;
+          return {
+            id: p.id,
+            title: p.title,
+            roomId: p.roomId,
+            roomUrl: p.roomUrl || null,
+            archivedAt: p.archivedAt || null,
             isCurrent: activeRoomId && String(p.roomId) === activeRoomId,
             counts: counts || { total: 0, inProgress: 0, completed: 0, other: 0 }
           };
@@ -184,7 +254,7 @@ router.get("/sidebar", (req, res) => {
 
       res.json({
         activeRoomId: activeRoomId || null,
-        projects
+        projects: projects.filter((p) => !p.archivedAt)
       });
     } catch (error) {
       res.status(error.status || 500).json({ error: error.message, details: error.details || null });
@@ -320,6 +390,127 @@ router.delete("/:projectId", async (req, res) => {
     }
 
     res.json({ ok: Boolean(ok) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.post("/:projectId/archive", async (req, res) => {
+  try {
+    const project = getProject(req.params.projectId);
+    if (!project?.id || !project?.roomId) return res.status(404).json({ error: "Project not found" });
+
+    const auth = requireUserToken(req);
+    const user = await getSelfProfileWithToken(auth).catch(() => null);
+    const userId = String(user?.id || "").trim();
+    if (!userId) return res.status(401).json({ error: "Invalid user token" });
+
+    const security =
+      (await getRoomSecurityInfo(project.roomId, auth).catch(() => null)) ||
+      (await getRoomSecurityInfo(project.roomId).catch(() => null));
+    if (!canManageRoomFromSecurityInfo(security, userId)) {
+      return res.status(403).json({ error: "Only the room admin can archive projects" });
+    }
+
+    const cancelOpenRequests = Boolean(req.body?.cancelOpenRequests);
+    const roomId = String(project.roomId || "").trim();
+    const openFlows = listFlowsForRoom(roomId).filter((f) => {
+      const st = String(f?.status || "");
+      return st !== "Completed" && st !== "Canceled";
+    });
+    if (openFlows.length && !cancelOpenRequests) {
+      return res.status(409).json({
+        error: "Project has open requests",
+        openRequests: openFlows.length
+      });
+    }
+
+    const roomIds = [String(project.roomId).trim(), String(project.signingRoomId || "").trim()]
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+
+    const results = [];
+    for (const rid of roomIds) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await archiveRoom(rid, auth).catch(async (e) => {
+        if (e?.status === 403) return archiveRoom(rid).catch(() => null);
+        return null;
+      });
+      results.push({ roomId: rid, ok: Boolean(result) });
+    }
+
+    const displayName =
+      user?.displayName ||
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      user?.userName ||
+      user?.email ||
+      "User";
+
+    const now = new Date().toISOString();
+
+    if (openFlows.length && cancelOpenRequests) {
+      for (const f of openFlows) {
+        const id = String(f?.id || "").trim();
+        if (!id) continue;
+        cancelFlow(id, { canceledByUserId: userId, canceledByName: displayName });
+      }
+    }
+
+    updateProject(project.id, {
+      archivedAt: now,
+      archivedByUserId: userId,
+      archivedByName: displayName
+    });
+
+    const cfg = getConfig();
+    if (String(cfg.formsRoomId || "").trim() && String(cfg.formsRoomId) === String(project.roomId)) {
+      await updateConfig({ formsRoomId: "", formsRoomTitle: "" }).catch(() => null);
+    }
+
+    res.json({ ok: true, projectId: project.id, archivedAt: now, rooms: results, canceledRequests: cancelOpenRequests ? openFlows.length : 0 });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.post("/:projectId/unarchive", async (req, res) => {
+  try {
+    const project = getProject(req.params.projectId);
+    if (!project?.id || !project?.roomId) return res.status(404).json({ error: "Project not found" });
+
+    const auth = requireUserToken(req);
+    const user = await getSelfProfileWithToken(auth).catch(() => null);
+    const userId = String(user?.id || "").trim();
+    if (!userId) return res.status(401).json({ error: "Invalid user token" });
+
+    const security =
+      (await getRoomSecurityInfo(project.roomId, auth).catch(() => null)) ||
+      (await getRoomSecurityInfo(project.roomId).catch(() => null));
+    if (!canManageRoomFromSecurityInfo(security, userId)) {
+      return res.status(403).json({ error: "Only the room admin can restore projects" });
+    }
+
+    const roomIds = [String(project.roomId).trim(), String(project.signingRoomId || "").trim()]
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+
+    const results = [];
+    for (const rid of roomIds) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await unarchiveRoom(rid, auth).catch(async (e) => {
+        if (e?.status === 403) return unarchiveRoom(rid).catch(() => null);
+        return null;
+      });
+      results.push({ roomId: rid, ok: Boolean(result) });
+    }
+
+    updateProject(project.id, {
+      archivedAt: null,
+      archivedByUserId: null,
+      archivedByName: null
+    });
+
+    res.json({ ok: true, projectId: project.id, rooms: results });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message, details: error.details || null });
   }

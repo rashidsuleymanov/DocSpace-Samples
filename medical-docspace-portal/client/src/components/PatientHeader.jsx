@@ -3,7 +3,7 @@
   { id: "records", label: "Documents", icon: "documents" },
   { id: "fill-sign", label: "Fill & Sign", icon: "fill" },
   { id: "appointments", label: "Appointments", icon: "appointments" },
-  { id: "profile", label: "Profile", icon: "profile", disabled: true }
+  { id: "settings", label: "Profile", icon: "profile" }
 ];
 
 export default function PatientHeader({ user, active, onNavigate, onLogout, badgeCounts }) {

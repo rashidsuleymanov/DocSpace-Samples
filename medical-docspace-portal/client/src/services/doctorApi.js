@@ -61,6 +61,14 @@ export async function createMedicalRecord(roomId, payload) {
   return data.file || null;
 }
 
+export async function createRoomDocument(roomId, payload) {
+  const data = await request(`/api/doctor/rooms/${roomId}/documents`, {
+    method: "POST",
+    body: payload
+  });
+  return data.file || null;
+}
+
 export async function getDoctorFolderContents(roomId, title) {
   const query = `?title=${encodeURIComponent(title)}`;
   const data = await request(`/api/doctor/rooms/${roomId}/folder-contents${query}`);

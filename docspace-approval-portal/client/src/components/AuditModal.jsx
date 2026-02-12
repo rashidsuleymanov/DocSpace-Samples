@@ -92,7 +92,7 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
       {error ? <p className="error">{error}</p> : null}
       {loading ? (
         <div className="empty" style={{ marginTop: 0 }}>
-          <strong>Loading activity…</strong>
+          <strong>Loading activity...</strong>
           <p className="muted" style={{ margin: "6px 0 0" }}>
             Just a moment.
           </p>
@@ -147,4 +147,3 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
     </Modal>
   );
 }
-

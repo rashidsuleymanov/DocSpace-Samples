@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import AppLayout from "./components/AppLayout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import Documents from "./pages/Documents.jsx";
 import Requests from "./pages/Requests.jsx";
 import Projects from "./pages/Projects.jsx";
 import Project from "./pages/Project.jsx";
 import Login from "./pages/Login.jsx";
 import Drafts from "./pages/Drafts.jsx";
 import Library from "./pages/Library.jsx";
+import Contacts from "./pages/Contacts.jsx";
+import BulkSend from "./pages/BulkSend.jsx";
+import BulkLinks from "./pages/BulkLinks.jsx";
 import Settings from "./pages/Settings.jsx";
 import { clearSession, loadSession, saveSession } from "./services/session.js";
 import {
@@ -32,6 +36,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hasWebhookSecret, setHasWebhookSecret] = useState(false);
   const [branding, setBranding] = useState({
     portalName: "DocSpace Approval Portal",
     portalTagline: "Approval portal",
@@ -65,6 +70,7 @@ export default function App() {
     const run = async () => {
       const cfg = await getSettingsConfig().catch(() => null);
       if (!cfg || cancelled) return;
+      setHasWebhookSecret(Boolean(cfg.hasWebhookSecret));
       setBranding((prev) => ({
         ...prev,
         portalName: cfg.portalName || prev.portalName,
@@ -158,6 +164,23 @@ export default function App() {
       window.removeEventListener("portal:flowsChanged", flowsHandler);
     };
   }, [refreshActiveProject, refreshDraftsSummary, session]);
+
+  useEffect(() => {
+    if (!session?.token) return;
+    if (view === "login") return;
+    if (hasWebhookSecret) return;
+
+    const hasActive = Array.isArray(flows) && flows.some((f) => String(f?.status || "") === "InProgress");
+    if (!hasActive) return;
+
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refreshFlows(session).catch(() => null);
+      refreshActiveProject().catch(() => null);
+    }, 60000);
+
+    return () => clearInterval(id);
+  }, [flows, hasWebhookSecret, refreshActiveProject, refreshFlows, session, view]);
 
   const loadTemplatesForSession = async (activeSession) => {
     if (!activeSession?.token) return [];
@@ -308,7 +331,7 @@ export default function App() {
   useEffect(() => {
     if (!session?.token) return;
     if (!String(activeRoomId || "").trim()) return;
-    if (view !== "dashboard" && view !== "requests") return;
+    if (view !== "dashboard" && view !== "requests" && view !== "bulk" && view !== "bulkLinks") return;
     if (templates.length > 0) return;
     loadTemplatesForSession(session).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -391,6 +414,15 @@ export default function App() {
             onOpenProject={actions.openProject}
           />
         )}
+        {view === "documents" && (
+          <Documents
+            session={session}
+            busy={busy}
+            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+            onOpenRequests={() => actions.openRequests("all", "all")}
+            onOpenProjects={(opts) => actions.openProjects(opts)}
+          />
+        )}
         {view === "requests" && (
           <Requests
             session={session}
@@ -410,6 +442,34 @@ export default function App() {
             onStartFlow={actions.startFlow}
             onOpenDrafts={() => actions.navigate("drafts")}
             onOpenProjects={(opts) => actions.openProjects(opts)}
+          />
+        )}
+        {view === "bulk" && (
+          <BulkSend
+            session={session}
+            busy={busy}
+            activeRoomId={activeRoomId}
+            activeProject={activeProject}
+            templates={templates}
+            onStartFlow={actions.startFlow}
+            onOpenRequests={() => actions.openRequests("all", "all")}
+          />
+        )}
+        {view === "bulkLinks" && (
+          <BulkLinks
+            session={session}
+            busy={busy}
+            activeRoomId={activeRoomId}
+            activeProject={activeProject}
+            templates={templates}
+            onOpenRequests={() => actions.openRequests("all", "all")}
+          />
+        )}
+        {view === "contacts" && (
+          <Contacts
+            session={session}
+            busy={busy}
+            onOpenBulk={() => actions.navigate("bulk")}
           />
         )}
         {view === "projects" && (

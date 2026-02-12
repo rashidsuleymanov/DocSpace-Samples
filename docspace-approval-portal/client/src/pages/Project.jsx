@@ -1077,7 +1077,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             {addFormError ? <p className="error" style={{ margin: 0 }}>{addFormError}</p> : null}
 
             {addFormLoading ? (
-              <EmptyState title="Loading…" description="Just a moment." />
+              <EmptyState title="Loading..." description="Just a moment." />
             ) : addFormSource === "shared" && addFormShared.length === 0 ? (
               <EmptyState
                 title="No shared templates"
@@ -1100,7 +1100,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                       <div className="select-row-main">
                         <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                       </div>
-                      <span className="select-row-right" aria-hidden="true">{selected ? "✓" : "›"}</span>
+                      <span className="select-row-right" aria-hidden="true">{selected ? "Selected" : ">"}</span>
                     </button>
                   );
                 })}

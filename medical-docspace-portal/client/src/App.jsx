@@ -17,10 +17,11 @@ import {
 import { getDoctorSession } from "./services/doctorApi.js";
 
 export default function App() {
-  const settingsEnabled = false;
+  const settingsEnabled = true;
   const [view, setView] = useState("login");
   const [session, setSession] = useState(null);
   const [doctorSession, setDoctorSession] = useState(null);
+  const [recordsFolderTitle, setRecordsFolderTitle] = useState("");
   const [booting, setBooting] = useState(true);
   const [busy, setBusy] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -95,6 +96,10 @@ export default function App() {
       },
       onNavigate(next) {
         setView(next);
+      },
+      onOpenRecordsFolder(folderTitle) {
+        setRecordsFolderTitle(String(folderTitle || "").trim());
+        setView("records");
       }
     }),
     []
@@ -125,7 +130,12 @@ export default function App() {
         />
       )}
       {view === "dashboard" && session && (
-        <Dashboard session={session} onLogout={actions.onLogout} onNavigate={actions.onNavigate} />
+        <Dashboard
+          session={session}
+          onLogout={actions.onLogout}
+          onNavigate={actions.onNavigate}
+          onOpenFolder={actions.onOpenRecordsFolder}
+        />
       )}
       {view === "appointments" && session && (
         <Appointments
@@ -139,6 +149,8 @@ export default function App() {
           session={session}
           onLogout={actions.onLogout}
           onNavigate={actions.onNavigate}
+          initialFolderTitle={recordsFolderTitle}
+          onInitialFolderOpened={() => setRecordsFolderTitle("")}
         />
       )}
       {view === "fill-sign" && session && (

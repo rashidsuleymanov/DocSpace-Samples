@@ -9,6 +9,7 @@ import {
   getFileInfo,
   getFolderContents,
   getFolderByTitleWithin,
+  getFormsRoomFolders,
   requireFormsRoom,
   getRoomFolderByTitle,
   getRoomInfo,
@@ -51,6 +52,24 @@ function patientNameFromRoom(title) {
   const value = String(title || "");
   return isPatientRoom(value) ? value.slice(0, -patientRoomSuffix.length) : value;
 }
+
+function normalizeFolderTitle(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+const allowedFolderTitles = new Map(
+  [
+    "Personal Data",
+    "Contracts",
+    "Lab Results",
+    "Medical Records",
+    "Appointments",
+    "Sick Leave",
+    "Insurance",
+    "Prescriptions",
+    "Imaging"
+  ].map((title) => [normalizeFolderTitle(title), title])
+);
 
 router.get("/session", async (_req, res) => {
   try {
@@ -187,7 +206,10 @@ router.get("/appointments", (req, res) => {
 router.get("/templates/files", async (_req, res) => {
   try {
     const room = await requireFormsRoom();
-    const contents = await getFolderContents(room.id);
+    const folders = await getFormsRoomFolders(room.id).catch(() => null);
+    const templatesFolder = folders?.templates || null;
+    const listFromId = templatesFolder?.id ? templatesFolder.id : room.id;
+    const contents = await getFolderContents(listFromId);
     const files = (contents?.items || [])
       .filter((item) => item.type === "file")
       .map((item) => ({
@@ -196,7 +218,9 @@ router.get("/templates/files", async (_req, res) => {
       }));
     return res.json({
       room: { id: room.id, title: room.title },
-      templatesFolder: null,
+      templatesFolder: templatesFolder?.id
+        ? { id: templatesFolder.id, title: templatesFolder.title }
+        : null,
       files
     });
   } catch (error) {
@@ -220,6 +244,42 @@ router.get("/lab/files", async (_req, res) => {
     return res.json({
       room: { id: room.id, title: room.title },
       files
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/rooms/:roomId/documents", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const rawFolderTitle = String(req.body?.folderTitle || "").trim();
+    const title = String(req.body?.title || "").trim();
+    if (!rawFolderTitle) {
+      return res.status(400).json({ error: "folderTitle is required" });
+    }
+    const folderTitle = allowedFolderTitles.get(normalizeFolderTitle(rawFolderTitle)) || "";
+    if (!folderTitle) {
+      return res.status(400).json({ error: `Unsupported folderTitle: ${rawFolderTitle}` });
+    }
+    if (!title) {
+      return res.status(400).json({ error: "title is required" });
+    }
+
+    const safeTitle = title.toLowerCase().endsWith(".docx") ? title : `${title}.docx`;
+    const file = await createRoomDocument({ roomId, folderTitle, title: safeTitle });
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: file.webUrl || file.viewUrl || file.url || null,
+            shareToken: file.shareToken || null
+          }
+        : null
     });
   } catch (error) {
     return res.status(error.status || 500).json({

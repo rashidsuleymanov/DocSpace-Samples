@@ -2,6 +2,8 @@
 import {
   createPatientRoom,
   createPatientFolders,
+  createRoomDocument,
+  ensureRoomFolderByTitle,
   ensureRoomMembers,
   getRoomSummary,
   getFolderContents,
@@ -12,6 +14,7 @@ import {
   getRoomInfo,
   getDoctorProfile,
   createAppointmentTicket,
+  uploadFileToFolder,
   setFileExternalLink
 } from "../docspaceClient.js";
 import {
@@ -216,6 +219,376 @@ router.post("/appointments/ticket", async (req, res) => {
       ticket: normalized
     });
     return res.json({ file: normalized });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/contact-change-request", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const requestedRoomId = String(req.body?.roomId || "").trim();
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+
+    const roomId = String(patientRoomId || requestedRoomId || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const safeDate = new Date().toISOString().slice(0, 10);
+    const safeName = String(displayName || "Patient").replace(/[^\p{L}\p{N}\s._-]+/gu, "").trim();
+    const title = `Contact change request - ${safeDate}${safeName ? ` - ${safeName}` : ""}.docx`;
+
+    const file = await createRoomDocument({
+      roomId,
+      folderTitle: "Contracts",
+      title
+    });
+
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: file.webUrl || file.viewUrl || file.url || null,
+            shareToken: file.shareToken || null
+          }
+        : null,
+      payload
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/insurance-update-request", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const requestedRoomId = String(req.body?.roomId || "").trim();
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+
+    const roomId = String(patientRoomId || requestedRoomId || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const safeDate = new Date().toISOString().slice(0, 10);
+    const safeName = String(displayName || "Patient").replace(/[^\p{L}\p{N}\s._-]+/gu, "").trim();
+    const title = `Insurance update request - ${safeDate}${safeName ? ` - ${safeName}` : ""}.docx`;
+
+    const file = await createRoomDocument({
+      roomId,
+      folderTitle: "Insurance",
+      title
+    });
+
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: file.webUrl || file.viewUrl || file.url || null,
+            shareToken: file.shareToken || null
+          }
+        : null,
+      payload
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/sick-leave-request", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const requestedRoomId = String(req.body?.roomId || "").trim();
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+
+    const roomId = String(patientRoomId || requestedRoomId || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const safeDate = new Date().toISOString().slice(0, 10);
+    const safeName = String(displayName || "Patient").replace(/[^\p{L}\p{N}\s._-]+/gu, "").trim();
+    const title = `Sick leave request - ${safeDate}${safeName ? ` - ${safeName}` : ""}.docx`;
+
+    const file = await createRoomDocument({
+      roomId,
+      folderTitle: "Sick Leave",
+      title
+    });
+
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: file.webUrl || file.viewUrl || file.url || null,
+            shareToken: file.shareToken || null
+          }
+        : null,
+      payload
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/imaging-upload-request", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const requestedRoomId = String(req.body?.roomId || "").trim();
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+
+    const roomId = String(patientRoomId || requestedRoomId || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const payload = req.body?.payload && typeof req.body.payload === "object" ? req.body.payload : {};
+    const safeDate = new Date().toISOString().slice(0, 10);
+    const safeName = String(displayName || "Patient").replace(/[^\p{L}\p{N}\s._-]+/gu, "").trim();
+    const title = `Imaging upload request - ${safeDate}${safeName ? ` - ${safeName}` : ""}.docx`;
+
+    const file = await createRoomDocument({
+      roomId,
+      folderTitle: "Imaging",
+      title
+    });
+
+    return res.json({
+      file: file
+        ? {
+            id: file.id,
+            title: file.title,
+            openUrl: file.webUrl || file.viewUrl || file.url || null,
+            shareToken: file.shareToken || null
+          }
+        : null,
+      payload
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/imaging/upload", async (req, res) => {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+
+    const user = await getSelfProfileWithToken(auth);
+    if (!user?.id) {
+      return res.status(401).json({ error: "Unable to resolve user from token" });
+    }
+
+    const displayName =
+      user.displayName ||
+      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+      user.userName ||
+      user.email ||
+      "Patient";
+
+    const requestedRoomId = String(req.body?.roomId || "").trim();
+    let patientRoomId = getPatientRoomIdByUserId(user.id);
+    if (!patientRoomId) {
+      const emailPrefix = user.email ? user.email.split("@")[0] : "";
+      const candidates = [
+        displayName ? `${displayName} - Patient Room` : "",
+        user.userName ? `${user.userName} - Patient Room` : "",
+        user.email ? `${user.email} - Patient Room` : "",
+        emailPrefix ? `${emailPrefix} - Patient Room` : ""
+      ];
+      const room = await findRoomByCandidates(candidates, auth).catch(() => null);
+      if (room?.id) {
+        patientRoomId = room.id;
+        recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
+      }
+    }
+
+    const roomId = String(patientRoomId || requestedRoomId || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const file = req.body?.file && typeof req.body.file === "object" ? req.body.file : null;
+    const fileName = String(file?.fileName || "").trim();
+    const base64 = String(file?.base64 || "").trim();
+    const contentType = String(file?.contentType || "application/octet-stream").trim();
+    if (!fileName || !base64) {
+      return res.status(400).json({ error: "file.fileName and file.base64 are required" });
+    }
+
+    const maxBytes = 15 * 1024 * 1024;
+    const buffer = Buffer.from(base64, "base64");
+    if (buffer.length > maxBytes) {
+      return res.status(413).json({ error: `File too large (${buffer.length} bytes). Max is ${maxBytes} bytes.` });
+    }
+
+    const summary = await getRoomSummary(roomId, auth).catch(() => []);
+    const imagingFolder =
+      (summary || []).find((f) => String(f?.title || "").trim().toLowerCase() === "imaging") ||
+      null;
+    const folder =
+      imagingFolder?.id
+        ? { id: imagingFolder.id, title: imagingFolder.title }
+        : await ensureRoomFolderByTitle(roomId, "Imaging").catch(() => null);
+    if (!folder?.id) {
+      return res.status(404).json({ error: "Imaging folder not found" });
+    }
+
+    const uploaded = await uploadFileToFolder(
+      {
+        folderId: folder.id,
+        fileName,
+        buffer,
+        contentType
+      },
+      auth
+    );
+
+    return res.json({ folder, uploaded });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,

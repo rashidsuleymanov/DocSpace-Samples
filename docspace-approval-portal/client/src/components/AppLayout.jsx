@@ -12,7 +12,11 @@ function initialsFrom(value) {
 
 const navItems = [
   { id: "dashboard", label: "Home" },
+  { id: "documents", label: "Documents" },
   { id: "requests", label: "Requests" },
+  { id: "bulk", label: "Bulk send" },
+  { id: "bulkLinks", label: "Bulk links" },
+  { id: "contacts", label: "Contacts" },
   { id: "drafts", label: "Templates" },
   { id: "settings", label: "Settings" }
 ];
@@ -196,10 +200,10 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     <span className="projects-nav-title truncate">{p.title || "Untitled"}</span>
                     <span className="projects-nav-meta muted">
                       {inProgress ? `${inProgress} in progress` : "No active requests"}
-                      {total ? ` • ${total} total` : ""}
+                      {total ? ` - ${total} total` : ""}
                     </span>
                     <span className="projects-nav-right" aria-hidden="true">
-                      {isCurrent ? "✓" : ""}
+                      {isCurrent ? "Current" : ""}
                     </span>
                   </button>
                 );

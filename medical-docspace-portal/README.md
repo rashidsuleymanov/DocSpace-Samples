@@ -81,7 +81,9 @@ Room reads send the **user token** from the browser to the server.
 - Personal Data
 - Contracts
 - Lab Results
+- Medical Records
 - Appointments
+- Fill & Sign
 - Sick Leave
 - Insurance
 - Prescriptions

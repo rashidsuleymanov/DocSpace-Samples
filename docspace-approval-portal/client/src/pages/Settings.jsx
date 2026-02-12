@@ -286,7 +286,7 @@ export default function Settings({ busy, onOpenDrafts }) {
               value={conn.portalLogoUrl}
               onChange={(e) => setConn((s) => ({ ...s, portalLogoUrl: e.target.value }))}
               disabled={busy || connLoading}
-              placeholder="https://…/logo.png"
+              placeholder="https://.../logo.png"
             />
           </label>
           <label>
@@ -322,7 +322,7 @@ export default function Settings({ busy, onOpenDrafts }) {
           </div>
         </div>
 
-        {!requiredRooms && roomsLoading ? <p className="muted">Loading…</p> : null}
+        {!requiredRooms && roomsLoading ? <p className="muted">Loading...</p> : null}
 
         {requiredRooms?.canCreate === false ? (
           <div className="empty-state" style={{ marginTop: 12 }}>

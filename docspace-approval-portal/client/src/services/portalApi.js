@@ -135,9 +135,13 @@ export async function deleteSharedTemplate({ token, fileId }) {
   return data;
 }
 
-export async function listFlows({ token }) {
+export async function listFlows({ token, includeArchived = false, archivedOnly = false } = {}) {
   if (!String(token || "").trim()) throw new Error("Authorization token is required");
-  const response = await fetch("/api/flows", { headers: { Authorization: token } });
+  const params = new URLSearchParams();
+  if (includeArchived) params.set("includeArchived", "1");
+  if (archivedOnly) params.set("archivedOnly", "1");
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/flows${query}`, { headers: { Authorization: token } });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Flows load failed (${response.status})`));
@@ -145,12 +149,16 @@ export async function listFlows({ token }) {
   return data;
 }
 
-export async function listProjectFlows({ token, projectId }) {
+export async function listProjectFlows({ token, projectId, includeArchived = false, archivedOnly = false } = {}) {
   const t = String(token || "").trim();
   if (!t) throw new Error("Authorization token is required");
   const pid = String(projectId || "").trim();
   if (!pid) throw new Error("projectId is required");
-  const response = await fetch(`/api/flows/project/${encodeURIComponent(pid)}`, { headers: { Authorization: t } });
+  const params = new URLSearchParams();
+  if (includeArchived) params.set("includeArchived", "1");
+  if (archivedOnly) params.set("archivedOnly", "1");
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/flows/project/${encodeURIComponent(pid)}${query}`, { headers: { Authorization: t } });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Project flows load failed (${response.status})`));
@@ -168,6 +176,48 @@ export async function cancelFlow({ token, flowId }) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Cancel failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function reopenFlow({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/reopen`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Reopen failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function archiveFlow({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Archive failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function unarchiveFlow({ token, flowId }) {
+  const id = String(flowId || "").trim();
+  if (!id) throw new Error("flowId is required");
+  const response = await fetch(`/api/flows/${encodeURIComponent(id)}/unarchive`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Restore failed (${response.status})`));
   }
   return data;
 }
@@ -322,6 +372,48 @@ export async function getProjectsSidebar({ token }) {
   return data;
 }
 
+export async function getProjectsList({ token }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch("/api/projects/list", { headers: { Authorization: token } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Projects load failed (${response.status})`));
+  return data;
+}
+
+export async function archiveProject({ token, projectId, cancelOpenRequests = false }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const pid = String(projectId || "").trim();
+  if (!pid) throw new Error("projectId is required");
+  const response = await fetch(`/api/projects/${encodeURIComponent(pid)}/archive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ cancelOpenRequests: Boolean(cancelOpenRequests) })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(toErrorMessage(data, `Archive failed (${response.status})`));
+    err.status = response.status;
+    err.details = data;
+    throw err;
+  }
+  return data;
+}
+
+export async function unarchiveProject({ token, projectId }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const pid = String(projectId || "").trim();
+  if (!pid) throw new Error("projectId is required");
+  const response = await fetch(`/api/projects/${encodeURIComponent(pid)}/unarchive`, {
+    method: "POST",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Restore failed (${response.status})`));
+  }
+  return data;
+}
+
 export async function createProject({ token, title }) {
   if (!String(token || "").trim()) throw new Error("Authorization token is required");
   const response = await fetch("/api/projects", {
@@ -331,6 +423,61 @@ export async function createProject({ token, title }) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(toErrorMessage(data, `Project creation failed (${response.status})`));
+  return data;
+}
+
+export async function listContacts({ token }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch("/api/contacts", { headers: { Authorization: token } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Contacts load failed (${response.status})`));
+  return data;
+}
+
+export async function createContact({ token, name, email, tags }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch("/api/contacts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ name, email, tags })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Contact create failed (${response.status})`));
+  return data;
+}
+
+export async function updateContact({ token, contactId, name, email, tags }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch(`/api/contacts/${encodeURIComponent(String(contactId || ""))}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ name, email, tags })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Contact update failed (${response.status})`));
+  return data;
+}
+
+export async function deleteContact({ token, contactId }) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch(`/api/contacts/${encodeURIComponent(String(contactId || ""))}`, {
+    method: "DELETE",
+    headers: { Authorization: token }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Contact delete failed (${response.status})`));
+  return data;
+}
+
+export async function createBulkLinks({ token, templateFileId, projectId, count } = {}) {
+  if (!String(token || "").trim()) throw new Error("Authorization token is required");
+  const response = await fetch("/api/links/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ templateFileId, projectId, count })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(toErrorMessage(data, `Bulk links failed (${response.status})`));
   return data;
 }
 

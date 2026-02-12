@@ -2,6 +2,7 @@ import { getStorePath, loadStoreSnapshot, saveStoreSnapshot } from "./storePersi
 
 const flows = [];
 const projects = [];
+const contacts = [];
 
 const storePath = getStorePath();
 let saveTimer = null;
@@ -11,7 +12,8 @@ function snapshotStore() {
     version: 1,
     savedAt: new Date().toISOString(),
     flows,
-    projects
+    projects,
+    contacts
   };
 }
 
@@ -25,21 +27,39 @@ async function hydrateStore() {
   if (Array.isArray(snapshot.projects)) {
     projects.splice(0, projects.length, ...snapshot.projects);
   }
+  if (Array.isArray(snapshot.contacts)) {
+    contacts.splice(0, contacts.length, ...snapshot.contacts);
+  }
 
   for (const flow of flows) {
     if (!flow || typeof flow !== "object") continue;
     if (!flow.groupId && flow.id) flow.groupId = flow.id;
+    if (flow.source === undefined) flow.source = null;
     if (flow.resultFileId === undefined) flow.resultFileId = null;
     if (flow.resultFileTitle === undefined) flow.resultFileTitle = null;
     if (flow.resultFileUrl === undefined) flow.resultFileUrl = null;
     if (flow.stageIndex === undefined) flow.stageIndex = null;
     if (flow.dueDate === undefined) flow.dueDate = null;
+    if (flow.archivedAt === undefined) flow.archivedAt = null;
+    if (flow.archivedByUserId === undefined) flow.archivedByUserId = null;
+    if (flow.archivedByName === undefined) flow.archivedByName = null;
     if (!Array.isArray(flow.events)) flow.events = [];
   }
 
   for (const project of projects) {
     if (!project || typeof project !== "object") continue;
     if (!project.signingRoomId) project.signingRoomId = null;
+    if (project.archivedAt === undefined) project.archivedAt = null;
+    if (project.archivedByUserId === undefined) project.archivedByUserId = null;
+    if (project.archivedByName === undefined) project.archivedByName = null;
+  }
+
+  for (const contact of contacts) {
+    if (!contact || typeof contact !== "object") continue;
+    if (contact.ownerUserId === undefined) contact.ownerUserId = null;
+    if (contact.name === undefined) contact.name = null;
+    if (contact.email === undefined) contact.email = null;
+    if (!Array.isArray(contact.tags)) contact.tags = [];
   }
 }
 
@@ -74,6 +94,7 @@ export function createFlow({
   id,
   groupId,
   kind = "approval",
+  source = null,
   templateFileId,
   templateTitle,
   fileId,
@@ -107,6 +128,7 @@ export function createFlow({
     id: flowId,
     groupId: String(groupId || flowId).trim() || flowId,
     kind: String(kind || "approval").trim() || "approval",
+    source: source ? String(source) : null,
     templateFileId: fid,
     templateTitle: templateTitle ? String(templateTitle) : null,
     fileId: fileId ? String(fileId) : null,
@@ -206,6 +228,83 @@ export function cancelFlow(flowId, { canceledByUserId, canceledByName } = {}) {
   });
 }
 
+export function reopenFlow(flowId, { reopenedByUserId, reopenedByName } = {}) {
+  const id = String(flowId || "").trim();
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+
+  const status = String(current.status || "");
+  if (status === "Completed") return current;
+  if (status === "InProgress") return current;
+  if (status !== "Canceled") return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    status: "InProgress",
+    canceledAt: null,
+    canceledByUserId: null,
+    canceledByName: null,
+    reopenedAt: now,
+    reopenedByUserId: reopenedByUserId ? String(reopenedByUserId) : null,
+    reopenedByName: reopenedByName ? String(reopenedByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "reopened",
+      actorUserId: reopenedByUserId ? String(reopenedByUserId) : null,
+      actorName: reopenedByName ? String(reopenedByName) : null
+    })
+  });
+}
+
+export function archiveFlow(flowId, { archivedByUserId, archivedByName } = {}) {
+  const id = String(flowId || "").trim();
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+
+  const status = String(current.status || "");
+  if (status !== "Completed" && status !== "Canceled") return current;
+  if (current.archivedAt) return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    archivedAt: now,
+    archivedByUserId: archivedByUserId ? String(archivedByUserId) : null,
+    archivedByName: archivedByName ? String(archivedByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "archived",
+      actorUserId: archivedByUserId ? String(archivedByUserId) : null,
+      actorName: archivedByName ? String(archivedByName) : null
+    })
+  });
+}
+
+export function unarchiveFlow(flowId, { unarchivedByUserId, unarchivedByName } = {}) {
+  const id = String(flowId || "").trim();
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+  if (!current.archivedAt) return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    archivedAt: null,
+    archivedByUserId: null,
+    archivedByName: null,
+    unarchivedAt: now,
+    unarchivedByUserId: unarchivedByUserId ? String(unarchivedByUserId) : null,
+    unarchivedByName: unarchivedByName ? String(unarchivedByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "unarchived",
+      actorUserId: unarchivedByUserId ? String(unarchivedByUserId) : null,
+      actorName: unarchivedByName ? String(unarchivedByName) : null
+    })
+  });
+}
+
 export function completeFlow(
   flowId,
   {
@@ -293,6 +392,9 @@ export function createProject({ id, title, roomId, roomUrl } = {}) {
     roomId: rid,
     roomUrl: roomUrl ? String(roomUrl) : null,
     signingRoomId: null,
+    archivedAt: null,
+    archivedByUserId: null,
+    archivedByName: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -340,6 +442,89 @@ export function deleteProject(projectId) {
   const idx = projects.findIndex((p) => String(p.id) === pid);
   if (idx === -1) return false;
   projects.splice(idx, 1);
+  scheduleSave();
+  return true;
+}
+
+function normalizeEmail(value) {
+  const v = normalize(value).toLowerCase();
+  if (!v) return "";
+  return v;
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return [];
+  const uniq = new Set();
+  for (const raw of value) {
+    const t = normalize(raw);
+    if (!t) continue;
+    uniq.add(t.slice(0, 30));
+  }
+  return Array.from(uniq).slice(0, 12);
+}
+
+export function listContactsForUser(userId) {
+  const uid = normalize(userId);
+  if (!uid) return [];
+  return contacts
+    .filter((c) => normalize(c?.ownerUserId) === uid)
+    .slice()
+    .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+}
+
+export function createContact({ id, ownerUserId, name, email, tags } = {}) {
+  const cid = normalize(id);
+  const uid = normalize(ownerUserId);
+  const mail = normalizeEmail(email);
+  if (!cid || !uid || !mail) return null;
+
+  const entry = {
+    id: cid,
+    ownerUserId: uid,
+    name: normalize(name) || mail,
+    email: mail,
+    tags: normalizeTags(tags),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const existingIdx = contacts.findIndex((c) => normalize(c?.id) === cid);
+  if (existingIdx >= 0) contacts.splice(existingIdx, 1);
+  contacts.unshift(entry);
+  scheduleSave();
+  return entry;
+}
+
+export function updateContact(contactId, patch = {}) {
+  const cid = normalize(contactId);
+  if (!cid) return null;
+  const idx = contacts.findIndex((c) => normalize(c?.id) === cid);
+  if (idx < 0) return null;
+
+  const current = contacts[idx] || {};
+  const next = {
+    ...current,
+    ...patch,
+    id: current.id,
+    ownerUserId: current.ownerUserId,
+    email: patch.email !== undefined ? normalizeEmail(patch.email) : current.email,
+    name: patch.name !== undefined ? normalize(patch.name) : current.name,
+    tags: patch.tags !== undefined ? normalizeTags(patch.tags) : current.tags,
+    createdAt: current.createdAt,
+    updatedAt: new Date().toISOString()
+  };
+
+  contacts[idx] = next;
+  scheduleSave();
+  return next;
+}
+
+export function deleteContact(contactId) {
+  const cid = normalize(contactId);
+  if (!cid) return false;
+  const idx = contacts.findIndex((c) => normalize(c?.id) === cid);
+  if (idx === -1) return false;
+  contacts.splice(idx, 1);
   scheduleSave();
   return true;
 }

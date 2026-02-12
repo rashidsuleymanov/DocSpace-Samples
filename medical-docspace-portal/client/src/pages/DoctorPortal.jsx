@@ -10,6 +10,7 @@ import {
   createLabResult,
   createMedicalRecord,
   createPrescription,
+  createRoomDocument,
   getDoctorAppointments,
   getDoctorFillSignContents,
   getDoctorFolderContents,
@@ -88,6 +89,7 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [fillModalOpen, setFillModalOpen] = useState(false);
   const [rxModalOpen, setRxModalOpen] = useState(false);
   const [recordModalOpen, setRecordModalOpen] = useState(false);
+  const [docCreateModalOpen, setDocCreateModalOpen] = useState(false);
 
   const [labForm, setLabForm] = useState({ title: "" });
   const [rxForm, setRxForm] = useState({ medication: "", dosage: "", instructions: "" });
@@ -98,6 +100,7 @@ export default function DoctorPortal({ doctor, onExit }) {
     date: new Date().toISOString().slice(0, 10),
     summary: ""
   });
+  const [docCreateForm, setDocCreateForm] = useState({ title: "" });
 
   const editorRef = useRef(null);
 
@@ -174,6 +177,9 @@ export default function DoctorPortal({ doctor, onExit }) {
 
   const isLabFolderActive = activeFolderTitle === "Lab Results";
   const isPrescriptionFolderActive = activeFolderTitle === "Prescriptions";
+  const isGenericDocFolderActive = ["Contracts", "Insurance", "Sick Leave", "Imaging", "Personal Data"].includes(
+    activeFolderTitle
+  );
 
   useEffect(() => {
     const loadRooms = async () => {
@@ -739,6 +745,36 @@ export default function DoctorPortal({ doctor, onExit }) {
     }
   };
 
+  const handleGenericDocument = async (event) => {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    const folderTitle = String(activeFolderTitle || "").trim();
+    if (!folderTitle) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const title = String(docCreateForm.title || "").trim();
+      if (!title) {
+        throw new Error("Title is required");
+      }
+      const file = await createRoomDocument(selectedRoom.id, { folderTitle, title });
+      setDocCreateModalOpen(false);
+      setDocCreateForm({ title: "" });
+      setMessage(file?.title ? `Document created: ${file.title}` : "Document created");
+      if (file?.openUrl) {
+        openDoc(file.title || "Document", file.openUrl);
+      }
+      const data = await getDoctorRoomSummary(selectedRoom.id);
+      setSummary(data);
+      const contents = await getDoctorFolderContents(selectedRoom.id, folderTitle);
+      setActiveFolderItems(contents.items || []);
+    } catch (error) {
+      setMessage(error.message || "Failed to create document");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const topbar = getTopbarProps({ view, selectedRoom, dateFilter, onDateFilter: setDateFilter });
 
   return (
@@ -869,6 +905,21 @@ export default function DoctorPortal({ doctor, onExit }) {
                     {isPrescriptionFolderActive && (
                       <button className="primary" type="button" onClick={() => setRxModalOpen(true)}>
                         Create prescription
+                      </button>
+                    )}
+                    {isGenericDocFolderActive && (
+                      <button
+                        className="primary"
+                        type="button"
+                        onClick={() => {
+                          const today = new Date().toISOString().slice(0, 10);
+                          const patient = selectedRoom?.patientName || "Patient";
+                          const base = `${activeFolderTitle} - ${today} - ${patient}`.replace(/\s+/g, " ").trim();
+                          setDocCreateForm({ title: base });
+                          setDocCreateModalOpen(true);
+                        }}
+                      >
+                        Create document
                       </button>
                     )}
                   </div>
@@ -1196,6 +1247,31 @@ export default function DoctorPortal({ doctor, onExit }) {
               </label>
               <button className="primary" type="submit" disabled={busy}>
                 Open editor
+              </button>
+            </form>
+          </Modal>
+        )}
+
+        {docCreateModalOpen && selectedRoom && (
+          <Modal
+            title={activeFolderTitle ? `Create document \u2014 ${activeFolderTitle}` : "Create document"}
+            onClose={() => setDocCreateModalOpen(false)}
+          >
+            <form className="auth-form" onSubmit={handleGenericDocument}>
+              <p className="muted">
+                Creates a new document in <strong>{activeFolderTitle || "the selected folder"}</strong> and opens it in DocSpace.
+              </p>
+              <label>
+                Title
+                <input
+                  type="text"
+                  value={docCreateForm.title}
+                  onChange={(e) => setDocCreateForm({ title: e.target.value })}
+                  required
+                />
+              </label>
+              <button className="primary" type="submit" disabled={busy}>
+                Create & open
               </button>
             </form>
           </Modal>

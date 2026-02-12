@@ -1,5 +1,7 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PatientShell from "../components/PatientShell.jsx";
+import FolderTile from "../components/FolderTile.jsx";
+import folderStructure from "../data/folderStructure.js";
 
 const seenNewsStorageKey = "medical.portal.news.seen";
 
@@ -25,11 +27,18 @@ function saveSeenNews(session, set) {
   } catch {}
 }
 
-export default function Dashboard({ session, onLogout, onNavigate }) {
-  const [summaryError] = useState("");
+export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder }) {
   const [showBanner, setShowBanner] = useState(true);
   const [news, setNews] = useState([]);
   const [newsError, setNewsError] = useState("");
+
+  const [foldersError, setFoldersError] = useState("");
+  const [folderStats, setFolderStats] = useState(folderStructure);
+
+  const quickFolderKeys = useMemo(
+    () => new Set(["personal-data", "contracts", "insurance", "sick-leave", "imaging", "prescriptions"]),
+    []
+  );
 
   useEffect(() => {
     const loadNews = async () => {
@@ -52,6 +61,27 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
     loadNews();
   }, [session]);
 
+  useEffect(() => {
+    const loadFolders = async () => {
+      if (!session?.room?.id || session.room.id === "DOCSPACE") return;
+      try {
+        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
+        const response = await fetch(`/api/patients/room-summary?roomId=${session.room.id}`, {
+          headers
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load folder stats");
+        }
+        setFolderStats(mapFoldersFromSummary(folderStructure, data.summary || []));
+        setFoldersError("");
+      } catch (error) {
+        setFoldersError(error?.message || "Failed to load folder stats");
+      }
+    };
+    loadFolders();
+  }, [session]);
+
   const notifications = useMemo(() => {
     const seen = loadSeenNews(session);
     const items = [];
@@ -70,6 +100,11 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
               if (entry?.id) nextSeen.add(`${folder.id}:${entry.id}`);
             });
             saveSeenNews(session, nextSeen);
+            const targetTitle = String(folder?.title || "").trim();
+            if (targetTitle && typeof onOpenFolder === "function") {
+              onOpenFolder(targetTitle);
+              return;
+            }
             onNavigate("records");
           }
         });
@@ -85,7 +120,7 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
       });
     }
     return items;
-  }, [news, onNavigate, session]);
+  }, [news, onNavigate, onOpenFolder, session]);
 
   return (
     <PatientShell
@@ -102,11 +137,7 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
             <span>
               We've sent a confirmation email to <strong>{session.user.email || "your inbox"}</strong>.
             </span>
-            <button
-              className="ghost ghost-light"
-              type="button"
-              onClick={() => setShowBanner(false)}
-            >
+            <button className="ghost ghost-light" type="button" onClick={() => setShowBanner(false)}>
               Dismiss
             </button>
           </section>
@@ -161,7 +192,61 @@ export default function Dashboard({ session, onLogout, onNavigate }) {
         </div>
       </section>
 
-      {summaryError && <p className="muted">Summary error: {summaryError}</p>}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3>Your folders</h3>
+            <p className="muted">Quick access to key sections in your patient room.</p>
+          </div>
+        </div>
+        {foldersError && <p className="muted">{foldersError}</p>}
+        <div className="folder-grid">
+          {folderStats
+            .filter((folder) => quickFolderKeys.has(folder.key))
+            .map((folder) => {
+              const { key, ...rest } = folder;
+              return (
+                <FolderTile
+                  key={key}
+                  {...rest}
+                  onClick={() => {
+                    if (typeof onOpenFolder === "function") {
+                      onOpenFolder(folder.title);
+                      return;
+                    }
+                    onNavigate("records");
+                  }}
+                />
+              );
+            })}
+        </div>
+      </section>
     </PatientShell>
   );
 }
+
+function mapFoldersFromSummary(base, summary) {
+  const baseByTitle = new Map(base.map((item) => [normalize(item.title), item]));
+  const byKey = new Map();
+
+  for (const folder of summary || []) {
+    const count = (folder.filesCount ?? 0) + (folder.foldersCount ?? 0);
+    const meta = baseByTitle.get(normalize(folder.title)) || null;
+    const key = meta?.key || normalize(folder.title);
+    byKey.set(key, {
+      key,
+      id: folder.id,
+      title: folder.title,
+      description: meta?.description || "Patient documents",
+      icon: meta?.icon || "folder",
+      count
+    });
+  }
+
+  return base.map((item) => byKey.get(item.key) || { ...item, count: 0 });
+}
+
+function normalize(value) {
+  return String(value || "").trim().toLowerCase();
+}
+

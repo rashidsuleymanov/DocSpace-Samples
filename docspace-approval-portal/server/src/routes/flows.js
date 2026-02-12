@@ -19,7 +19,20 @@ import {
   createFileFromTemplateToFolder
 } from "../docspaceClient.js";
 import { getConfig, updateConfig } from "../config.js";
-import { cancelFlow, completeFlow, createFlow, getFlow, listFlowsForGroup, listFlowsForRoom, listFlowsForUser, updateFlow, updateProject } from "../store.js";
+import {
+  archiveFlow,
+  cancelFlow,
+  completeFlow,
+  createFlow,
+  getFlow,
+  listFlowsForGroup,
+  listFlowsForRoom,
+  listFlowsForUser,
+  reopenFlow,
+  unarchiveFlow,
+  updateFlow,
+  updateProject
+} from "../store.js";
 import { getProject } from "../store.js";
 
 const router = Router();
@@ -243,6 +256,12 @@ function canManageRoomFromSecurityInfo(security, userId) {
   return Boolean(me?.isOwner) || isRoomAdminAccess(me?.access);
 }
 
+function parseBool(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "y" || raw === "on";
+}
+
 async function resolveFlows(rawFlows, auth) {
   const formsFoldersCache = new Map(); // roomId -> folders
   const contentsCache = new Map(); // folderId -> contents
@@ -251,6 +270,7 @@ async function resolveFlows(rawFlows, auth) {
 
   const flows = await Promise.all(
     (rawFlows || []).map(async (flow) => {
+      if (flow?.archivedAt) return flow;
       const status = String(flow?.status || "");
       if (status === "Canceled") return flow;
       if (status === "Queued") return flow;
@@ -502,7 +522,13 @@ router.get("/", async (req, res) => {
     if (!userId) return res.status(401).json({ error: "Invalid user token" });
     const userEmail = String(user?.email || "").trim().toLowerCase();
 
-    const rawFlows = listFlowsForUser({ userId, userEmail });
+    const includeArchived = parseBool(req.query?.includeArchived);
+    const archivedOnly = parseBool(req.query?.archivedOnly);
+
+    let rawFlows = listFlowsForUser({ userId, userEmail });
+    if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
+    else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
+
     const flows = await resolveFlows(rawFlows, auth);
 
     // Hide queued requests from recipients until their stage starts.
@@ -538,13 +564,104 @@ router.get("/project/:projectId", async (req, res) => {
     if (!isMember) return res.status(403).json({ error: "No access to this project" });
 
     const canManage = canManageRoomFromSecurityInfo(security, userId);
-    const rawFlows = canManage
+    const includeArchived = parseBool(req.query?.includeArchived);
+    const archivedOnly = parseBool(req.query?.archivedOnly);
+
+    let rawFlows = canManage
       ? listFlowsForRoom(roomId)
       : listFlowsForUser({ userId, userEmail }).filter((f) => normalize(f?.projectRoomId) === roomId);
+
+    if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
+    else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
 
     const flows = await resolveFlows(rawFlows, auth);
     const filtered = canManage ? flows : (flows || []).filter((f) => String(f?.status || "") !== "Queued" || String(f?.createdByUserId || "") === userId);
     res.json({ flows: filtered, canManage });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/:flowId/archive", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (flow.archivedAt) return res.json({ ok: true, flow });
+
+    const status = String(flow.status || "");
+    if (status !== "Completed" && status !== "Canceled") {
+      return res.status(400).json({ error: "Only completed or canceled requests can be archived" });
+    }
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can archive requests" });
+    }
+
+    const displayName =
+      me?.displayName ||
+      [me?.firstName, me?.lastName].filter(Boolean).join(" ") ||
+      me?.userName ||
+      me?.email ||
+      "User";
+
+    const updated = archiveFlow(flowId, { archivedByUserId: meId, archivedByName: displayName });
+    if (!updated) return res.status(500).json({ error: "Failed to archive request" });
+    return res.json({ ok: true, flow: updated });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/:flowId/unarchive", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (!flow.archivedAt) return res.json({ ok: true, flow });
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can restore archived requests" });
+    }
+
+    const displayName =
+      me?.displayName ||
+      [me?.firstName, me?.lastName].filter(Boolean).join(" ") ||
+      me?.userName ||
+      me?.email ||
+      "User";
+
+    const updated = unarchiveFlow(flowId, { unarchivedByUserId: meId, unarchivedByName: displayName });
+    if (!updated) return res.status(500).json({ error: "Failed to restore request" });
+    return res.json({ ok: true, flow: updated });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message,
@@ -589,6 +706,54 @@ router.post("/:flowId/cancel", async (req, res) => {
 
     const updated = cancelFlow(flowId, { canceledByUserId: meId, canceledByName: displayName });
     if (!updated) return res.status(500).json({ error: "Failed to cancel request" });
+    return res.json({ ok: true, flow: updated });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/:flowId/reopen", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (String(flow.status || "") === "Completed") {
+      return res.status(400).json({ error: "Completed requests cannot be reopened" });
+    }
+    if (String(flow.status || "") === "InProgress") {
+      return res.json({ ok: true, flow });
+    }
+    if (String(flow.status || "") !== "Canceled") {
+      return res.status(400).json({ error: "Only canceled requests can be reopened" });
+    }
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can reopen requests" });
+    }
+
+    const displayName =
+      me?.displayName ||
+      [me?.firstName, me?.lastName].filter(Boolean).join(" ") ||
+      me?.userName ||
+      me?.email ||
+      "User";
+
+    const updated = reopenFlow(flowId, { reopenedByUserId: meId, reopenedByName: displayName });
+    if (!updated) return res.status(500).json({ error: "Failed to reopen request" });
     return res.json({ ok: true, flow: updated });
   } catch (error) {
     res.status(error.status || 500).json({

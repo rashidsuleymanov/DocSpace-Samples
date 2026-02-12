@@ -85,6 +85,29 @@ async function apiRequestRaw(path, { method = "GET", body, auth } = {}) {
   return { data, raw, status: response.status };
 }
 
+async function apiRequestForm(path, { method = "POST", body, auth } = {}) {
+  requireConfig({ requiresAuth: !auth });
+  const authorization = normalizeAuthHeader(auth || authHeader);
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      Authorization: authorization
+    },
+    body
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error || data?.message || response.statusText;
+    const error = new Error(message);
+    error.status = response.status;
+    error.details = data;
+    throw error;
+  }
+
+  return data?.response ?? data;
+}
+
 export async function getFileExternalLinks(fileId, auth) {
   if (!fileId) return [];
   const response = await apiRequest(`/api/2.0/files/file/${fileId}/links`, { auth });
@@ -705,6 +728,27 @@ export async function copyFileToFolder({ fileId, destFolderId, toFillOut = false
       content: true,
       toFillOut: Boolean(toFillOut)
     }
+  });
+}
+
+export async function uploadFileToFolder(
+  { folderId, fileName, buffer, contentType = "application/octet-stream" } = {},
+  auth
+) {
+  const fid = String(folderId || "").trim();
+  const name = String(fileName || "").trim();
+  if (!fid) throw new Error("folderId is required");
+  if (!name) throw new Error("fileName is required");
+  if (!buffer) throw new Error("buffer is required");
+
+  const form = new FormData();
+  const blob = new Blob([buffer], { type: contentType || "application/octet-stream" });
+  form.append("file", blob, name);
+
+  return apiRequestForm(`/api/2.0/files/${encodeURIComponent(fid)}/upload`, {
+    method: "POST",
+    body: form,
+    auth
   });
 }
 

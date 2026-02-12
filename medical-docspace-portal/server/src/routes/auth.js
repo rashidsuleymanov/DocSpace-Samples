@@ -4,6 +4,7 @@ import {
   createDocSpaceUser,
   createPatientRoom,
   createPatientFolders,
+  createRoomFileFromTemplate,
   ensureRoomMembers,
   ensureExternalLinkAccess,
   getFileInfo,
@@ -22,6 +23,32 @@ import {
   recordFillSignAssignment,
   recordPatientMapping
 } from "../store.js";
+
+function resolveFileExtension(info) {
+  const ext =
+    String(info?.fileExst || "").trim() ||
+    (String(info?.title || "").match(/\.[a-z0-9]+$/i)?.[0] || "");
+  if (!ext) return "";
+  return ext.startsWith(".") ? ext : `.${ext}`;
+}
+
+async function copyTemplateIntoRoom({ roomId, folderTitle, templateFileId, titleBase }) {
+  const fid = String(templateFileId || "").trim();
+  if (!fid) return null;
+  const info = await getFileInfo(fid).catch(() => null);
+  if (!info?.id) {
+    throw new Error(`Template file not found: ${fid}`);
+  }
+  const ext = resolveFileExtension(info);
+  const safeTitleBase = String(titleBase || "").trim();
+  const desiredTitle = safeTitleBase ? `${safeTitleBase}${ext}` : undefined;
+  return createRoomFileFromTemplate({
+    roomId,
+    folderTitle,
+    templateFileId: fid,
+    title: desiredTitle
+  });
+}
 
 async function ensureAutoFillSignAssignment({ userId, fullName, roomId } = {}) {
   const templateId = String(config.autoFillSignTemplateId || "").trim();
@@ -131,6 +158,34 @@ router.post("/register", async (req, res) => {
     recordPatientMapping({ userId: user.id, roomId: room.id, patientName: fullName });
 
     const warnings = [];
+    const contractTemplateId = String(config.templateContractId || "").trim();
+    if (contractTemplateId) {
+      try {
+        await copyTemplateIntoRoom({
+          roomId: room.id,
+          folderTitle: "Contracts",
+          templateFileId: contractTemplateId,
+          titleBase: `Contract - ${fullName}`
+        });
+      } catch (error) {
+        warnings.push(error?.message || "Failed to copy contract template");
+      }
+    }
+
+    const welcomeTemplateId = String(config.templateWelcomeId || "").trim();
+    if (welcomeTemplateId) {
+      try {
+        await copyTemplateIntoRoom({
+          roomId: room.id,
+          folderTitle: "Personal Data",
+          templateFileId: welcomeTemplateId,
+          titleBase: `Welcome - ${fullName}`
+        });
+      } catch (error) {
+        warnings.push(error?.message || "Failed to copy welcome template");
+      }
+    }
+
     const autoAssigned = await ensureAutoFillSignAssignment({
       userId: user?.id,
       fullName,

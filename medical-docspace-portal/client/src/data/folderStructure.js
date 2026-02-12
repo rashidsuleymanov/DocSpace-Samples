@@ -21,6 +21,13 @@ const folderStructure = [
     count: 0
   },
   {
+    key: "medical-records",
+    title: "Medical Records",
+    description: "Doctor notes, visit summaries, treatment history.",
+    icon: "note",
+    count: 0
+  },
+  {
     key: "appointments",
     title: "Appointments",
     description: "Upcoming visits, referrals, doctor notes.",

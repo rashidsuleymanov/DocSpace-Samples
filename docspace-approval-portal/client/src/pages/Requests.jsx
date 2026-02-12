@@ -6,7 +6,17 @@ import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
-import { cancelFlow, completeFlow, getProjectMembers, getProjectsPermissions, inviteProject } from "../services/portalApi.js";
+import {
+  archiveFlow,
+  cancelFlow,
+  completeFlow,
+  getProjectMembers,
+  getProjectsPermissions,
+  inviteProject,
+  listFlows,
+  reopenFlow,
+  unarchiveFlow
+} from "../services/portalApi.js";
 
 function isPdfTemplate(t) {
   const ext = String(t?.fileExst || "").trim().toLowerCase();
@@ -77,11 +87,17 @@ export default function Requests({
 
   const [localError, setLocalError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkMode, setBulkMode] = useState("archive"); // archive | restore
+  const [bulkCandidates, setBulkCandidates] = useState([]);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(String(initialFilter || "all"));
   const [scope, setScope] = useState(String(initialScope || "all"));
   const [who, setWho] = useState("assigned");
+  const [archivedFlows, setArchivedFlows] = useState([]);
+  const [archivedRefreshing, setArchivedRefreshing] = useState(false);
+  const [archivedError, setArchivedError] = useState("");
   const [sendOpen, setSendOpen] = useState(false);
   const [sendQuery, setSendQuery] = useState("");
   const [sendSelectedId, setSendSelectedId] = useState("");
@@ -145,13 +161,47 @@ export default function Requests({
     setScope(String(initialScope || "all"));
   }, [initialScope]);
 
+  useEffect(() => {
+    if (statusFilter !== "archived") return;
+    if (!token) return;
+    setArchivedRefreshing(true);
+    setArchivedError("");
+    listFlows({ token, archivedOnly: true })
+      .then((data) => setArchivedFlows(Array.isArray(data?.flows) ? data.flows : []))
+      .catch((e) => {
+        setArchivedFlows([]);
+        setArchivedError(e?.message || "Failed to load archived requests");
+      })
+      .finally(() => setArchivedRefreshing(false));
+  }, [statusFilter, token]);
+
+  useEffect(() => {
+    if (statusFilter !== "archived") return;
+    const handler = () => {
+      if (!token) return;
+      setArchivedRefreshing(true);
+      setArchivedError("");
+      listFlows({ token, archivedOnly: true })
+        .then((data) => setArchivedFlows(Array.isArray(data?.flows) ? data.flows : []))
+        .catch((e) => {
+          setArchivedFlows([]);
+          setArchivedError(e?.message || "Failed to load archived requests");
+        })
+        .finally(() => setArchivedRefreshing(false));
+    };
+    window.addEventListener("portal:flowsChanged", handler);
+    return () => window.removeEventListener("portal:flowsChanged", handler);
+  }, [statusFilter, token]);
+
+  const flowsSource = statusFilter === "archived" ? archivedFlows : flows;
+
   const filteredByScope = useMemo(() => {
-    const items = Array.isArray(flows) ? flows : [];
+    const items = Array.isArray(flowsSource) ? flowsSource : [];
     if (scope !== "current") return items;
     const rid = String(activeRoomId || "").trim();
     if (!rid) return [];
     return items.filter((f) => String(f?.projectRoomId || "") === rid);
-  }, [activeRoomId, flows, scope]);
+  }, [activeRoomId, flowsSource, scope]);
 
   const filteredByWho = useMemo(() => {
     const items = filteredByScope;
@@ -259,7 +309,13 @@ export default function Requests({
   const filteredGroups = useMemo(() => {
     const q = String(query || "").trim().toLowerCase();
     const byStatus =
-      statusFilter === "inProgress"
+      statusFilter === "archived"
+        ? grouped.filter((g) => (Array.isArray(g?.flows) ? g.flows : []).some((f) => Boolean(f?.archivedAt)))
+        : statusFilter === "links"
+          ? grouped.filter((g) =>
+              (Array.isArray(g?.flows) ? g.flows : []).some((f) => String(f?.source || "") === "bulkLink")
+            )
+        : statusFilter === "inProgress"
         ? grouped.filter((g) => g.status === "InProgress")
         : statusFilter === "completed"
           ? grouped.filter((g) => g.status === "Completed")
@@ -479,6 +535,90 @@ export default function Requests({
     }
   };
 
+  const onReopenGroup = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items
+      .filter((f) => String(f?.status || "") === "Canceled")
+      .map((f) => String(f?.id || "").trim())
+      .filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await reopenFlow({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to reopen request");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const onArchiveGroup = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await archiveFlow({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to archive request");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const onUnarchiveGroup = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await unarchiveFlow({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to restore request");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const runBulk = async () => {
+    if (!bulkCandidates.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const group of bulkCandidates) {
+        const items = Array.isArray(group?.flows) ? group.flows : [];
+        const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+        for (const id of ids) {
+          // eslint-disable-next-line no-await-in-loop
+          if (bulkMode === "restore") await unarchiveFlow({ token, flowId: id }).catch(() => null);
+          else await archiveFlow({ token, flowId: id }).catch(() => null);
+        }
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Bulk action failed");
+    } finally {
+      setActionBusy(false);
+      setBulkOpen(false);
+      setBulkCandidates([]);
+    }
+  };
+
   const onComplete = async (flow) => {
     const id = String(flow?.id || "").trim();
     if (!id || !token) return;
@@ -655,7 +795,7 @@ export default function Requests({
           <p className="muted">
             {hasProject ? (
               <>
-                Tracking requests in “{projectTitle || "Current project"}”.{" "}
+                Tracking requests in "{projectTitle || "Current project"}".{" "}
                 <StatusPill tone={canManageProject ? "blue" : "gray"}>{canManageProject ? "Admin" : "View-only"}</StatusPill>
               </>
             ) : (
@@ -688,13 +828,13 @@ export default function Requests({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search…"
+              placeholder="Search..."
               disabled={busy || (scope === "current" && !hasProject)}
               style={{ maxWidth: 260 }}
             />
             {flowsRefreshing ? (
               <span className="muted" style={{ fontSize: 12 }}>
-                Updating…
+                Updating...
               </span>
             ) : updatedLabel ? (
               <span className="muted" style={{ fontSize: 12 }}>
@@ -702,6 +842,38 @@ export default function Requests({
               </span>
             ) : null}
             <span className="muted">{filteredGroups.length} shown</span>
+            {(() => {
+              const candidates =
+                statusFilter === "archived"
+                  ? filteredGroups.filter((g) => {
+                      const f = g?.primaryFlow || g?.flows?.[0] || null;
+                      return f && Boolean(f?.archivedAt) && canManageFlow(f);
+                    })
+                  : statusFilter === "completed" || statusFilter === "other"
+                    ? filteredGroups.filter((g) => {
+                        const f = g?.primaryFlow || g?.flows?.[0] || null;
+                        const st = String(g?.status || f?.status || "");
+                        if (!f) return false;
+                        if (st !== "Completed" && st !== "Canceled") return false;
+                        return canManageFlow(f);
+                      })
+                    : [];
+
+              if (!candidates.length) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkCandidates(candidates);
+                    setBulkMode(statusFilter === "archived" ? "restore" : "archive");
+                    setBulkOpen(true);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  {statusFilter === "archived" ? `Restore shown (${candidates.length})` : `Archive shown (${candidates.length})`}
+                </button>
+              );
+            })()}
             <button
               type="button"
               onClick={() => (typeof onRefreshFlows === "function" ? onRefreshFlows() : null)}
@@ -765,10 +937,27 @@ export default function Requests({
             >
               Other
             </button>
+            <button
+              type="button"
+              className={`chip${statusFilter === "links" ? " is-active" : ""}`}
+              onClick={() => setStatusFilter("links")}
+              disabled={busy}
+            >
+              Links
+            </button>
+            <button
+              type="button"
+              className={`chip${statusFilter === "archived" ? " is-active" : ""}`}
+              onClick={() => setStatusFilter("archived")}
+              disabled={busy || archivedRefreshing}
+            >
+              Archived
+            </button>
           </div>
         </div>
 
         <div className="list">
+          {statusFilter === "archived" && archivedError ? <p className="error">{archivedError}</p> : null}
           {scope === "current" && !hasProject ? (
             <EmptyState
               title={hasAnyProjects ? "No project selected" : "No projects yet"}
@@ -785,7 +974,27 @@ export default function Requests({
               }
             />
           ) : filteredGroups.length === 0 ? (
-            who === "assigned" ? (
+            statusFilter === "archived" ? (
+              <EmptyState
+                title="No archived requests"
+                description="Archive completed or canceled requests to keep your inbox clean."
+                actions={
+                  <button type="button" onClick={() => setStatusFilter("all")} disabled={busy}>
+                    View active requests
+                  </button>
+                }
+              />
+            ) : statusFilter === "links" ? (
+              <EmptyState
+                title="No links yet"
+                description="Generate links from Bulk links, then track them here."
+                actions={
+                  <button type="button" onClick={() => setStatusFilter("all")} disabled={busy}>
+                    View all requests
+                  </button>
+                }
+              />
+            ) : who === "assigned" ? (
               <EmptyState
                 title="No assigned requests"
                 description="Requests assigned to your email will appear here."
@@ -841,6 +1050,9 @@ export default function Requests({
                     {dueDate ? (
                       <StatusPill tone={isOverdue ? "red" : "gray"}>{isOverdue ? `Overdue: ${dueDate}` : `Due: ${dueDate}`}</StatusPill>
                     ) : null}{" "}
+                    {statusFilter === "archived" && flow?.archivedAt ? (
+                      <StatusPill tone="gray">{`Archived: ${String(flow.archivedAt).slice(0, 10)}`}</StatusPill>
+                    ) : null}{" "}
                     {scope !== "current" ? (
                       <StatusPill tone="gray">
                         {(() => {
@@ -863,31 +1075,56 @@ export default function Requests({
                   >
                     Open
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDetailsGroup(group);
-                      setDetailsOpen(true);
-                    }}
-                    disabled={busy}
-                  >
-                    Details
-                  </button>
-                  {(canManageFlow(flow) || (String(flow?.kind || "").toLowerCase() === "sharedsign" && isAssignedToMe(flow))) &&
-                  status !== "Completed" &&
-                  status !== "Canceled" ? (
+                  {(() => {
+                    const kind = String(flow?.kind || "").toLowerCase();
+                    const canManage = canManageFlow(flow);
+                    const canComplete =
+                      kind === "sharedsign" &&
+                      status !== "Completed" &&
+                      status !== "Canceled" &&
+                      Boolean((flow && isAssignedToMe(flow)) || canManage);
+                    if (!canComplete) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActionsGroup(group);
+                          setCompleteOpen(true);
+                        }}
+                        disabled={busy || actionBusy}
+                      >
+                        Complete
+                      </button>
+                    );
+                  })()}
+                  {status === "Canceled" && canManageFlow(flow) ? (
+                    <button type="button" onClick={() => onReopenGroup(group)} disabled={busy || actionBusy}>
+                      Reopen
+                    </button>
+                  ) : null}
+                  {statusFilter === "archived" && canManageFlow(flow) ? (
+                    <button type="button" onClick={() => onUnarchiveGroup(group)} disabled={busy || actionBusy}>
+                      Restore
+                    </button>
+                  ) : null}
+                  {statusFilter !== "archived" && (status === "Completed" || status === "Canceled") && canManageFlow(flow) ? (
+                    <button type="button" onClick={() => onArchiveGroup(group)} disabled={busy || actionBusy}>
+                      Archive
+                    </button>
+                  ) : null}
+                  {true ? (
                     <button
                       type="button"
-                      className="projects-more"
+                      className="icon-button"
                       onClick={() => {
                         setActionsGroup(group);
                         setActionsOpen(true);
                       }}
                       disabled={busy || actionBusy}
-                      aria-label="Request actions"
-                      title="Actions"
+                      aria-label="More actions"
+                      title="More actions"
                     >
-                      …
+                      ...
                     </button>
                   ) : null}
                 </div>
@@ -899,10 +1136,51 @@ export default function Requests({
       </section>
 
       <Modal
+        open={bulkOpen}
+        title={bulkMode === "restore" ? "Restore archived requests?" : "Archive requests?"}
+        onClose={() => {
+          if (actionBusy) return;
+          setBulkOpen(false);
+          setBulkCandidates([]);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setBulkOpen(false);
+                setBulkCandidates([]);
+              }}
+              disabled={busy || actionBusy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={bulkMode === "restore" ? "primary" : "danger"}
+              onClick={runBulk}
+              disabled={busy || actionBusy || !bulkCandidates.length}
+            >
+              {actionBusy ? "Working..." : bulkMode === "restore" ? "Restore" : "Archive"}
+            </button>
+          </>
+        }
+      >
+        <div className="empty" style={{ marginTop: 0 }}>
+          <strong>{bulkCandidates.length} request(s) will be updated.</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            {bulkMode === "restore"
+              ? "This returns requests to the active list."
+              : "This moves completed or canceled requests out of the active list."}
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
         open={sendOpen}
         title={
           projectTitle
-            ? `${sendKind === "fillSign" || sendKind === "sharedSign" ? "Request signature" : "New request"} — ${projectTitle}`
+            ? `${sendKind === "fillSign" || sendKind === "sharedSign" ? "Request signature" : "New request"} - ${projectTitle}`
             : sendKind === "fillSign" || sendKind === "sharedSign"
               ? "Request signature"
               : "New request"
@@ -1136,7 +1414,7 @@ export default function Requests({
                       <div className="select-row-main">
                         <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                       </div>
-                      <span className="select-row-right" aria-hidden="true">{selected ? "✓" : "›"}</span>
+                      <span className="select-row-right" aria-hidden="true">{selected ? "Selected" : ">"}</span>
                     </button>
                   );
                 })}
@@ -1172,7 +1450,7 @@ export default function Requests({
                   </div>
 
                 {membersLoading ? (
-                  <EmptyState title="Loading people…" />
+                  <EmptyState title="Loading people..." />
                 ) : (
                   <div className={`recipient-grid${sendAdvanced && canManageProject ? "" : " is-single"}`}>
                     <div className="recipient-panel">
@@ -1186,7 +1464,7 @@ export default function Requests({
                           <input
                             value={memberQuery}
                             onChange={(e) => setMemberQuery(e.target.value)}
-                            placeholder="Search people…"
+                            placeholder="Search people..."
                             disabled={busy}
                           />
                         </label>
@@ -1274,7 +1552,7 @@ export default function Requests({
                             value={notifyMessage}
                             onChange={(e) => setNotifyMessage(e.target.value)}
                             disabled={busy || !canManageProject || !notify}
-                            placeholder="Short note for recipients…"
+                            placeholder="Short note for recipients..."
                           />
                         </label>
                         <p className="muted" style={{ margin: 0 }}>
@@ -1460,98 +1738,209 @@ export default function Requests({
         title={(() => {
           const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
           const title = flow?.fileTitle || flow?.templateTitle || "";
-          return title ? `Request actions: ${title}` : "Request actions";
+          return title || "Request";
         })()}
+        size="sm"
         onClose={() => {
           setActionsOpen(false);
           setActionsGroup(null);
         }}
       >
-        <div className="action-sheet">
-          <button
-            type="button"
-            className="primary"
-            onClick={() => {
-              const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
-              if (flow) openFlow(flow);
-              setActionsOpen(false);
-              setActionsGroup(null);
-            }}
-            disabled={
-              !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.openUrl ||
-              busy ||
-              actionBusy ||
-              String(actionsGroup?.status || "") === "Canceled"
-            }
-          >
-            Open
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAuditOpen(true);
-              setActionsOpen(false);
-            }}
-            disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
-          >
-            Activity
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDetailsGroup(actionsGroup);
-              setDetailsOpen(true);
-              setActionsOpen(false);
-            }}
-            disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
-          >
-            Details
-          </button>
-          {(() => {
-            const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
-            const kind = String(flow?.kind || "").toLowerCase();
-            const isAssigned = isAssignedToMe(flow);
-            const canManage = canManageFlow(flow);
-            const canComplete =
-              kind === "sharedsign" &&
-              (isAssigned || canManage) &&
-              String(flow?.status || "") !== "Completed" &&
-              String(flow?.status || "") !== "Canceled";
-            if (!canComplete) return null;
-            return (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => setCompleteOpen(true)}
-                disabled={busy || actionBusy}
-              >
-                Complete
-              </button>
-            );
-          })()}
-          <button
-            type="button"
-            onClick={() => onCopyLink((actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.openUrl)}
-            disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.openUrl}
-          >
-            Copy link
-          </button>
-          {(() => {
-            const flow = actionsGroup?.primaryFlow || actionsGroup?.flows?.[0] || null;
-            const canCancel = canManageFlow(flow);
-            if (!canCancel) return null;
-            return (
-              <button
-                type="button"
-                className="danger"
-                onClick={() => setCancelOpen(true)}
-                disabled={busy || actionBusy || !actionsGroup?.flows?.length || String(actionsGroup?.status || "") === "Completed"}
-              >
-                Cancel request
-              </button>
-            );
-          })()}
-        </div>
+        {(() => {
+          const group = actionsGroup;
+          const flow = group?.primaryFlow || group?.flows?.[0] || null;
+          if (!flow) return null;
+
+          const status = String(group?.status || flow?.status || "");
+          const kind = String(flow?.kind || "").toLowerCase();
+          const canManage = canManageFlow(flow);
+          const isArchived = Boolean(flow?.archivedAt);
+          const canReopen = status === "Canceled" && canManage;
+          const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+          const canComplete =
+            kind === "sharedsign" &&
+            status !== "Completed" &&
+            status !== "Canceled" &&
+            Boolean(isAssignedToMe(flow) || canManage);
+          const canArchive = canManage && !isArchived && (status === "Completed" || status === "Canceled");
+          const canUnarchive = canManage && isArchived;
+
+          const openUrl = String((status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || "").trim();
+          const canOpen = Boolean(openUrl) && status !== "Canceled";
+          const openLabel = status === "Completed" ? "Open result" : "Open";
+
+          const canCopyLink = Boolean(openUrl) && kind !== "fillsign";
+
+          return (
+            <div className="modal-actions">
+              <div className="action-list" role="menu" aria-label="Request actions">
+                <button
+                  type="button"
+                  className="action-item primary"
+                  onClick={() => {
+                    openFlow(flow);
+                    setActionsOpen(false);
+                    setActionsGroup(null);
+                  }}
+                  disabled={!canOpen || busy || actionBusy}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>{openLabel}</strong>
+                    <span className="muted">{status === "Completed" ? "View the final file." : "Open the request file."}</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">&gt;</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="action-item"
+                  onClick={() => {
+                    setDetailsGroup(group);
+                    setDetailsOpen(true);
+                    setActionsOpen(false);
+                  }}
+                  disabled={busy || actionBusy || !flow?.id}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>Details</strong>
+                    <span className="muted">Recipients, due date, link.</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">&gt;</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="action-item"
+                  onClick={() => {
+                    setAuditOpen(true);
+                    setActionsOpen(false);
+                  }}
+                  disabled={busy || actionBusy || !flow?.id}
+                  role="menuitem"
+                >
+                  <div className="action-item-text">
+                    <strong>Activity</strong>
+                    <span className="muted">Timeline of changes.</span>
+                  </div>
+                  <span className="action-item-right" aria-hidden="true">&gt;</span>
+                </button>
+
+                {canCopyLink ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={() => onCopyLink(openUrl)}
+                    disabled={busy || actionBusy || !openUrl}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Copy link</strong>
+                      <span className="muted">Share with recipients.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canComplete ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      setCompleteOpen(true);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Complete</strong>
+                      <span className="muted">Mark your signing step done.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canReopen ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      await onReopenGroup(group);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Reopen request</strong>
+                      <span className="muted">Undo cancel and continue.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canArchive ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      await onArchiveGroup(group);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Archive request</strong>
+                      <span className="muted">Moves it out of the active list.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canUnarchive ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      await onUnarchiveGroup(group);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Restore from archive</strong>
+                      <span className="muted">Returns it to the active list.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canCancel ? (
+                  <button
+                    type="button"
+                    className="action-item danger"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      setCancelOpen(true);
+                    }}
+                    disabled={busy || actionBusy || !group?.flows?.length}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Cancel request</strong>
+                      <span className="muted">Stops the request in this portal.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       <AuditModal
