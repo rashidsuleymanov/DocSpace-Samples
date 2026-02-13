@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
+import AuditModal from "../components/AuditModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
-import { activateProject, createProject, listFlows } from "../services/portalApi.js";
+import { activateProject, createProject, getProjectsPermissions, listFlows, listProjectFlows, trashFlow, untrashFlow } from "../services/portalApi.js";
 
 function normalize(value) {
   return String(value || "").trim();
@@ -39,19 +40,27 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
   const meEmail = normalize(session?.user?.email).toLowerCase();
   const displayName = session?.user?.displayName || session?.user?.email || "User";
 
-  const [tab, setTab] = useState("my"); // my | personal
+  const [tab, setTab] = useState("my"); // my | personal | trash
   const [who, setWho] = useState("all"); // all | assigned | created
   const [query, setQuery] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [flows, setFlows] = useState([]);
+  const [permsLoaded, setPermsLoaded] = useState(false);
+  const [projectPerms, setProjectPerms] = useState({});
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState("");
+  const [teamFlows, setTeamFlows] = useState([]);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsGroup, setDetailsGroup] = useState(null);
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Document");
   const [docUrl, setDocUrl] = useState("");
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditFlowId, setAuditFlowId] = useState("");
+  const [auditTitle, setAuditTitle] = useState("Activity");
 
   const [createPersonalOpen, setCreatePersonalOpen] = useState(false);
   const [createPersonalTitle, setCreatePersonalTitle] = useState(() => `Personal - ${String(displayName || "User").trim()}`.trim());
@@ -81,7 +90,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     if (!token) return;
     setLoading(true);
     setError("");
-    listFlows({ token, includeArchived: true })
+    listFlows({ token, includeArchived: true, includeTrashed: true })
       .then((data) => setFlows(Array.isArray(data?.flows) ? data.flows : []))
       .catch((e) => {
         setFlows([]);
@@ -89,6 +98,63 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       })
       .finally(() => setLoading(false));
   }, [token]);
+
+  useEffect(() => {
+    if (!token || permsLoaded) return;
+    getProjectsPermissions({ token })
+      .catch(() => null)
+      .then((permsRes) => {
+        setProjectPerms(permsRes?.permissions && typeof permsRes.permissions === "object" ? permsRes.permissions : {});
+      })
+      .finally(() => setPermsLoaded(true));
+  }, [permsLoaded, token]);
+
+  const manageableProjects = useMemo(() => {
+    const list = Array.isArray(projects) ? projects : [];
+    const perms = projectPerms && typeof projectPerms === "object" ? projectPerms : {};
+    return list.filter((p) => Boolean(perms?.[String(p?.id || "")]));
+  }, [projectPerms, projects]);
+
+  const refreshTeam = useMemo(
+    () => async () => {
+      if (!token) return;
+      const list = manageableProjects;
+      if (!list.length) {
+        setTeamFlows([]);
+        return;
+      }
+      setTeamLoading(true);
+      setTeamError("");
+      try {
+        const results = await Promise.all(
+          list.map((p) =>
+            listProjectFlows({
+              token,
+              projectId: String(p.id),
+              includeArchived: true,
+              includeTrashed: true
+            }).catch(() => ({ flows: [] }))
+          )
+        );
+        const merged = [];
+        for (const r of results) {
+          if (Array.isArray(r?.flows)) merged.push(...r.flows);
+        }
+        setTeamFlows(merged);
+      } catch (e) {
+        setTeamFlows([]);
+        setTeamError(e?.message || "Failed to load team documents");
+      } finally {
+        setTeamLoading(false);
+      }
+    },
+    [manageableProjects, token]
+  );
+
+  useEffect(() => {
+    if (tab !== "team") return;
+    refreshTeam().catch(() => null);
+  }, [refreshTeam, tab]);
 
   const docs = useMemo(() => {
     const items = Array.isArray(flows) ? flows : [];
@@ -113,18 +179,48 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     return list;
   }, [flows]);
 
+  const teamDocs = useMemo(() => {
+    const items = Array.isArray(teamFlows) ? teamFlows : [];
+    const completed = items.filter((f) => String(f?.status || "") === "Completed" && normalize(f?.resultFileUrl || f?.openUrl));
+
+    const byKey = new Map();
+    for (const flow of completed) {
+      const key = normalize(flow?.resultFileId) || normalize(flow?.fileId) || normalize(flow?.id);
+      if (!key) continue;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, flow);
+        continue;
+      }
+      const a = String(existing?.completedAt || existing?.updatedAt || existing?.createdAt || "");
+      const b = String(flow?.completedAt || flow?.updatedAt || flow?.createdAt || "");
+      if (String(b).localeCompare(String(a)) > 0) byKey.set(key, flow);
+    }
+
+    const list = Array.from(byKey.values());
+    list.sort((a, b) => String(b?.completedAt || b?.updatedAt || b?.createdAt || "").localeCompare(String(a?.completedAt || a?.updatedAt || a?.createdAt || "")));
+    return list;
+  }, [teamFlows]);
+
   const filtered = useMemo(() => {
     const q = normalize(query).toLowerCase();
+    const baseDocs = tab === "team" ? teamDocs : docs;
+    const notTrashed = baseDocs.filter((f) => !normalize(f?.trashedAt));
+    const trashed = baseDocs.filter((f) => Boolean(normalize(f?.trashedAt)));
     const base =
-      tab === "personal"
-        ? docs.filter((f) => {
-            const rid = normalize(f?.projectRoomId);
-            if (!rid) return false;
-            if (personalRoomIds.has(rid)) return true;
-            const title = roomTitleById.get(rid) || "";
-            return isPersonalTitle(title);
-          })
-        : docs;
+      tab === "trash"
+        ? trashed
+        : tab === "team"
+          ? notTrashed
+        : tab === "personal"
+          ? notTrashed.filter((f) => {
+              const rid = normalize(f?.projectRoomId);
+              if (!rid) return false;
+              if (personalRoomIds.has(rid)) return true;
+              const title = roomTitleById.get(rid) || "";
+              return isPersonalTitle(title);
+            })
+          : notTrashed;
 
     const scoped =
       who === "created"
@@ -143,7 +239,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       const hay = `${flowTitle(f)} ${project}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [docs, meEmail, meId, personalRoomIds, query, roomTitleById, tab, who]);
+  }, [docs, meEmail, meId, personalRoomIds, query, roomTitleById, tab, teamDocs, who]);
 
   const groupsById = useMemo(() => {
     const items = Array.isArray(flows) ? flows : [];
@@ -201,6 +297,16 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     setDocOpen(true);
   };
 
+  const copy = async (value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  };
+
   const openDetailsFromFlow = (flow) => {
     const gid = normalize(flow?.groupId || flow?.id);
     const group = gid ? groupsById.get(gid) : null;
@@ -212,7 +318,9 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
   const tabItems = useMemo(
     () => [
       { id: "my", label: "My documents" },
-      { id: "personal", label: "Personal" }
+      { id: "personal", label: "Personal" },
+      { id: "team", label: "Team" },
+      { id: "trash", label: "Trash" }
     ],
     []
   );
@@ -264,13 +372,26 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       </header>
 
       {error ? <p className="error">{error}</p> : null}
+      {tab === "team" && teamError ? <p className="error">{teamError}</p> : null}
 
       <section className="card">
         <div className="card-header compact">
           <div>
-            <h3>{tab === "personal" ? "Personal documents" : "My documents"}</h3>
+            <h3>
+              {tab === "trash"
+                ? "Trash"
+                : tab === "team"
+                  ? "Team documents"
+                  : tab === "personal"
+                    ? "Personal documents"
+                    : "My documents"}
+            </h3>
             <p className="muted">
-              {tab === "personal"
+              {tab === "trash"
+                ? "Restore documents you moved to trash."
+                : tab === "team"
+                  ? "Completed files across projects you manage."
+                : tab === "personal"
                 ? "A private workspace for personal signing tasks."
                 : "Documents where you participated (created or were assigned)."}
             </p>
@@ -283,7 +404,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
               disabled={busy || loading}
               style={{ maxWidth: 260 }}
             />
-            {loading ? <span className="muted" style={{ fontSize: 12 }}>Loading...</span> : null}
+            {loading || teamLoading ? <span className="muted" style={{ fontSize: 12 }}>Loading...</span> : null}
             <span className="muted">{filtered.length} shown</span>
           </div>
         </div>
@@ -294,7 +415,17 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
         </div>
 
         <div className="list">
-          {tab === "personal" && !hasPersonalWorkspace ? (
+          {tab === "team" && manageableProjects.length === 0 ? (
+            <EmptyState
+              title="No team projects yet"
+              description="Team documents appear for projects where you are an admin."
+              actions={
+                <button type="button" onClick={() => onOpenProjects?.()} disabled={busy}>
+                  Open Projects
+                </button>
+              }
+            />
+          ) : tab === "personal" && !hasPersonalWorkspace ? (
             <EmptyState
               title="No personal workspace yet"
               description="Create a personal workspace for quick, one-off signing tasks."
@@ -306,20 +437,30 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
             />
           ) : filtered.length === 0 ? (
             <EmptyState
-              title="No documents yet"
-              description="Completed requests will appear here. Start a request to generate a signed or filled file."
+              title={tab === "trash" ? "Trash is empty" : "No documents yet"}
+              description={
+                tab === "trash"
+                  ? "Move completed documents to trash to hide them from your list."
+                  : "Completed requests will appear here. Start a request to generate a signed or filled file."
+              }
               actions={
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => {
-                    onOpenRequests?.();
-                    setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
-                  }}
-                  disabled={busy}
-                >
-                  New request
-                </button>
+                tab === "trash" ? (
+                  <button type="button" onClick={() => setTab("my")} disabled={busy}>
+                    Back to documents
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      onOpenRequests?.();
+                      setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
+                    }}
+                    disabled={busy}
+                  >
+                    New request
+                  </button>
+                )
               }
             />
           ) : (
@@ -329,6 +470,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
               const projectTitle = rid ? roomTitleById.get(rid) || "Project" : "Project";
               const completedAt = String(flow?.completedAt || flow?.updatedAt || flow?.createdAt || "");
               const archivedAt = normalize(flow?.archivedAt);
+              const trashedAt = normalize(flow?.trashedAt);
               return (
                 <div key={normalize(flow?.resultFileId) || normalize(flow?.id)} className="list-row request-row">
                   <div className="list-main">
@@ -336,6 +478,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
                     <span className="muted request-row-meta">
                       <StatusPill tone={statusTone("Completed")}>Completed</StatusPill>{" "}
                       {archivedAt ? <StatusPill tone="gray">{`Archived: ${archivedAt.slice(0, 10)}`}</StatusPill> : null}{" "}
+                      {trashedAt ? <StatusPill tone="gray">{`Trashed: ${trashedAt.slice(0, 10)}`}</StatusPill> : null}{" "}
                       <StatusPill tone="gray">{projectTitle}</StatusPill>{" "}
                       <span className="muted">Updated {completedAt ? completedAt.slice(0, 19).replace("T", " ") : "-"}</span>
                     </span>
@@ -344,9 +487,82 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
                     <button type="button" className="primary" onClick={() => openDoc(flow)} disabled={busy || !normalize(flow?.resultFileUrl || flow?.openUrl)}>
                       Open
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => copy(normalize(flow?.resultFileUrl || flow?.openUrl))}
+                      disabled={busy || !normalize(flow?.resultFileUrl || flow?.openUrl)}
+                    >
+                      Copy link
+                    </button>
                     <button type="button" onClick={() => openDetailsFromFlow(flow)} disabled={busy}>
                       Details
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = normalize(flow?.id);
+                        if (!id) return;
+                        setAuditFlowId(id);
+                        setAuditTitle(`Activity: ${flowTitle(flow)}`);
+                        setAuditOpen(true);
+                      }}
+                      disabled={busy || loading || !normalize(flow?.id)}
+                    >
+                      Activity
+                    </button>
+                    {tab === "trash" ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const id = normalize(flow?.id);
+                          if (!id || !token) return;
+                          setLoading(true);
+                          setError("");
+                          try {
+                            await untrashFlow({ token, flowId: id });
+                            if (tab === "team") {
+                              await refreshTeam().catch(() => null);
+                            } else {
+                              const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
+                              setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                            }
+                          } catch (e) {
+                            setError(e?.message || "Restore failed");
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        disabled={busy || loading}
+                      >
+                        Restore
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const id = normalize(flow?.id);
+                          if (!id || !token) return;
+                          setLoading(true);
+                          setError("");
+                          try {
+                            await trashFlow({ token, flowId: id });
+                            if (tab === "team") {
+                              await refreshTeam().catch(() => null);
+                            } else {
+                              const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
+                              setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                            }
+                          } catch (e) {
+                            setError(e?.message || "Trash failed");
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        disabled={busy || loading}
+                      >
+                        Trash
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -425,6 +641,14 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       />
 
       <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
+
+      <AuditModal
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+        token={token}
+        flowId={auditFlowId}
+        title={auditTitle}
+      />
     </div>
   );
 }

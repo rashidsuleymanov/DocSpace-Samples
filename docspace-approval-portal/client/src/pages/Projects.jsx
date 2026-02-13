@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ContextMenu from "../components/ContextMenu.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
@@ -33,8 +34,9 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
 
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [actionsProjectEntry, setActionsProjectEntry] = useState(null);
+  const [actionsAnchorEl, setActionsAnchorEl] = useState(null);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteProjectEntry, setInviteProjectEntry] = useState(null);
@@ -149,9 +151,14 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
 
   const openActions = (project) => {
     setActionsProjectEntry(project || null);
-    setActionsOpen(true);
+    setActionsMenuOpen(true);
     setError("");
     setNotice("");
+  };
+
+  const closeActions = () => {
+    setActionsMenuOpen(false);
+    setActionsAnchorEl(null);
   };
 
   const onInvite = async () => {
@@ -222,24 +229,24 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     setNotice("");
   };
 
-  const doArchive = async ({ cancelOpenRequests } = {}) => {
-    const project = archiveEntry;
-    if (!project?.id) return;
-    setLoading(true);
-    setError("");
-    setNotice("");
-    try {
-      await archiveProject({ token, projectId: project.id, cancelOpenRequests: Boolean(cancelOpenRequests) });
-      setArchiveOpen(false);
-      setArchiveWarnOpen(false);
-      setArchiveEntry(null);
-      setArchiveOpenRequests(0);
-      await refresh();
-      setNotice("Project archived.");
-      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
-    } catch (e) {
-      if (e?.status === 409 && typeof e?.details?.openRequests === "number") {
-        setArchiveOpen(false);
+	  const doArchive = async ({ cancelOpenRequests } = {}) => {
+	    const project = archiveEntry;
+	    if (!project?.id) return;
+	    setLoading(true);
+	    setError("");
+	    setNotice("");
+	    try {
+	      const res = await archiveProject({ token, projectId: project.id, cancelOpenRequests: Boolean(cancelOpenRequests) });
+	      setArchiveOpen(false);
+	      setArchiveWarnOpen(false);
+	      setArchiveEntry(null);
+	      setArchiveOpenRequests(0);
+	      await refresh();
+	      setNotice(res?.warning ? `Project archived. ${res.warning}` : "Project archived.");
+	      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+	    } catch (e) {
+	      if (e?.status === 409 && typeof e?.details?.openRequests === "number") {
+	        setArchiveOpen(false);
         setArchiveOpenRequests(Number(e.details.openRequests) || 0);
         setArchiveWarnOpen(true);
       } else {
@@ -404,7 +411,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             </div>
           </div>
 
-          <div className="projects-room-list">
+          <div className="projects-grid" aria-label="Projects grid">
             {filtered.map((p) => {
               const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
               const disabled = busy || loading;
@@ -413,50 +420,64 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               const total = Number(p?.counts?.total || 0);
               const isArchived = Boolean(p?.archivedAt);
               return (
-                <div key={p.id} className={`project-tile${isCurrent ? " is-current" : ""}`}>
-                  <div className="project-tile-main">
-                    <div className="project-tile-title-row">
+                <div key={p.id} className={`project-card${isCurrent ? " is-current" : ""}${isArchived ? " is-archived" : ""}`}>
+                  <button
+                    type="button"
+                    className="project-card-main"
+                    onClick={() => (typeof onOpenProject === "function" ? onOpenProject(p.id) : null)}
+                    disabled={disabled || isArchived}
+                    title={isArchived ? "Restore this project to open it." : "Open project"}
+                  >
+                    <div className="project-card-title-row">
                       <strong className="truncate">{p.title || "Untitled"}</strong>
-                      {isArchived ? <StatusPill tone="gray">Archived</StatusPill> : null}
-                      {isCurrent ? <StatusPill tone="green">Current</StatusPill> : null}
-                      {canManage ? <StatusPill tone="blue">Admin</StatusPill> : <StatusPill tone="gray">View-only</StatusPill>}
+                      <span className="project-card-badges" aria-hidden="true">
+                        {isCurrent ? <StatusPill tone="green">Current</StatusPill> : null}
+                        {isArchived ? <StatusPill tone="gray">Archived</StatusPill> : null}
+                        {canManage ? <StatusPill tone="blue">Admin</StatusPill> : <StatusPill tone="gray">Member</StatusPill>}
+                      </span>
                     </div>
-                    <div className="project-tile-meta">
-                      <StatusPill tone={inProgress ? "yellow" : "gray"}>{inProgress} in progress</StatusPill>
-                      <StatusPill tone="gray">{total} total</StatusPill>
-                      {isArchived ? (
-                        <StatusPill tone="gray" title={p?.archivedByName ? `Archived by ${p.archivedByName}` : ""}>
-                          {p?.archivedAt ? `Archived ${String(p.archivedAt).slice(0, 10)}` : "Archived"}
-                        </StatusPill>
-                      ) : null}
-                    </div>
-                  </div>
 
-                  <div className="project-tile-actions">
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={() => (typeof onOpenProject === "function" ? onOpenProject(p.id) : null)}
-                      disabled={disabled || isArchived}
-                      title={isArchived ? "Restore this project to open it." : ""}
-                    >
-                      Open
-                    </button>
+                    <div className="project-card-metrics" aria-label="Request counts">
+                      <div className="project-metric">
+                        <span className="muted">In progress</span>
+                        <strong>{inProgress}</strong>
+                      </div>
+                      <div className="project-metric">
+                        <span className="muted">Total</span>
+                        <strong>{total}</strong>
+                      </div>
+                    </div>
+
+                    {isArchived && p?.archivedAt ? (
+                      <div className="project-card-footnote muted">
+                        Archived {String(p.archivedAt).slice(0, 10)}
+                        {p?.archivedByName ? ` by ${p.archivedByName}` : ""}
+                      </div>
+                    ) : null}
+                  </button>
+
+                  <div className="project-card-actions" aria-label="Project actions">
+                    {!isArchived ? (
+                      <button type="button" onClick={() => onSetCurrent(p)} disabled={disabled || isCurrent}>
+                        {isCurrent ? "Current" : "Set current"}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => openRestore(p)} disabled={disabled || !canManage}>
+                        Restore
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-button projects-more"
-                      onClick={() => openActions(p)}
+                      onClick={(e) => {
+                        setActionsProjectEntry(p);
+                        setActionsAnchorEl(e.currentTarget);
+                        openActions(p);
+                      }}
                       disabled={disabled}
                       aria-label="More actions"
                       title="More actions"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path
-                          d="M5 10a1.6 1.6 0 1 1-3.2 0A1.6 1.6 0 0 1 5 10Zm6.6 0a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 0 1 3.2 0Zm6.6 0a1.6 1.6 0 1 1-3.2 0a1.6 1.6 0 0 1 3.2 0Z"
-                          fill="currentColor"
-                        />
-                      </svg>
-                    </button>
+                    />
                   </div>
                 </div>
               );
@@ -465,15 +486,15 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
         </section>
       )}
 
-      <Modal
-        open={actionsOpen}
-        title={actionsProjectEntry?.title ? `${actionsProjectEntry.title}` : "Project"}
-        size="sm"
+      <ContextMenu
+        open={actionsMenuOpen}
+        anchorEl={actionsAnchorEl}
         onClose={() => {
           if (loading) return;
-          setActionsOpen(false);
+          closeActions();
           setActionsProjectEntry(null);
         }}
+        ariaLabel="Project actions"
       >
         {(() => {
           const p = actionsProjectEntry;
@@ -490,7 +511,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                     type="button"
                     className="action-item primary"
                     onClick={() => {
-                      setActionsOpen(false);
+                      closeActions();
                       setActionsProjectEntry(null);
                       openRestore(p);
                     }}
@@ -509,7 +530,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   type="button"
                   className="action-item primary"
                   onClick={() => {
-                    setActionsOpen(false);
+                    closeActions();
                     setActionsProjectEntry(null);
                     if (typeof onOpenProject === "function") onOpenProject(p.id);
                   }}
@@ -527,7 +548,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   type="button"
                   className={`action-item${isCurrent ? " is-disabled" : ""}`}
                   onClick={async () => {
-                    setActionsOpen(false);
+                    closeActions();
                     setActionsProjectEntry(null);
                     await onSetCurrent(p);
                   }}
@@ -545,7 +566,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   type="button"
                   className="action-item"
                   onClick={() => {
-                    setActionsOpen(false);
+                    closeActions();
                     setActionsProjectEntry(null);
                     openInvite(p);
                   }}
@@ -564,7 +585,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                     type="button"
                     className="action-item"
                     onClick={() => {
-                      setActionsOpen(false);
+                      closeActions();
                       setActionsProjectEntry(null);
                       openArchive(p);
                     }}
@@ -585,7 +606,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                       <strong>Open in DocSpace</strong>
                       <span className="muted">Manage the room and permissions.</span>
                     </div>
-                    <span className="action-item-right" aria-hidden="true">↗</span>
+                    <span className="action-item-right" aria-hidden="true">New tab</span>
                   </a>
                 ) : null}
 
@@ -593,7 +614,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   type="button"
                   className="action-item danger"
                   onClick={() => {
-                    setActionsOpen(false);
+                    closeActions();
                     setActionsProjectEntry(null);
                     openDelete(p);
                   }}
@@ -610,7 +631,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             </div>
           );
         })()}
-      </Modal>
+      </ContextMenu>
 
       <Modal
         open={archiveOpen}

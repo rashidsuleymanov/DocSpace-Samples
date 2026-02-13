@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-02-04T17:39:31.259Z",
+  "savedAt": "2026-02-13T09:53:32.997Z",
   "appointments": [
     {
       "id": "c343037a-d6a0-4df5-bbaf-bae3e75b3efa",
@@ -91,6 +91,24 @@
         "shareToken": "dDsNMbq429q7tNX"
       },
       "createdAt": "2026-02-04T16:05:31.591Z"
+    },
+    {
+      "id": "5e7332b8-0e5c-4c57-8b97-0470b5605420",
+      "roomId": 2323915,
+      "roomTitle": "Patient Room",
+      "patientName": "Emily Carter",
+      "date": "2026-02-13",
+      "time": "14:48",
+      "doctor": "John Smith",
+      "reason": "Головная боль",
+      "status": "Scheduled",
+      "ticket": {
+        "id": "3258508",
+        "title": "Appointment 2026-02-13 14_48 - John Smith.docx",
+        "url": "https://suleymanovrn.onlyoffice.com/s/PgYjyGkSmQXgBxs",
+        "shareToken": "PgYjyGkSmQXgBxs"
+      },
+      "createdAt": "2026-02-13T09:47:35.096Z"
     }
   ],
   "medicalRecords": [],
@@ -172,6 +190,19 @@
       "shareLink": "https://suleymanovrn.onlyoffice.com/s/RmhjRYFxZ3kqrxQ",
       "shareToken": "Ty9TWW1QZDA3TSt3TXhWbk1jYUtEVEgzdE5FRnBLMWo0SHZFVHdIZmJQbz0_ImY1OGVhZTIzLWQ4ZjgtNGNlMy05MTI1LWEyNDBhY2ZhNWNhOCI",
       "createdAt": "2026-02-04T16:02:37.416Z"
+    },
+    {
+      "id": "e82e80bf-b2a1-4422-80f2-230f9ff79e0d",
+      "patientRoomId": "2323915",
+      "patientId": "89bbb9ac-ab74-4c8e-a690-8e58b6045419",
+      "patientName": "Emily Carter",
+      "templateFileId": "3174347",
+      "templateTitle": "Medical Agreement.pdf",
+      "medicalRoomId": "2264561",
+      "requestedBy": "suleymanovrashidn@gmail.com",
+      "shareLink": "https://suleymanovrn.onlyoffice.com/s/RmhjRYFxZ3kqrxQ",
+      "shareToken": "Ty9TWW1QZDA3TSt3TXhWbk1jYUtEVEgzdE5FRnBLMWo0SHZFVHdIZmJQbz0_ImY1OGVhZTIzLWQ4ZjgtNGNlMy05MTI1LWEyNDBhY2ZhNWNhOCI",
+      "createdAt": "2026-02-13T09:49:00.532Z"
     }
   ],
   "patientMappings": [
@@ -204,6 +235,11 @@
       "userId": "5e41b434-86e4-4fb9-9f67-6ff87eb99f65",
       "roomId": "2282140",
       "patientName": "Test User"
+    },
+    {
+      "userId": "89bbb9ac-ab74-4c8e-a690-8e58b6045419",
+      "roomId": "2323915",
+      "patientName": "Emily Carter"
     }
   ]
 }

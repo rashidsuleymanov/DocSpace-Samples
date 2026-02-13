@@ -70,6 +70,7 @@ function isTrackableFlow(flow) {
   const status = String(flow?.status || "");
   if (!flow?.id) return false;
   if (flow?.archivedAt) return false;
+  if (flow?.trashedAt) return false;
   if (status === "Canceled" || status === "Completed") return false;
   const kind = String(flow?.kind || "").toLowerCase();
   if (kind === "sharedsign") return false;

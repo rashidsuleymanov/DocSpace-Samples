@@ -11,6 +11,7 @@ import Library from "./pages/Library.jsx";
 import Contacts from "./pages/Contacts.jsx";
 import BulkSend from "./pages/BulkSend.jsx";
 import BulkLinks from "./pages/BulkLinks.jsx";
+import SendDrafts from "./pages/SendDrafts.jsx";
 import Settings from "./pages/Settings.jsx";
 import { clearSession, loadSession, saveSession } from "./services/session.js";
 import {
@@ -155,13 +156,16 @@ export default function App() {
     const handler = () => refreshActiveProject().catch(() => null);
     const draftsHandler = () => refreshDraftsSummary(session).catch(() => null);
     const flowsHandler = () => refreshFlows(session).catch(() => null);
+    const templatesHandler = () => loadTemplatesForSession(session).catch(() => null);
     window.addEventListener("portal:projectChanged", handler);
     window.addEventListener("portal:draftsChanged", draftsHandler);
     window.addEventListener("portal:flowsChanged", flowsHandler);
+    window.addEventListener("portal:templatesChanged", templatesHandler);
     return () => {
       window.removeEventListener("portal:projectChanged", handler);
       window.removeEventListener("portal:draftsChanged", draftsHandler);
       window.removeEventListener("portal:flowsChanged", flowsHandler);
+      window.removeEventListener("portal:templatesChanged", templatesHandler);
     };
   }, [refreshActiveProject, refreshDraftsSummary, session]);
 
@@ -444,6 +448,15 @@ export default function App() {
             onOpenProjects={(opts) => actions.openProjects(opts)}
           />
         )}
+        {view === "sendDrafts" && (
+          <SendDrafts
+            session={session}
+            busy={busy}
+            onOpenRequests={() => actions.openRequests("all", "all")}
+            onOpenBulkSend={() => actions.navigate("bulk")}
+            onOpenBulkLinks={() => actions.navigate("bulkLinks")}
+          />
+        )}
         {view === "bulk" && (
           <BulkSend
             session={session}
@@ -469,6 +482,8 @@ export default function App() {
           <Contacts
             session={session}
             busy={busy}
+            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+            activeProject={activeProject}
             onOpenBulk={() => actions.navigate("bulk")}
           />
         )}

@@ -231,6 +231,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
       if (!result) throw new Error("Authorization token is required");
       setPublishOpen(false);
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+      window.dispatchEvent(new CustomEvent("portal:templatesChanged"));
       setNotice(
         result?.warning
           ? `Published to project and set as current. ${result.warning}`

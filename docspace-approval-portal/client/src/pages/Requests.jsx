@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import AuditModal from "../components/AuditModal.jsx";
+import ContextMenu from "../components/ContextMenu.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
@@ -10,13 +11,21 @@ import {
   archiveFlow,
   cancelFlow,
   completeFlow,
+  getDirectoryGroup,
+  deleteFlowPermanently,
   getProjectMembers,
   getProjectsPermissions,
   inviteProject,
+  listDirectoryGroups,
+  listDirectoryPeople,
   listFlows,
   reopenFlow,
-  unarchiveFlow
+  searchDirectoryPeople,
+  trashFlow,
+  unarchiveFlow,
+  untrashFlow
 } from "../services/portalApi.js";
+import { listLocalDrafts, saveLocalDraft } from "../services/draftsStore.js";
 
 function isPdfTemplate(t) {
   const ext = String(t?.fileExst || "").trim().toLowerCase();
@@ -30,6 +39,18 @@ function normalizeEmailList(value) {
   const uniq = new Set();
   for (const p of parts) uniq.add(p);
   return Array.from(uniq);
+}
+
+function mergeEmailSets(...parts) {
+  const out = new Set();
+  for (const p of parts) {
+    const arr = Array.isArray(p) ? p : p instanceof Set ? Array.from(p) : [];
+    for (const e of arr) {
+      const email = String(e || "").trim().toLowerCase();
+      if (email) out.add(email);
+    }
+  }
+  return Array.from(out);
 }
 
 function withFillAction(url) {
@@ -92,12 +113,15 @@ export default function Requests({
   const [bulkCandidates, setBulkCandidates] = useState([]);
 
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState(String(initialFilter || "all"));
-  const [scope, setScope] = useState(String(initialScope || "all"));
-  const [who, setWho] = useState("assigned");
+  const [statusFilter, setStatusFilter] = useState(String(initialFilter || "inProgress"));
+  const [scope, setScope] = useState(String(initialScope || "current"));
+  const [who, setWho] = useState("all");
   const [archivedFlows, setArchivedFlows] = useState([]);
   const [archivedRefreshing, setArchivedRefreshing] = useState(false);
   const [archivedError, setArchivedError] = useState("");
+  const [trashedFlows, setTrashedFlows] = useState([]);
+  const [trashedRefreshing, setTrashedRefreshing] = useState(false);
+  const [trashedError, setTrashedError] = useState("");
   const [sendOpen, setSendOpen] = useState(false);
   const [sendQuery, setSendQuery] = useState("");
   const [sendSelectedId, setSendSelectedId] = useState("");
@@ -113,6 +137,10 @@ export default function Requests({
   const [orderEnabled, setOrderEnabled] = useState(false);
   const [orderMap, setOrderMap] = useState({});
   const [orderMaxStep, setOrderMaxStep] = useState(2);
+  const [sendDraftAvailable, setSendDraftAvailable] = useState(false);
+  const [activeDraftId, setActiveDraftId] = useState("");
+  const [draftMenuOpen, setDraftMenuOpen] = useState(false);
+  const [draftAnchorEl, setDraftAnchorEl] = useState(null);
 
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
@@ -125,6 +153,18 @@ export default function Requests({
   const [notify, setNotify] = useState(true);
   const [notifyMessage, setNotifyMessage] = useState("");
   const [notifyBusy, setNotifyBusy] = useState(false);
+  const [dirMode, setDirMode] = useState("people"); // people | groups
+  const [dirPeopleQuery, setDirPeopleQuery] = useState("");
+  const [dirPeople, setDirPeople] = useState([]);
+  const [dirPeopleTotal, setDirPeopleTotal] = useState(0);
+  const [dirGroups, setDirGroups] = useState([]);
+  const [dirGroupQuery, setDirGroupQuery] = useState("");
+  const [dirSelectedGroupIds, setDirSelectedGroupIds] = useState(() => new Set());
+  const [dirGroupMembersById, setDirGroupMembersById] = useState({});
+  const [dirGroupLoadingIds, setDirGroupLoadingIds] = useState(() => new Set());
+  const [pickedDirectoryEmails, setPickedDirectoryEmails] = useState(() => new Set());
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("Document");
@@ -132,7 +172,10 @@ export default function Requests({
 
   const [actionsOpen, setActionsOpen] = useState(false);
   const [actionsGroup, setActionsGroup] = useState(null);
+  const [actionsAnchorEl, setActionsAnchorEl] = useState(null);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -142,6 +185,16 @@ export default function Requests({
   const hasProject = Boolean(String(activeRoomId || "").trim());
   const projectTitle = activeProject?.title || "";
   const projectId = activeProject?.id ? String(activeProject.id) : "";
+
+  const closeActionsMenu = useCallback(() => {
+    setActionsMenuOpen(false);
+    setActionsAnchorEl(null);
+  }, []);
+
+  const closeDraftMenu = useCallback(() => {
+    setDraftMenuOpen(false);
+    setDraftAnchorEl(null);
+  }, []);
 
   useEffect(() => {
     if (!token || permsLoaded) return;
@@ -193,7 +246,39 @@ export default function Requests({
     return () => window.removeEventListener("portal:flowsChanged", handler);
   }, [statusFilter, token]);
 
-  const flowsSource = statusFilter === "archived" ? archivedFlows : flows;
+  useEffect(() => {
+    if (statusFilter !== "trash") return;
+    if (!token) return;
+    setTrashedRefreshing(true);
+    setTrashedError("");
+    listFlows({ token, trashedOnly: true })
+      .then((data) => setTrashedFlows(Array.isArray(data?.flows) ? data.flows : []))
+      .catch((e) => {
+        setTrashedFlows([]);
+        setTrashedError(e?.message || "Failed to load trash");
+      })
+      .finally(() => setTrashedRefreshing(false));
+  }, [statusFilter, token]);
+
+  useEffect(() => {
+    if (statusFilter !== "trash") return;
+    const handler = () => {
+      if (!token) return;
+      setTrashedRefreshing(true);
+      setTrashedError("");
+      listFlows({ token, trashedOnly: true })
+        .then((data) => setTrashedFlows(Array.isArray(data?.flows) ? data.flows : []))
+        .catch((e) => {
+          setTrashedFlows([]);
+          setTrashedError(e?.message || "Failed to load trash");
+        })
+        .finally(() => setTrashedRefreshing(false));
+    };
+    window.addEventListener("portal:flowsChanged", handler);
+    return () => window.removeEventListener("portal:flowsChanged", handler);
+  }, [statusFilter, token]);
+
+  const flowsSource = statusFilter === "archived" ? archivedFlows : statusFilter === "trash" ? trashedFlows : flows;
 
   const filteredByScope = useMemo(() => {
     const items = Array.isArray(flowsSource) ? flowsSource : [];
@@ -311,6 +396,8 @@ export default function Requests({
     const byStatus =
       statusFilter === "archived"
         ? grouped.filter((g) => (Array.isArray(g?.flows) ? g.flows : []).some((f) => Boolean(f?.archivedAt)))
+        : statusFilter === "trash"
+          ? grouped
         : statusFilter === "links"
           ? grouped.filter((g) =>
               (Array.isArray(g?.flows) ? g.flows : []).some((f) => String(f?.source || "") === "bulkLink")
@@ -401,12 +488,161 @@ export default function Requests({
     return Array.from(uniq);
   }, [pickedMemberIds, projectMembers]);
 
+  const filteredDirGroups = useMemo(() => {
+    const list = Array.isArray(dirGroups) ? dirGroups : [];
+    const q = String(dirGroupQuery || "").trim().toLowerCase();
+    const filtered = q ? list.filter((g) => String(g?.name || "").toLowerCase().includes(q)) : list.slice();
+    filtered.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+    return filtered;
+  }, [dirGroupQuery, dirGroups]);
+
+  const directoryRows = useMemo(() => {
+    const list =
+      dirMode === "groups"
+        ? Array.from(dirSelectedGroupIds).flatMap((gid) => (Array.isArray(dirGroupMembersById?.[gid]) ? dirGroupMembersById[gid] : []))
+        : dirPeople;
+    const items = Array.isArray(list) ? list : [];
+
+    const normalized = items
+      .map((p) => ({
+        email: String(p?.email || "").trim().toLowerCase(),
+        name: String(p?.displayName || p?.name || "").trim()
+      }))
+      .filter((p) => p.email);
+
+    const seen = new Set();
+    const uniq = [];
+    for (const row of normalized) {
+      if (seen.has(row.email)) continue;
+      seen.add(row.email);
+      uniq.push(row);
+    }
+    return uniq;
+  }, [dirGroupMembersById, dirMode, dirPeople, dirSelectedGroupIds]);
+
   const allRecipientEmails = useMemo(() => {
     const fromPick = selectedMemberEmails;
     const fromInvite = normalizeEmailList(inviteEmails);
-    const uniq = new Set([...(fromPick || []), ...(fromInvite || [])]);
-    return Array.from(uniq);
-  }, [inviteEmails, selectedMemberEmails]);
+    const fromDirectory = pickedDirectoryEmails instanceof Set ? Array.from(pickedDirectoryEmails) : [];
+    return mergeEmailSets(fromPick, fromInvite, fromDirectory);
+  }, [inviteEmails, pickedDirectoryEmails, selectedMemberEmails]);
+
+  const toggleDirectoryGroup = useCallback((groupId) => {
+    const gid = String(groupId || "").trim();
+    if (!gid) return;
+
+    setDirSelectedGroupIds((prev) => {
+      const next = new Set(prev instanceof Set ? prev : []);
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
+      return next;
+    });
+  }, []);
+
+  const refreshSendDraftAvailable = useCallback(() => {
+    try {
+      const list = listLocalDrafts(session);
+      setSendDraftAvailable(list.length > 0);
+    } catch {
+      setSendDraftAvailable(false);
+    }
+  }, [session]);
+
+  const saveSendDraft = useCallback(() => {
+    try {
+      const payload = {
+        v: 1,
+        kind: sendKind,
+        templateId: sendSelectedId,
+        templateTitle: sendSelectedTitle,
+        dueDate: sendDueDate || "",
+        recipients: allRecipientEmails,
+        notify: Boolean(notify),
+        message: String(notifyMessage || ""),
+        orderEnabled: Boolean(orderEnabled),
+        orderMaxStep: Number(orderMaxStep) || 2,
+        orderMap: orderMap && typeof orderMap === "object" ? orderMap : {}
+      };
+      const title = `${sendSelectedTitle || "Request"}${sendKind ? ` (${sendKind})` : ""}`.trim();
+      const saved = saveLocalDraft(session, {
+        id: activeDraftId || "",
+        type: "request",
+        title,
+        payload
+      });
+      setActiveDraftId(saved?.id || "");
+      setLocalError("");
+      setSendDraftAvailable(true);
+    } catch {
+      setLocalError("Failed to save draft");
+    }
+  }, [
+    allRecipientEmails,
+    activeDraftId,
+    session,
+    notify,
+    notifyMessage,
+    orderEnabled,
+    orderMap,
+    orderMaxStep,
+    sendDueDate,
+    sendKind,
+    sendSelectedId,
+    sendSelectedTitle
+  ]);
+
+  const applyDraftPayload = useCallback((payload) => {
+    const data = payload && typeof payload === "object" ? payload : {};
+    setSendKind(String(data.kind || "approval"));
+    setSendSelectedId(String(data.templateId || ""));
+    setSendSelectedTitle(String(data.templateTitle || ""));
+    setSendDueDate(String(data.dueDate || ""));
+    const recipients = Array.isArray(data.recipients) ? data.recipients : [];
+    setPickedMemberIds(new Set());
+    setInviteEmails(recipients.join("\n"));
+    setNotify(Boolean(data.notify));
+    setNotifyMessage(String(data.message || ""));
+    setOrderEnabled(Boolean(data.orderEnabled));
+    setOrderMaxStep(Number(data.orderMaxStep) || 2);
+    setOrderMap(data.orderMap && typeof data.orderMap === "object" ? data.orderMap : {});
+    setSendStep("recipients");
+    setLocalError("");
+  }, []);
+
+  const loadLastDraft = useCallback(() => {
+    try {
+      const list = listLocalDrafts(session).filter((d) => d.type === "request");
+      if (!list.length) return false;
+      const latest = list[0];
+      setActiveDraftId(String(latest.id || ""));
+      applyDraftPayload(latest.payload);
+      return true;
+    } catch {
+      setLocalError("Failed to load draft");
+      return false;
+    }
+  }, [applyDraftPayload, session]);
+
+  const clearDraftSelection = useCallback(() => {
+    setActiveDraftId("");
+    refreshSendDraftAvailable();
+  }, [refreshSendDraftAvailable]);
+
+  useEffect(() => {
+    const handler = (evt) => {
+      const payload = evt?.detail?.payload || null;
+      if (!payload) return;
+      setSendOpen(true);
+      setTimeout(() => applyDraftPayload(payload), 0);
+    };
+    window.addEventListener("portal:requestsLoadDraft", handler);
+    return () => window.removeEventListener("portal:requestsLoadDraft", handler);
+  }, [applyDraftPayload]);
+
+  useEffect(() => {
+    if (!sendOpen) return;
+    refreshSendDraftAvailable();
+  }, [refreshSendDraftAvailable, sendOpen]);
 
   useEffect(() => {
     if (!sendOpen) return;
@@ -452,6 +688,17 @@ export default function Requests({
     setInviteEmails("");
     setNotify(true);
     setNotifyMessage("");
+    setDirMode("people");
+    setDirPeopleQuery("");
+    setDirPeople([]);
+    setDirPeopleTotal(0);
+    setDirGroups([]);
+    setDirGroupQuery("");
+    setDirSelectedGroupIds(new Set());
+    setDirGroupMembersById({});
+    setDirGroupLoadingIds(new Set());
+    setPickedDirectoryEmails(new Set());
+    setDirectoryError("");
     setMembersError("");
 
     if (!token || !projectId) {
@@ -474,6 +721,159 @@ export default function Requests({
       })
       .finally(() => setMembersLoading(false));
   }, [projectId, sendOpen, token]);
+
+  useEffect(() => {
+    if (!sendOpen) return;
+    if (sendStep !== "recipients") return;
+    if (!token) return;
+
+    let cancelled = false;
+    setDirectoryLoading(true);
+    setDirectoryError("");
+
+    Promise.allSettled([listDirectoryGroups({ token }), listDirectoryPeople({ token, limit: 25, offset: 0 })]).then((results) => {
+      if (cancelled) return;
+
+      let nextError = "";
+      const groupsRes = results[0];
+      if (groupsRes?.status === "fulfilled") {
+        setDirGroups(Array.isArray(groupsRes.value?.groups) ? groupsRes.value.groups : []);
+      } else {
+        setDirGroups([]);
+        nextError = groupsRes?.reason?.message || "Failed to load DocSpace directory";
+      }
+
+      const peopleRes = results[1];
+      if (peopleRes?.status === "fulfilled") {
+        const list = Array.isArray(peopleRes.value?.people) ? peopleRes.value.people : [];
+        const total = Number.isFinite(Number(peopleRes.value?.total)) ? Number(peopleRes.value.total) : list.length;
+        setDirPeople(list);
+        setDirPeopleTotal(total);
+      } else {
+        setDirPeople([]);
+        setDirPeopleTotal(0);
+        if (!nextError) nextError = peopleRes?.reason?.message || "Failed to load DocSpace directory";
+      }
+
+      setDirectoryError(nextError);
+    }).finally(() => {
+      if (cancelled) return;
+      setDirectoryLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sendOpen, sendStep, token]);
+
+  useEffect(() => {
+    if (!sendOpen || sendStep !== "recipients") return;
+    if (!token) return;
+    if (dirMode !== "people") return;
+    const q = String(dirPeopleQuery || "").trim();
+    if (!q) {
+      if (Array.isArray(dirPeople) && dirPeople.length) return;
+      if (Number(dirPeopleTotal) > 0) return;
+
+      let cancelled = false;
+      setDirectoryLoading(true);
+      setDirectoryError("");
+      listDirectoryPeople({ token, limit: 25, offset: 0 })
+        .then((data) => {
+          if (cancelled) return;
+          const list = Array.isArray(data?.people) ? data.people : [];
+          const total = Number.isFinite(Number(data?.total)) ? Number(data.total) : list.length;
+          setDirPeople(list);
+          setDirPeopleTotal(total);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setDirPeople([]);
+          setDirPeopleTotal(0);
+          setDirectoryError(e?.message || "Failed to load people");
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setDirectoryLoading(false);
+        });
+
+      return;
+    }
+
+    let cancelled = false;
+    setDirectoryLoading(true);
+    setDirectoryError("");
+    const handle = setTimeout(() => {
+      searchDirectoryPeople({ token, query: q })
+        .then((data) => {
+          if (cancelled) return;
+          setDirPeople(Array.isArray(data?.people) ? data.people : []);
+          setDirPeopleTotal(0);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setDirPeople([]);
+          setDirPeopleTotal(0);
+          setDirectoryError(e?.message || "Failed to search people");
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setDirectoryLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [dirMode, dirPeople, dirPeopleQuery, dirPeopleTotal, sendOpen, sendStep, token]);
+
+  useEffect(() => {
+    if (!sendOpen || sendStep !== "recipients") return;
+    if (!token) return;
+    if (dirMode !== "groups") return;
+    const selected = Array.from(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds : [])
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+    if (!selected.length) return;
+
+    let cancelled = false;
+
+    const fetchMissing = async () => {
+      for (const gid of selected) {
+        if (cancelled) return;
+        if (dirGroupMembersById && typeof dirGroupMembersById === "object" && Array.isArray(dirGroupMembersById[gid])) continue;
+
+        setDirGroupLoadingIds((prev) => {
+          const next = new Set(prev instanceof Set ? prev : []);
+          next.add(gid);
+          return next;
+        });
+
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const data = await getDirectoryGroup({ token, groupId: gid });
+          const members = Array.isArray(data?.members) ? data.members : [];
+          if (!cancelled) {
+            setDirGroupMembersById((prev) => ({ ...(prev && typeof prev === "object" ? prev : {}), [gid]: members }));
+          }
+        } catch (e) {
+          if (!cancelled) setDirectoryError(e?.message || "Failed to load group members");
+        } finally {
+          setDirGroupLoadingIds((prev) => {
+            const next = new Set(prev instanceof Set ? prev : []);
+            next.delete(gid);
+            return next;
+          });
+        }
+      }
+    };
+
+    fetchMissing().catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [dirGroupMembersById, dirMode, dirSelectedGroupIds, sendOpen, sendStep, token]);
 
   // Permissions are enforced server-side (user token).
 
@@ -595,6 +995,63 @@ export default function Requests({
     }
   };
 
+  const onTrashGroup = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await trashFlow({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to move request to trash");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const onUntrashGroup = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await untrashFlow({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to restore request");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const onDeleteGroupPermanently = async (group) => {
+    const items = Array.isArray(group?.flows) ? group.flows : [];
+    const ids = items.map((f) => String(f?.id || "").trim()).filter(Boolean);
+    if (!ids.length || !token) return;
+    setLocalError("");
+    setActionBusy(true);
+    try {
+      for (const id of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await deleteFlowPermanently({ token, flowId: id }).catch(() => null);
+      }
+      window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+    } catch (e) {
+      setLocalError(e?.message || "Failed to delete request");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const runBulk = async () => {
     if (!bulkCandidates.length || !token) return;
     setLocalError("");
@@ -676,6 +1133,10 @@ export default function Requests({
     setSendFlows(flows);
     setSendFlow(flows[0] || null);
     setSendWarning(String(result?.warning || "").trim());
+    if (flows.length) {
+      setActiveDraftId("");
+      refreshSendDraftAvailable();
+    }
   };
 
   const onNotifyRecipients = async () => {
@@ -947,6 +1408,14 @@ export default function Requests({
             </button>
             <button
               type="button"
+              className={`chip${statusFilter === "trash" ? " is-active" : ""}`}
+              onClick={() => setStatusFilter("trash")}
+              disabled={busy || trashedRefreshing}
+            >
+              Trash
+            </button>
+            <button
+              type="button"
               className={`chip${statusFilter === "archived" ? " is-active" : ""}`}
               onClick={() => setStatusFilter("archived")}
               disabled={busy || archivedRefreshing}
@@ -958,6 +1427,7 @@ export default function Requests({
 
         <div className="list">
           {statusFilter === "archived" && archivedError ? <p className="error">{archivedError}</p> : null}
+          {statusFilter === "trash" && trashedError ? <p className="error">{trashedError}</p> : null}
           {scope === "current" && !hasProject ? (
             <EmptyState
               title={hasAnyProjects ? "No project selected" : "No projects yet"}
@@ -981,6 +1451,16 @@ export default function Requests({
                 actions={
                   <button type="button" onClick={() => setStatusFilter("all")} disabled={busy}>
                     View active requests
+                  </button>
+                }
+              />
+            ) : statusFilter === "trash" ? (
+              <EmptyState
+                title="Trash is empty"
+                description="Move completed or canceled requests to trash to hide them from your list."
+                actions={
+                  <button type="button" onClick={() => setStatusFilter("all")} disabled={busy}>
+                    View all requests
                   </button>
                 }
               />
@@ -1073,7 +1553,7 @@ export default function Requests({
                     disabled={!(status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || busy || status === "Canceled"}
                     title={status === "Canceled" ? "Canceled requests cannot be opened" : ""}
                   >
-                    Open
+                    {status === "Completed" ? "Open result" : "Open"}
                   </button>
                   {(() => {
                     const kind = String(flow?.kind || "").toLowerCase();
@@ -1097,36 +1577,36 @@ export default function Requests({
                       </button>
                     );
                   })()}
-                  {status === "Canceled" && canManageFlow(flow) ? (
-                    <button type="button" onClick={() => onReopenGroup(group)} disabled={busy || actionBusy}>
-                      Reopen
-                    </button>
-                  ) : null}
-                  {statusFilter === "archived" && canManageFlow(flow) ? (
-                    <button type="button" onClick={() => onUnarchiveGroup(group)} disabled={busy || actionBusy}>
-                      Restore
-                    </button>
-                  ) : null}
-                  {statusFilter !== "archived" && (status === "Completed" || status === "Canceled") && canManageFlow(flow) ? (
-                    <button type="button" onClick={() => onArchiveGroup(group)} disabled={busy || actionBusy}>
-                      Archive
-                    </button>
-                  ) : null}
-                  {true ? (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      onClick={() => {
-                        setActionsGroup(group);
-                        setActionsOpen(true);
-                      }}
-                      disabled={busy || actionBusy}
-                      aria-label="More actions"
-                      title="More actions"
-                    >
-                      ...
-                    </button>
-                  ) : null}
+                  {(() => {
+                    const canManage = canManageFlow(flow);
+                    const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+                    if (!canCancel) return null;
+                    return (
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          setActionsGroup(group);
+                          setCancelOpen(true);
+                        }}
+                        disabled={busy || actionBusy}
+                      >
+                        Cancel
+                      </button>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={(e) => {
+                      setActionsGroup(group);
+                      setActionsAnchorEl(e.currentTarget);
+                      setActionsMenuOpen(true);
+                    }}
+                    disabled={busy || actionBusy}
+                    aria-label="More actions"
+                    title="More actions"
+                  />
                 </div>
               </div>
               );
@@ -1134,6 +1614,183 @@ export default function Requests({
           )}
         </div>
       </section>
+
+      <ContextMenu open={actionsMenuOpen} anchorEl={actionsAnchorEl} onClose={closeActionsMenu} ariaLabel="Request actions">
+        {(() => {
+          const group = actionsGroup;
+          const flow = group?.primaryFlow || group?.flows?.[0] || null;
+          if (!flow) return null;
+
+          const status = String(group?.status || flow?.status || "");
+          const kind = String(flow?.kind || "").toLowerCase();
+          const canManage = canManageFlow(flow);
+          const isArchived = Boolean(flow?.archivedAt);
+          const isTrashed = Boolean(flow?.trashedAt);
+          const canReopen = status === "Canceled" && canManage;
+          const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+          const canArchive = canManage && !isArchived && (status === "Completed" || status === "Canceled");
+          const canUnarchive = canManage && isArchived;
+          const canTrash = canManage && !isTrashed && (status === "Completed" || status === "Canceled" || isArchived);
+          const canUntrash = canManage && isTrashed;
+          const canDelete = canManage && isTrashed && statusFilter === "trash";
+
+          const openUrl = String((status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || "").trim();
+          const canCopyLink = Boolean(openUrl) && kind !== "fillsign";
+
+          const hasManageActions = canReopen || canArchive || canUnarchive || canTrash || canUntrash || canCancel || canDelete;
+
+          return (
+            <>
+              <button
+                type="button"
+                className="menu-item"
+                onClick={() => {
+                  closeActionsMenu();
+                  setDetailsGroup(group);
+                  setDetailsOpen(true);
+                }}
+              >
+                <span>Details</span>
+                <span className="menu-item-meta">Recipients, due date</span>
+              </button>
+              <button
+                type="button"
+                className="menu-item"
+                onClick={() => {
+                  closeActionsMenu();
+                  setActionsGroup(group);
+                  setAuditOpen(true);
+                }}
+                disabled={busy || actionBusy}
+              >
+                <span>Activity</span>
+                <span className="menu-item-meta">Timeline</span>
+              </button>
+              {canCopyLink ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    closeActionsMenu();
+                    onCopyLink(openUrl);
+                  }}
+                  disabled={busy || actionBusy || !openUrl}
+                >
+                  <span>Copy link</span>
+                  <span className="menu-item-meta">Share</span>
+                </button>
+              ) : null}
+
+              {hasManageActions ? <div className="menu-sep" role="separator" /> : null}
+
+              {canReopen ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    closeActionsMenu();
+                    await onReopenGroup(group);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Reopen</span>
+                  <span className="menu-item-meta">Undo cancel</span>
+                </button>
+              ) : null}
+
+              {canUntrash ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    closeActionsMenu();
+                    await onUntrashGroup(group);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Restore</span>
+                  <span className="menu-item-meta">From trash</span>
+                </button>
+              ) : null}
+
+              {canUnarchive ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    closeActionsMenu();
+                    await onUnarchiveGroup(group);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Restore</span>
+                  <span className="menu-item-meta">From archive</span>
+                </button>
+              ) : null}
+
+              {canArchive ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    closeActionsMenu();
+                    await onArchiveGroup(group);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Archive</span>
+                  <span className="menu-item-meta">Hide from active</span>
+                </button>
+              ) : null}
+
+              {canTrash ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    closeActionsMenu();
+                    await onTrashGroup(group);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Move to trash</span>
+                  <span className="menu-item-meta">Soft delete</span>
+                </button>
+              ) : null}
+
+              {canCancel ? (
+                <button
+                  type="button"
+                  className="menu-item danger"
+                  onClick={() => {
+                    closeActionsMenu();
+                    setCancelOpen(true);
+                  }}
+                  disabled={busy || actionBusy}
+                >
+                  <span>Cancel request</span>
+                  <span className="menu-item-meta">Stops the flow</span>
+                </button>
+              ) : null}
+
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="menu-item danger"
+                  onClick={() => {
+                    closeActionsMenu();
+                    setDeleteOpen(true);
+                  }}
+                  disabled={busy || actionBusy || !group?.flows?.length}
+                >
+                  <span>Delete permanently</span>
+                  <span className="menu-item-meta">Remove from portal</span>
+                </button>
+              ) : null}
+            </>
+          );
+        })()}
+      </ContextMenu>
 
       <Modal
         open={bulkOpen}
@@ -1185,11 +1842,23 @@ export default function Requests({
               ? "Request signature"
               : "New request"
         }
+        size="lg"
         onClose={() => setSendOpen(false)}
         footer={
           <>
-            {!sendFlows.length ? (
-              <>
+             {!sendFlows.length ? (
+               <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    setDraftAnchorEl(e.currentTarget);
+                    setDraftMenuOpen(true);
+                  }}
+                  disabled={busy || (!sendDraftAvailable && !sendSelectedId && !activeDraftId)}
+                  title={!sendDraftAvailable && !sendSelectedId && !activeDraftId ? "No draft actions available" : ""}
+                >
+                  Drafts
+                </button>
                 {sendStep === "recipients" ? (
                   <button type="button" onClick={() => setSendStep("setup")} disabled={busy}>
                     Back
@@ -1243,18 +1912,38 @@ export default function Requests({
           </>
         }
       >
-        {!templateItems.length ? (
-          <EmptyState
-            title="No published templates in this project"
-            description="Create a template, publish it to a project, then start a request."
-            actions={
-              <button type="button" className="primary" onClick={onOpenDrafts} disabled={busy}>
-                Open Templates
-              </button>
-            }
-          />
-        ) : (
-          <div className="request-wizard">
+        <div className="wizard-modal">
+          {!templateItems.length ? (
+            <EmptyState
+              title="No published templates in this project"
+              description={
+                activeProject?.title
+                  ? `No published templates found in "${activeProject.title}". Publish a template to this project, or switch projects.`
+                  : "Create a template, publish it to a project, then start a request."
+              }
+              actions={
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="primary" onClick={onOpenDrafts} disabled={busy}>
+                    Open Templates
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent("portal:templatesChanged"));
+                      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+                    }}
+                    disabled={busy}
+                  >
+                    Refresh
+                  </button>
+                  <button type="button" onClick={onOpenProjects} disabled={busy}>
+                    Change project
+                  </button>
+                </div>
+              }
+            />
+          ) : (
+            <div className="request-wizard">
             {!sendFlows.length ? (
               <div className="wizard-stepper" aria-label="New request steps">
                 <button
@@ -1397,27 +2086,61 @@ export default function Requests({
                   />
                 </label>
               </div>
-              <div className="list" style={{ marginTop: 0 }}>
-                {filteredSendTemplates.slice(0, 8).map((t) => {
-                  const selected = String(sendSelectedId) === String(t.id);
-                  return (
+              <div className="template-picker" style={{ marginTop: 0 }}>
+                <div className="template-picker-meta">
+                  <span className="muted">{filteredSendTemplates.length} shown</span>
+                  {sendSelectedId ? (
                     <button
-                      key={t.id}
                       type="button"
-                      className={`select-row${selected ? " is-selected" : ""}`}
+                      className="link"
                       onClick={() => {
-                        setSendSelectedId(String(t.id));
-                        setSendSelectedTitle(String(t.title || `File ${t.id}`));
+                        setSendSelectedId("");
+                        setSendSelectedTitle("");
                       }}
                       disabled={busy}
                     >
-                      <div className="select-row-main">
-                        <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                      </div>
-                      <span className="select-row-right" aria-hidden="true">{selected ? "Selected" : ">"}</span>
+                      Clear selection
                     </button>
-                  );
-                })}
+                  ) : null}
+                </div>
+
+                {!filteredSendTemplates.length ? (
+                  <EmptyState
+                    title="No templates found"
+                    description={sendQuery ? "Try a different search, or publish another template." : "Publish a PDF template to this project to start a request."}
+                  />
+                ) : (
+                  <div className="template-picker-list list" role="listbox" aria-label="Templates">
+                    {filteredSendTemplates.map((t) => {
+                      const selected = String(sendSelectedId) === String(t.id);
+                      const title = t.title || `File ${t.id}`;
+                      const kind = t.isForm ? "Form" : "PDF";
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`list-row template-row${selected ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setSendSelectedId(String(t.id));
+                            setSendSelectedTitle(String(title));
+                          }}
+                          disabled={busy}
+                          role="option"
+                          aria-selected={selected}
+                          title={title}
+                        >
+                          <span className="list-main" style={{ minWidth: 0 }}>
+                            <strong className="truncate">{title}</strong>
+                          </span>
+                          <span className="template-row-right" aria-hidden="true">
+                            <StatusPill tone={t.isForm ? "green" : "gray"}>{kind}</StatusPill>
+                            <span className="template-row-check">{selected ? "✓" : ""}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
               </>
@@ -1449,10 +2172,28 @@ export default function Requests({
                     ) : null}
                   </div>
 
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <span className="muted">{allRecipientEmails.length} selected</span>
+                    {allRecipientEmails.length ? (
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => {
+                          setPickedMemberIds(new Set());
+                          setPickedDirectoryEmails(new Set());
+                          setInviteEmails("");
+                        }}
+                        disabled={busy}
+                      >
+                        Clear recipients
+                      </button>
+                    ) : null}
+                  </div>
+
                 {membersLoading ? (
                   <EmptyState title="Loading people..." />
                 ) : (
-                  <div className={`recipient-grid${sendAdvanced && canManageProject ? "" : " is-single"}`}>
+                  <div className="recipient-grid">
                     <div className="recipient-panel">
                       <div className="recipient-head">
                         <strong>People in this project</strong>
@@ -1475,7 +2216,7 @@ export default function Requests({
                       ) : !filteredProjectMembers.length ? (
                         <EmptyState title="No matches" description="Try a different search." />
                       ) : (
-                        <div className="member-list">
+                        <div className="member-list is-compact">
                           <label className="check-row">
                             <input
                               type="checkbox"
@@ -1522,51 +2263,271 @@ export default function Requests({
                       ) : null}
                     </div>
 
-                    {sendAdvanced && canManageProject ? (
                     <div className="recipient-panel">
                       <div className="recipient-head">
-                        <strong>Invite new people</strong>
-                        <span className="muted">Admin only</span>
+                        <strong>DocSpace directory</strong>
+                        <span className="muted">{directoryRows.length} shown</span>
                       </div>
+
+                      <Tabs
+                        value={dirMode}
+                        onChange={(v) => {
+                          setDirMode(String(v || "people"));
+                          setDirectoryError("");
+                        }}
+                        items={[
+                          { id: "people", label: "People" },
+                          { id: "groups", label: "Groups" }
+                        ]}
+                        ariaLabel="Directory source"
+                      />
+
                       <div className="auth-form" style={{ marginTop: 0 }}>
-                        <label>
-                          <span>Emails (comma / new line)</span>
-                          <textarea
-                            value={inviteEmails}
-                            onChange={(e) => setInviteEmails(e.target.value)}
-                            disabled={busy || !canManageProject}
-                          />
-                        </label>
-                        <label className="inline-check">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(notify)}
-                            onChange={(e) => setNotify(e.target.checked)}
-                            disabled={busy || !canManageProject}
-                          />
-                          <span>Send notification</span>
-                        </label>
-                        <label>
-                          <span>Message (optional)</span>
-                          <input
-                            value={notifyMessage}
-                            onChange={(e) => setNotifyMessage(e.target.value)}
-                            disabled={busy || !canManageProject || !notify}
-                            placeholder="Short note for recipients..."
-                          />
-                        </label>
-                        <p className="muted" style={{ margin: 0 }}>
-                          {sendKind === "fillSign"
-                            ? "After sending, people will see the document in their Requests inbox."
-                            : sendKind === "sharedSign"
-                              ? "After sending, people will open the shared signing link."
-                              : "After creating the request you can notify people and include the approval link."}
-                        </p>
+                        {dirMode === "people" ? (
+                          <label>
+                            <span>People</span>
+                            <input
+                              value={dirPeopleQuery}
+                              onChange={(e) => setDirPeopleQuery(e.target.value)}
+                              placeholder="Filter or search name/email..."
+                              disabled={busy || directoryLoading}
+                            />
+                          </label>
+                        ) : (
+                          <label>
+                            <span>Groups</span>
+                            <input
+                              value={dirGroupQuery}
+                              onChange={(e) => setDirGroupQuery(e.target.value)}
+                              placeholder="Filter groups..."
+                              disabled={busy || directoryLoading}
+                            />
+                          </label>
+                        )}
                       </div>
+
+                      {dirMode === "groups" ? (
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -4 }}>
+                          <span className="muted">{dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0} selected</span>
+                          {(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0) ? (
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => setDirSelectedGroupIds(new Set())}
+                              disabled={busy || directoryLoading}
+                            >
+                              Clear groups
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {directoryError ? <p className="error" style={{ margin: 0 }}>{directoryError}</p> : null}
+                      {directoryLoading ? <EmptyState title="Loading directory..." /> : null}
+
+                      {!directoryLoading && dirMode === "people" && !String(dirPeopleQuery || "").trim() && directoryRows.length === 0 ? (
+                        <EmptyState title="No people found" description="Your DocSpace directory is empty, or this user has no access." />
+                      ) : null}
+
+                      {!directoryLoading && dirMode === "groups" && (dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0) === 0 ? (
+                        <EmptyState title="Choose groups" description="Select one or more groups, then pick recipients from their members." />
+                      ) : null}
+
+                      {!directoryLoading && dirMode === "people" && String(dirPeopleQuery || "").trim() && directoryRows.length === 0 ? (
+                        <EmptyState title="No results" description="Try a different search." />
+                      ) : null}
+
+                      {!directoryLoading && dirMode === "groups" && (dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0) > 0 && directoryRows.length === 0 ? (
+                        <EmptyState title="No members found" description="Selected groups have no members with email addresses." />
+                      ) : null}
+
+                      {!directoryLoading && dirMode === "groups" && filteredDirGroups.length ? (
+                        <div className="member-list is-compact" style={{ marginTop: 4 }}>
+                          <label className="check-row">
+                            <input
+                              type="checkbox"
+                              checked={filteredDirGroups.length > 0 && filteredDirGroups.every((g) => (dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.has(String(g?.id)) : false))}
+                              onChange={(e) => {
+                                const next = new Set(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds : []);
+                                if (e.target.checked) {
+                                  for (const g of filteredDirGroups) {
+                                    const gid = String(g?.id || "").trim();
+                                    if (gid) next.add(gid);
+                                  }
+                                } else {
+                                  for (const g of filteredDirGroups) {
+                                    const gid = String(g?.id || "").trim();
+                                    if (gid) next.delete(gid);
+                                  }
+                                }
+                                setDirSelectedGroupIds(next);
+                              }}
+                              disabled={busy || directoryLoading}
+                            />
+                            <span>Select all shown groups</span>
+                          </label>
+
+                          {filteredDirGroups.map((g) => {
+                            const gid = String(g?.id || "").trim();
+                            if (!gid) return null;
+                            const name = String(g?.name || "").trim() || "Group";
+                            const count = Number.isFinite(Number(g?.membersCount)) ? Number(g.membersCount) : null;
+                            const selected = dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.has(gid) : false;
+                            const isLoading = dirGroupLoadingIds instanceof Set ? dirGroupLoadingIds.has(gid) : false;
+                            return (
+                              <label key={gid} className="check-row" title={name}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => toggleDirectoryGroup(gid)}
+                                  disabled={busy || directoryLoading || isLoading}
+                                />
+                                <span className="truncate">
+                                  {name}
+                                  {count !== null ? <span className="muted"> {" - "}{count} members</span> : null}
+                                  {isLoading ? <span className="muted"> {" - "}loading…</span> : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      {!directoryLoading && directoryRows.length ? (
+                        <div className="member-list is-compact">
+                          <label className="check-row">
+                            <input
+                              type="checkbox"
+                              checked={
+                                directoryRows.length > 0 && directoryRows.map((r) => r.email).filter(Boolean).every((email) => pickedDirectoryEmails.has(email))
+                              }
+                              onChange={(e) => {
+                                const emails = directoryRows.map((r) => r.email).filter(Boolean);
+                                if (!emails.length) return;
+                                if (e.target.checked) {
+                                  const next = new Set(pickedDirectoryEmails);
+                                  for (const email of emails) next.add(email);
+                                  setPickedDirectoryEmails(next);
+                                  return;
+                                }
+                                const next = new Set(pickedDirectoryEmails);
+                                for (const email of emails) next.delete(email);
+                                setPickedDirectoryEmails(next);
+                              }}
+                              disabled={busy}
+                            />
+                            <span>Select all shown</span>
+                          </label>
+                          {directoryRows.map((c) => {
+                            const email = String(c?.email || "").trim().toLowerCase();
+                            if (!email) return null;
+                            const name = String(c?.name || "").trim() || email;
+                            return (
+                              <label key={`${dirMode}:${email}`} className="check-row" title={email}>
+                                <input
+                                  type="checkbox"
+                                  checked={pickedDirectoryEmails.has(email)}
+                                  onChange={(e) => {
+                                    const next = new Set(pickedDirectoryEmails);
+                                    if (e.target.checked) next.add(email);
+                                    else next.delete(email);
+                                    setPickedDirectoryEmails(next);
+                                  }}
+                                  disabled={busy}
+                                />
+                                <span className="truncate">
+                                  {name}
+                                  {email && name !== email ? <span className="muted"> {" - "}{email}</span> : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      {!directoryLoading &&
+                      dirMode === "people" &&
+                      !String(dirPeopleQuery || "").trim() &&
+                      dirPeopleTotal > 0 &&
+                      Array.isArray(dirPeople) &&
+                      dirPeople.length < dirPeopleTotal ? (
+                        <div style={{ display: "flex", gap: 12, alignItems: "center", paddingTop: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!token) return;
+                              setDirectoryLoading(true);
+                              setDirectoryError("");
+                              listDirectoryPeople({ token, limit: 25, offset: dirPeople.length })
+                                .then((data) => {
+                                  const list = Array.isArray(data?.people) ? data.people : [];
+                                  const total = Number.isFinite(Number(data?.total)) ? Number(data.total) : dirPeopleTotal;
+                                  setDirPeople((prev) => [...(Array.isArray(prev) ? prev : []), ...list]);
+                                  setDirPeopleTotal(total);
+                                })
+                                .catch((e) => setDirectoryError(e?.message || "Failed to load people"))
+                                .finally(() => setDirectoryLoading(false));
+                            }}
+                            disabled={busy || directoryLoading}
+                          >
+                            Load more
+                          </button>
+                          <span className="muted">
+                            Showing {dirPeople.length} of {dirPeopleTotal}
+                          </span>
+                        </div>
+                      ) : null}
+
+                      <p className="muted" style={{ margin: 0 }}>
+                        Selected people are added as recipient emails.
+                      </p>
                     </div>
-                    ) : null}
                   </div>
                 )}
+
+                {sendAdvanced && canManageProject ? (
+                  <div className="recipient-panel" style={{ marginTop: 12 }}>
+                    <div className="recipient-head">
+                      <strong>Invite & message</strong>
+                      <span className="muted">Admin only</span>
+                    </div>
+                    <div className="auth-form" style={{ marginTop: 0 }}>
+                      <label>
+                        <span>Emails (comma / new line)</span>
+                        <textarea
+                          value={inviteEmails}
+                          onChange={(e) => setInviteEmails(e.target.value)}
+                          disabled={busy || !canManageProject}
+                        />
+                      </label>
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notify)}
+                          onChange={(e) => setNotify(e.target.checked)}
+                          disabled={busy || !canManageProject}
+                        />
+                        <span>Send notification</span>
+                      </label>
+                      <label>
+                        <span>Message (optional)</span>
+                        <input
+                          value={notifyMessage}
+                          onChange={(e) => setNotifyMessage(e.target.value)}
+                          disabled={busy || !canManageProject || !notify}
+                          placeholder="Short note for recipients..."
+                        />
+                      </label>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {sendKind === "fillSign"
+                          ? "After sending, people will see the document in their Requests inbox."
+                          : sendKind === "sharedSign"
+                            ? "After sending, people will open the shared signing link."
+                            : "After creating the request you can notify people and include the approval link."}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
                 {(sendKind === "sharedSign" || sendKind === "approval") && allRecipientEmails.length > 1 ? (
                   <div className="order-block">
@@ -1729,9 +2690,61 @@ export default function Requests({
                 </div>
               </div>
             ) : null}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </Modal>
+
+      <ContextMenu open={draftMenuOpen} anchorEl={draftAnchorEl} onClose={closeDraftMenu} ariaLabel="Draft actions">
+        {sendDraftAvailable ? (
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              closeDraftMenu();
+              loadLastDraft();
+            }}
+            disabled={busy}
+          >
+            <span>Load last draft</span>
+            <span className="menu-item-meta">Resume</span>
+          </button>
+        ) : null}
+        {sendSelectedId ? (
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              closeDraftMenu();
+              saveSendDraft();
+            }}
+            disabled={busy}
+          >
+            <span>Save draft</span>
+            <span className="menu-item-meta">Keep for later</span>
+          </button>
+        ) : null}
+        {activeDraftId ? (
+          <button
+            type="button"
+            className="menu-item danger"
+            onClick={() => {
+              closeDraftMenu();
+              clearDraftSelection();
+            }}
+            disabled={busy}
+          >
+            <span>Clear draft</span>
+            <span className="menu-item-meta">Forget selection</span>
+          </button>
+        ) : null}
+        {!sendDraftAvailable && !sendSelectedId && !activeDraftId ? (
+          <div className="menu-item" aria-disabled="true">
+            <span>No draft actions</span>
+            <span className="menu-item-meta">Pick a template first</span>
+          </div>
+        ) : null}
+      </ContextMenu>
 
       <Modal
         open={actionsOpen}
@@ -1755,6 +2768,7 @@ export default function Requests({
           const kind = String(flow?.kind || "").toLowerCase();
           const canManage = canManageFlow(flow);
           const isArchived = Boolean(flow?.archivedAt);
+          const isTrashed = Boolean(flow?.trashedAt);
           const canReopen = status === "Canceled" && canManage;
           const canCancel = canManage && status !== "Completed" && status !== "Canceled";
           const canComplete =
@@ -1764,6 +2778,8 @@ export default function Requests({
             Boolean(isAssignedToMe(flow) || canManage);
           const canArchive = canManage && !isArchived && (status === "Completed" || status === "Canceled");
           const canUnarchive = canManage && isArchived;
+          const canTrash = canManage && !isTrashed && (status === "Completed" || status === "Canceled" || isArchived);
+          const canUntrash = canManage && isTrashed;
 
           const openUrl = String((status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || "").trim();
           const canOpen = Boolean(openUrl) && status !== "Canceled";
@@ -1919,6 +2935,44 @@ export default function Requests({
                   </button>
                 ) : null}
 
+                {canTrash ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      await onTrashGroup(group);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Move to trash</strong>
+                      <span className="muted">Hide it from lists. You can restore later.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
+                {canUntrash ? (
+                  <button
+                    type="button"
+                    className="action-item"
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      await onUntrashGroup(group);
+                    }}
+                    disabled={busy || actionBusy}
+                    role="menuitem"
+                  >
+                    <div className="action-item-text">
+                      <strong>Restore from trash</strong>
+                      <span className="muted">Returns it to your lists.</span>
+                    </div>
+                    <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  </button>
+                ) : null}
+
                 {canCancel ? (
                   <button
                     type="button"
@@ -1990,6 +3044,39 @@ export default function Requests({
       </Modal>
 
       <Modal
+        open={deleteOpen}
+        title="Delete request permanently?"
+        onClose={() => setDeleteOpen(false)}
+        footer={
+          <>
+            <button type="button" onClick={() => setDeleteOpen(false)} disabled={busy || actionBusy}>
+              Keep
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={async () => {
+                const group = actionsGroup;
+                setDeleteOpen(false);
+                setActionsGroup(null);
+                await onDeleteGroupPermanently(group);
+              }}
+              disabled={busy || actionBusy || !actionsGroup?.flows?.length}
+            >
+              {actionBusy ? "Working..." : "Delete"}
+            </button>
+          </>
+        }
+      >
+        <div className="empty" style={{ marginTop: 0 }}>
+          <strong>This removes the request from portal lists.</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            DocSpace files and room access stay unchanged.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
         open={cancelOpen}
         title="Cancel request?"
         onClose={() => setCancelOpen(false)}
@@ -2018,7 +3105,7 @@ export default function Requests({
         <div className="empty" style={{ marginTop: 0 }}>
           <strong>This marks the request as canceled in the portal.</strong>
           <p className="muted" style={{ margin: "6px 0 0" }}>
-            It won’t delete any DocSpace files or revoke access.
+            It won't delete any DocSpace files or revoke access.
           </p>
         </div>
       </Modal>

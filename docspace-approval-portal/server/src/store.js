@@ -3,6 +3,7 @@ import { getStorePath, loadStoreSnapshot, saveStoreSnapshot } from "./storePersi
 const flows = [];
 const projects = [];
 const contacts = [];
+const projectContacts = [];
 
 const storePath = getStorePath();
 let saveTimer = null;
@@ -13,7 +14,8 @@ function snapshotStore() {
     savedAt: new Date().toISOString(),
     flows,
     projects,
-    contacts
+    contacts,
+    projectContacts
   };
 }
 
@@ -30,6 +32,9 @@ async function hydrateStore() {
   if (Array.isArray(snapshot.contacts)) {
     contacts.splice(0, contacts.length, ...snapshot.contacts);
   }
+  if (Array.isArray(snapshot.projectContacts)) {
+    projectContacts.splice(0, projectContacts.length, ...snapshot.projectContacts);
+  }
 
   for (const flow of flows) {
     if (!flow || typeof flow !== "object") continue;
@@ -43,6 +48,9 @@ async function hydrateStore() {
     if (flow.archivedAt === undefined) flow.archivedAt = null;
     if (flow.archivedByUserId === undefined) flow.archivedByUserId = null;
     if (flow.archivedByName === undefined) flow.archivedByName = null;
+    if (flow.trashedAt === undefined) flow.trashedAt = null;
+    if (flow.trashedByUserId === undefined) flow.trashedByUserId = null;
+    if (flow.trashedByName === undefined) flow.trashedByName = null;
     if (!Array.isArray(flow.events)) flow.events = [];
   }
 
@@ -60,6 +68,16 @@ async function hydrateStore() {
     if (contact.name === undefined) contact.name = null;
     if (contact.email === undefined) contact.email = null;
     if (!Array.isArray(contact.tags)) contact.tags = [];
+  }
+
+  for (const contact of projectContacts) {
+    if (!contact || typeof contact !== "object") continue;
+    if (contact.projectId === undefined) contact.projectId = null;
+    if (contact.name === undefined) contact.name = null;
+    if (contact.email === undefined) contact.email = null;
+    if (!Array.isArray(contact.tags)) contact.tags = [];
+    if (contact.createdByUserId === undefined) contact.createdByUserId = null;
+    if (contact.createdByName === undefined) contact.createdByName = null;
   }
 }
 
@@ -160,6 +178,9 @@ export function createFlow({
     status,
     createdAt: now,
     updatedAt: now,
+    trashedAt: null,
+    trashedByUserId: null,
+    trashedByName: null,
     events: [
       {
         ts: now,
@@ -303,6 +324,61 @@ export function unarchiveFlow(flowId, { unarchivedByUserId, unarchivedByName } =
       actorName: unarchivedByName ? String(unarchivedByName) : null
     })
   });
+}
+
+export function trashFlow(flowId, { trashedByUserId, trashedByName } = {}) {
+  const id = normalize(flowId);
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+  if (current.trashedAt) return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    trashedAt: now,
+    trashedByUserId: trashedByUserId ? String(trashedByUserId) : null,
+    trashedByName: trashedByName ? String(trashedByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "trashed",
+      actorUserId: trashedByUserId ? String(trashedByUserId) : null,
+      actorName: trashedByName ? String(trashedByName) : null
+    })
+  });
+}
+
+export function untrashFlow(flowId, { untrashedByUserId, untrashedByName } = {}) {
+  const id = normalize(flowId);
+  if (!id) return null;
+  const current = getFlow(id);
+  if (!current) return null;
+  if (!current.trashedAt) return current;
+
+  const now = new Date().toISOString();
+  return updateFlow(id, {
+    trashedAt: null,
+    trashedByUserId: null,
+    trashedByName: null,
+    untrashedAt: now,
+    untrashedByUserId: untrashedByUserId ? String(untrashedByUserId) : null,
+    untrashedByName: untrashedByName ? String(untrashedByName) : null,
+    events: withEvent(current, {
+      ts: now,
+      type: "untrashed",
+      actorUserId: untrashedByUserId ? String(untrashedByUserId) : null,
+      actorName: untrashedByName ? String(untrashedByName) : null
+    })
+  });
+}
+
+export function deleteFlow(flowId) {
+  const id = normalize(flowId);
+  if (!id) return false;
+  const idx = flows.findIndex((f) => String(f?.id || "").trim() === id);
+  if (idx === -1) return false;
+  flows.splice(idx, 1);
+  scheduleSave();
+  return true;
 }
 
 export function completeFlow(
@@ -525,6 +601,74 @@ export function deleteContact(contactId) {
   const idx = contacts.findIndex((c) => normalize(c?.id) === cid);
   if (idx === -1) return false;
   contacts.splice(idx, 1);
+  scheduleSave();
+  return true;
+}
+
+export function listProjectContacts(projectId) {
+  const pid = normalize(projectId);
+  if (!pid) return [];
+  return projectContacts
+    .filter((c) => normalize(c?.projectId) === pid)
+    .slice()
+    .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+}
+
+export function createProjectContact({ id, projectId, name, email, tags, createdByUserId = null, createdByName = null } = {}) {
+  const cid = normalize(id);
+  const pid = normalize(projectId);
+  const mail = normalizeEmail(email);
+  if (!cid || !pid || !mail) return null;
+
+  const entry = {
+    id: cid,
+    projectId: pid,
+    name: normalize(name) || mail,
+    email: mail,
+    tags: normalizeTags(tags),
+    createdByUserId: createdByUserId ? normalize(createdByUserId) : null,
+    createdByName: createdByName ? normalize(createdByName) : null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const existingIdx = projectContacts.findIndex((c) => normalize(c?.id) === cid);
+  if (existingIdx >= 0) projectContacts.splice(existingIdx, 1);
+  projectContacts.unshift(entry);
+  scheduleSave();
+  return entry;
+}
+
+export function updateProjectContact(contactId, patch = {}) {
+  const cid = normalize(contactId);
+  if (!cid) return null;
+  const idx = projectContacts.findIndex((c) => normalize(c?.id) === cid);
+  if (idx < 0) return null;
+
+  const current = projectContacts[idx] || {};
+  const next = {
+    ...current,
+    ...patch,
+    id: current.id,
+    projectId: current.projectId,
+    email: patch.email !== undefined ? normalizeEmail(patch.email) : current.email,
+    name: patch.name !== undefined ? normalize(patch.name) : current.name,
+    tags: patch.tags !== undefined ? normalizeTags(patch.tags) : current.tags,
+    createdAt: current.createdAt,
+    updatedAt: new Date().toISOString()
+  };
+
+  projectContacts[idx] = next;
+  scheduleSave();
+  return next;
+}
+
+export function deleteProjectContact(contactId) {
+  const cid = normalize(contactId);
+  if (!cid) return false;
+  const idx = projectContacts.findIndex((c) => normalize(c?.id) === cid);
+  if (idx === -1) return false;
+  projectContacts.splice(idx, 1);
   scheduleSave();
   return true;
 }

@@ -329,7 +329,7 @@ export default function Dashboard({
                           }
                           title={String(flow?.status || "") === "Canceled" ? "Canceled requests cannot be opened" : ""}
                         >
-                          Open
+                          {String(flow?.status || "") === "Completed" ? "Open result" : "Open"}
                         </button>
                         <button
                           type="button"

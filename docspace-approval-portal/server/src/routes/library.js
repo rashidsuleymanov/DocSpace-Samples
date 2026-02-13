@@ -184,22 +184,24 @@ router.post("/publish", async (req, res) => {
       toFillOut: false
     });
 
+    const opPending = Boolean(operation?.pending);
+    const maxDetectAttempts = opPending ? 30 : 12;
     let createdFile = null;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < maxDetectAttempts; attempt += 1) {
       const after = await getFolderContents(destFolderId).catch(() => null);
       const items = Array.isArray(after?.items) ? after.items : [];
       const candidates = items.filter((i) => i.type === "file" && !beforeIds.has(String(i.id)) && isPdfEntry(i));
       const matchByTitle = candidates.find((i) => String(i.title || "").trim() === String(info?.title || "").trim()) || null;
       createdFile = matchByTitle || candidates[0] || null;
       if (createdFile?.id) break;
-      await sleep(450);
+      await sleep(opPending ? 700 : 450);
     }
     let createdIn = createdFile?.id ? "templates" : null;
 
     if (!createdFile?.id && inProcessFolderId) {
       const beforeIn = await getFolderContents(inProcessFolderId).catch(() => null);
       const beforeInIds = new Set((beforeIn?.items || []).filter((i) => i.type === "file").map((i) => String(i.id)));
-      for (let attempt = 0; attempt < 8; attempt += 1) {
+      for (let attempt = 0; attempt < maxDetectAttempts; attempt += 1) {
         const after = await getFolderContents(inProcessFolderId).catch(() => null);
         const items = Array.isArray(after?.items) ? after.items : [];
         const candidates = items.filter((i) => i.type === "file" && !beforeInIds.has(String(i.id)) && isPdfEntry(i));
@@ -209,7 +211,7 @@ router.post("/publish", async (req, res) => {
           createdIn = "inProcess";
           break;
         }
-        await sleep(450);
+        await sleep(opPending ? 700 : 450);
       }
     }
 

@@ -180,10 +180,90 @@ async function tryRoomAction(path, { auth } = {}) {
   throw lastError || new Error("Room action failed");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeFileOpId(value) {
+  const raw = String(value || "").trim();
+  return raw;
+}
+
+function getFileOpEntry(list, opId) {
+  const id = normalizeFileOpId(opId);
+  if (!id) return null;
+  const items = Array.isArray(list)
+    ? list
+    : Array.isArray(list?.items)
+      ? list.items
+      : Array.isArray(list?.operations)
+        ? list.operations
+        : [];
+  return items.find((entry) => normalizeFileOpId(entry?.id ?? entry?.operationId ?? entry?.ID) === id) || null;
+}
+
+export async function listFileOps(auth) {
+  const data = await apiRequest("/api/2.0/files/fileops", { auth });
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.operations)) return data.operations;
+  return [];
+}
+
+async function waitFileOp(opId, auth, { timeoutMs = 12000, intervalMs = 650 } = {}) {
+  const id = normalizeFileOpId(opId);
+  if (!id) return { pending: false, operationId: null };
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    let list = null;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      list = await listFileOps(auth);
+    } catch (e) {
+      return { pending: true, operationId: id, error: e?.message || "Unable to check file operation status" };
+    }
+
+    const entry = getFileOpEntry(list, id);
+    if (!entry) {
+      // Some DocSpace builds remove completed operations from the list.
+      return { pending: false, operationId: id };
+    }
+
+    const done =
+      Boolean(entry?.finished) ||
+      Number(entry?.progress ?? entry?.percents ?? entry?.percentage ?? entry?.percent ?? 0) >= 100;
+
+    if (done) {
+      const errorText = String(entry?.error || "").trim();
+      if (errorText) {
+        const error = new Error(errorText);
+        error.details = entry;
+        throw error;
+      }
+      return { pending: false, operationId: id };
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(intervalMs);
+  }
+
+  return { pending: true, operationId: id, error: "DocSpace is still processing this operation" };
+}
+
 export async function archiveRoom(roomId, auth) {
   const rid = String(roomId || "").trim();
   if (!rid) throw new Error("roomId is required");
-  return tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, { auth });
+  const op = await tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, { auth });
+  const opId = normalizeFileOpId(op?.id ?? op?.operationId);
+  const finished = op?.finished === undefined ? null : Boolean(op.finished);
+
+  if (opId && finished === false) {
+    const waited = await waitFileOp(opId, auth, { timeoutMs: 12000, intervalMs: 650 });
+    return { operationId: waited.operationId || opId, pending: Boolean(waited.pending) };
+  }
+
+  return { operationId: opId || null, pending: false };
 }
 
 export async function unarchiveRoom(roomId, auth) {
@@ -256,11 +336,121 @@ export async function createUser({ firstName, lastName, email, password } = {}) 
   });
 }
 
+export async function createUserProfile({ firstName, lastName, email } = {}, auth) {
+  const fn = String(firstName || "").trim();
+  const ln = String(lastName || "").trim();
+  const em = String(email || "").trim();
+  if (!em) throw new Error("email is required");
+  return apiRequest("/api/2.0/people", {
+    method: "POST",
+    auth,
+    body: {
+      firstName: fn || em.split("@")[0] || "User",
+      lastName: ln,
+      email: em
+    }
+  });
+}
+
+export async function inviteUsers({ emails, message, subject } = {}, auth) {
+  const list = Array.isArray(emails) ? emails : [];
+  const invitations = list.map((e) => String(e || "").trim()).filter(Boolean).map((email) => ({ email, type: "All" }));
+  if (!invitations.length) throw new Error("emails are required");
+  const body = { invitations };
+  if (message) body.message = String(message);
+  if (subject) body.subject = String(subject);
+  return apiRequest("/api/2.0/people/invite", { method: "POST", auth, body });
+}
+
+export async function deleteUser(userId, auth) {
+  const id = String(userId || "").trim();
+  if (!id) throw new Error("userId is required");
+  return apiRequest(`/api/2.0/people/${encodeURIComponent(id)}`, { method: "DELETE", auth });
+}
+
 export async function searchUsers(query, auth) {
   const q = String(query || "").trim();
   if (!q) return [];
   const response = await apiRequest(`/api/2.0/people/search?query=${encodeURIComponent(q)}`, { auth });
   return Array.isArray(response) ? response : [];
+}
+
+export async function listPeople(auth) {
+  const response = await apiRequest("/api/2.0/people", { auth });
+  const list = Array.isArray(response) ? response : response?.users || response?.items || response?.response || [];
+  return Array.isArray(list) ? list : [];
+}
+
+export async function listGroups(auth) {
+  const paths = ["/api/2.0/group", "/api/2.0/groups"];
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await apiRequest(path, { auth });
+      const list = Array.isArray(response) ? response : response?.groups || response?.items || response?.response || [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("Failed to load groups");
+}
+
+export async function getGroupInfo(groupId, { includeMembers = true } = {}, auth) {
+  const gid = String(groupId || "").trim();
+  if (!gid) throw new Error("groupId is required");
+  const query = includeMembers ? "?includeMembers=true" : "";
+  const paths = [`/api/2.0/group/${encodeURIComponent(gid)}${query}`, `/api/2.0/groups/${encodeURIComponent(gid)}${query}`];
+  let lastError = null;
+  for (const path of paths) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await apiRequest(path, { auth });
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("Failed to load group");
+}
+
+export async function createGroup({ groupName, groupManager, members } = {}, auth) {
+  const name = String(groupName || "").trim();
+  const manager = String(groupManager || "").trim();
+  const list = Array.isArray(members) ? members.map((m) => String(m || "").trim()).filter(Boolean) : [];
+  if (!name) throw new Error("groupName is required");
+  const body = { groupName: name };
+  if (manager) body.groupManager = manager;
+  if (list.length) body.members = list;
+  return apiRequest("/api/2.0/group", { method: "POST", auth, body });
+}
+
+export async function updateGroup(groupId, { groupName, groupManager, membersToAdd } = {}, auth) {
+  const gid = String(groupId || "").trim();
+  if (!gid) throw new Error("groupId is required");
+  const name = String(groupName || "").trim();
+  const manager = String(groupManager || "").trim();
+  const list = Array.isArray(membersToAdd) ? membersToAdd.map((m) => String(m || "").trim()).filter(Boolean) : [];
+  const body = {};
+  if (name) body.groupName = name;
+  if (manager) body.groupManager = manager;
+  if (list.length) body.membersToAdd = list;
+  if (!Object.keys(body).length) throw new Error("Nothing to update");
+  return apiRequest(`/api/2.0/group/${encodeURIComponent(gid)}`, { method: "PUT", auth, body });
+}
+
+export async function removeGroupMembers(groupId, { members } = {}, auth) {
+  const gid = String(groupId || "").trim();
+  if (!gid) throw new Error("groupId is required");
+  const list = Array.isArray(members) ? members.map((m) => String(m || "").trim()).filter(Boolean) : [];
+  if (!list.length) throw new Error("members are required");
+  return apiRequest(`/api/2.0/group/${encodeURIComponent(gid)}/members`, { method: "DELETE", auth, body: { members: list } });
+}
+
+export async function deleteGroup(groupId, auth) {
+  const gid = String(groupId || "").trim();
+  if (!gid) throw new Error("groupId is required");
+  return apiRequest(`/api/2.0/group/${encodeURIComponent(gid)}`, { method: "DELETE", auth });
 }
 
 export async function shareRoom({ roomId, invitations, notify = false, message } = {}, auth) {
@@ -533,7 +723,7 @@ export async function copyFilesToFolder({ fileIds, destFolderId, deleteAfter = f
   const dest = String(destFolderId || "").trim();
   if (!ids.length) throw new Error("fileIds is required");
   if (!dest) throw new Error("destFolderId is required");
-  return apiRequest("/api/2.0/files/fileops/copy", {
+  const op = await apiRequest("/api/2.0/files/fileops/copy", {
     method: "PUT",
     auth,
     body: {
@@ -544,6 +734,15 @@ export async function copyFilesToFolder({ fileIds, destFolderId, deleteAfter = f
       toFillOut: Boolean(toFillOut)
     }
   });
+
+  const opId = normalizeFileOpId(op?.id ?? op?.operationId);
+  const finished = op?.finished === undefined ? null : Boolean(op.finished);
+  if (opId && finished === false) {
+    const waited = await waitFileOp(opId, auth, { timeoutMs: 20000, intervalMs: 750 });
+    return { operationId: waited.operationId || opId, pending: Boolean(waited.pending) };
+  }
+
+  return { operationId: opId || null, pending: false };
 }
 
 export async function copyFilesToFolderAsAdmin(
@@ -553,7 +752,7 @@ export async function copyFilesToFolderAsAdmin(
   const dest = String(destFolderId || "").trim();
   if (!ids.length) throw new Error("fileIds is required");
   if (!dest) throw new Error("destFolderId is required");
-  return apiRequest("/api/2.0/files/fileops/copy", {
+  const op = await apiRequest("/api/2.0/files/fileops/copy", {
     method: "PUT",
     body: {
       fileIds: ids,
@@ -563,6 +762,15 @@ export async function copyFilesToFolderAsAdmin(
       toFillOut: Boolean(toFillOut)
     }
   });
+
+  const opId = normalizeFileOpId(op?.id ?? op?.operationId);
+  const finished = op?.finished === undefined ? null : Boolean(op.finished);
+  if (opId && finished === false) {
+    const waited = await waitFileOp(opId, "", { timeoutMs: 20000, intervalMs: 750 });
+    return { operationId: waited.operationId || opId, pending: Boolean(waited.pending) };
+  }
+
+  return { operationId: opId || null, pending: false };
 }
 
 async function updateFileTitle({ fileId, title }, auth) {
@@ -581,7 +789,7 @@ export async function copyFileToFolder({ fileId, destFolderId, toFillOut = false
   const fid = String(fileId || "").trim();
   const did = String(destFolderId || "").trim();
   if (!fid || !did) throw new Error("fileId and destFolderId are required");
-  return apiRequest("/api/2.0/files/fileops/copy", {
+  const op = await apiRequest("/api/2.0/files/fileops/copy", {
     method: "PUT",
     auth,
     body: {
@@ -592,6 +800,15 @@ export async function copyFileToFolder({ fileId, destFolderId, toFillOut = false
       toFillOut: Boolean(toFillOut)
     }
   });
+
+  const opId = normalizeFileOpId(op?.id ?? op?.operationId);
+  const finished = op?.finished === undefined ? null : Boolean(op.finished);
+  if (opId && finished === false) {
+    const waited = await waitFileOp(opId, auth, { timeoutMs: 20000, intervalMs: 750 });
+    return { operationId: waited.operationId || opId, pending: Boolean(waited.pending) };
+  }
+
+  return { operationId: opId || null, pending: false };
 }
 
 export async function startFilling(fileId, auth) {

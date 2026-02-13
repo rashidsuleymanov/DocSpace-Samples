@@ -14,6 +14,7 @@ import draftsRoutes from "./routes/drafts.js";
 import webhooksRoutes from "./routes/webhooks.js";
 import contactsRoutes from "./routes/contacts.js";
 import linksRoutes from "./routes/links.js";
+import directoryRoutes from "./routes/directory.js";
 import { validateConfig } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +47,7 @@ app.use("/api/drafts", draftsRoutes);
 app.use("/api/webhooks", webhooksRoutes);
 app.use("/api/contacts", contactsRoutes);
 app.use("/api/links", linksRoutes);
+app.use("/api/directory", directoryRoutes);
 
 const isProd = process.env.NODE_ENV === "production";
 const debugEnabled = process.env.ENABLE_DEBUG_API === "true";

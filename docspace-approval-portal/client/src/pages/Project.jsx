@@ -874,7 +874,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                         disabled={!openUrl || status === "Canceled"}
                         onClick={() => openFlow(f, openUrl)}
                       >
-                        Open
+                        {status === "Completed" ? "Open result" : "Open"}
                       </button>
                       <button
                         type="button"

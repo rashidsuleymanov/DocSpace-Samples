@@ -10,15 +10,37 @@ function initialsFrom(value) {
   return (first + second).toUpperCase();
 }
 
-const navItems = [
-  { id: "dashboard", label: "Home" },
-  { id: "documents", label: "Documents" },
-  { id: "requests", label: "Requests" },
-  { id: "bulk", label: "Bulk send" },
-  { id: "bulkLinks", label: "Bulk links" },
-  { id: "contacts", label: "Contacts" },
-  { id: "drafts", label: "Templates" },
-  { id: "settings", label: "Settings" }
+const navSections = [
+  {
+    title: "Workspace",
+    items: [
+      { id: "dashboard", label: "Home" },
+      { id: "documents", label: "Documents" },
+      { id: "requests", label: "Requests" }
+    ]
+  },
+  {
+    title: "Create",
+    items: [
+      { id: "drafts", label: "Templates" },
+      { id: "sendDrafts", label: "Request drafts" }
+    ]
+  },
+  {
+    title: "Bulk tools",
+    items: [
+      { id: "bulk", label: "Bulk send" },
+      { id: "bulkLinks", label: "Bulk links" }
+    ]
+  },
+  {
+    title: "Directory",
+    items: [{ id: "contacts", label: "Directory" }]
+  },
+  {
+    title: "System",
+    items: [{ id: "settings", label: "Settings" }]
+  }
 ];
 
 export default function AppLayout({ session, branding, active, onNavigate, onOpenProject, onLogout, children }) {
@@ -113,16 +135,23 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
           </div>
         </button>
 
-        <nav className="nav">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item${active === item.id ? " is-active" : ""}`}
-              onClick={() => onNavigate(item.id)}
-            >
-              {item.label}
-            </button>
+        <nav className="nav" aria-label="Primary navigation">
+          {navSections.map((section) => (
+            <div key={section.title} className="nav-section">
+              <div className="nav-section-title" aria-hidden="true">
+                {section.title}
+              </div>
+              {section.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`nav-item${active === item.id ? " is-active" : ""}`}
+                  onClick={() => onNavigate(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 

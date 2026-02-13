@@ -24,12 +24,15 @@ import {
   cancelFlow,
   completeFlow,
   createFlow,
+  deleteFlow,
   getFlow,
   listFlowsForGroup,
   listFlowsForRoom,
   listFlowsForUser,
   reopenFlow,
+  trashFlow,
   unarchiveFlow,
+  untrashFlow,
   updateFlow,
   updateProject
 } from "../store.js";
@@ -271,6 +274,7 @@ async function resolveFlows(rawFlows, auth) {
   const flows = await Promise.all(
     (rawFlows || []).map(async (flow) => {
       if (flow?.archivedAt) return flow;
+      if (flow?.trashedAt) return flow;
       const status = String(flow?.status || "");
       if (status === "Canceled") return flow;
       if (status === "Queued") return flow;
@@ -524,10 +528,17 @@ router.get("/", async (req, res) => {
 
     const includeArchived = parseBool(req.query?.includeArchived);
     const archivedOnly = parseBool(req.query?.archivedOnly);
+    const includeTrashed = parseBool(req.query?.includeTrashed);
+    const trashedOnly = parseBool(req.query?.trashedOnly);
 
     let rawFlows = listFlowsForUser({ userId, userEmail });
-    if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
-    else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
+    if (trashedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.trashedAt));
+    else if (!includeTrashed) rawFlows = rawFlows.filter((f) => !f?.trashedAt);
+
+    if (!trashedOnly) {
+      if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
+      else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
+    }
 
     const flows = await resolveFlows(rawFlows, auth);
 
@@ -566,13 +577,20 @@ router.get("/project/:projectId", async (req, res) => {
     const canManage = canManageRoomFromSecurityInfo(security, userId);
     const includeArchived = parseBool(req.query?.includeArchived);
     const archivedOnly = parseBool(req.query?.archivedOnly);
+    const includeTrashed = parseBool(req.query?.includeTrashed);
+    const trashedOnly = parseBool(req.query?.trashedOnly);
 
     let rawFlows = canManage
       ? listFlowsForRoom(roomId)
       : listFlowsForUser({ userId, userEmail }).filter((f) => normalize(f?.projectRoomId) === roomId);
 
-    if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
-    else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
+    if (trashedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.trashedAt));
+    else if (!includeTrashed) rawFlows = rawFlows.filter((f) => !f?.trashedAt);
+
+    if (!trashedOnly) {
+      if (archivedOnly) rawFlows = rawFlows.filter((f) => Boolean(f?.archivedAt));
+      else if (!includeArchived) rawFlows = rawFlows.filter((f) => !f?.archivedAt);
+    }
 
     const flows = await resolveFlows(rawFlows, auth);
     const filtered = canManage ? flows : (flows || []).filter((f) => String(f?.status || "") !== "Queued" || String(f?.createdByUserId || "") === userId);
@@ -627,6 +645,108 @@ router.post("/:flowId/archive", async (req, res) => {
       error: error.message,
       details: error.details || null
     });
+  }
+});
+
+router.post("/:flowId/trash", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (flow.trashedAt) return res.json({ ok: true, flow });
+
+    const status = String(flow.status || "");
+    const canTrash = status === "Completed" || status === "Canceled" || Boolean(flow.archivedAt);
+    if (!canTrash) {
+      return res.status(400).json({ error: "Only completed, canceled, or archived requests can be moved to trash" });
+    }
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can move requests to trash" });
+    }
+
+    const updated = trashFlow(flowId, {
+      trashedByUserId: meId,
+      trashedByName: me?.displayName || me?.email || null
+    });
+
+    res.json({ ok: true, flow: updated });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.post("/:flowId/untrash", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (!flow.trashedAt) return res.json({ ok: true, flow });
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can restore requests from trash" });
+    }
+
+    const updated = untrashFlow(flowId, {
+      untrashedByUserId: meId,
+      untrashedByName: me?.displayName || me?.email || null
+    });
+
+    res.json({ ok: true, flow: updated });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
+router.delete("/:flowId", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const flowId = normalize(req.params?.flowId);
+    if (!flowId) return res.status(400).json({ error: "flowId is required" });
+
+    const flow = getFlow(flowId);
+    if (!flow?.id) return res.status(404).json({ error: "Request not found" });
+    if (!flow.trashedAt) return res.status(400).json({ error: "Only trashed requests can be deleted" });
+
+    const me = await getSelfProfileWithToken(auth).catch(() => null);
+    const meId = normalize(me?.id);
+    if (!meId) return res.status(401).json({ error: "Invalid user token" });
+
+    const roomId = normalize(flow?.projectRoomId);
+    if (!roomId) return res.status(400).json({ error: "Request has no project room" });
+
+    const security = await getRoomSecurityInfo(roomId, auth).catch(() => null);
+    if (!canManageRoomFromSecurityInfo(security, meId)) {
+      return res.status(403).json({ error: "Only the project admin can delete requests" });
+    }
+
+    const ok = deleteFlow(flowId);
+    if (!ok) return res.status(500).json({ error: "Failed to delete request" });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
   }
 });
 
