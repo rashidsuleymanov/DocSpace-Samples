@@ -78,6 +78,14 @@ function formatRecipients(value) {
   return { count: list.length, short: `${list[0]} +${list.length - 1}`, full: list.join(", ") };
 }
 
+
+function normalizeKind(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "fillsign" || v === "fill-sign" || v === "fill_sign" || v === "sign") return "fillSign";
+  if (v === "sharedsign" || v === "shared-sign" || v === "shared_sign" || v === "contract") return "sharedSign";
+  return "approval";
+}
+
 export default function Project({ session, busy, projectId, onBack, onStartFlow, onOpenDrafts }) {
   const token = session?.token || "";
   const meId = session?.user?.id ? String(session.user.id) : "";
@@ -846,7 +854,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                 const isAssigned = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
                 const recipientsLabel = formatRecipients(recipients);
                 const canComplete =
-                  String(f?.kind || "").toLowerCase() === "sharedsign" &&
+                  normalizeKind(f?.kind) === "sharedSign" &&
                   status !== "Completed" &&
                   status !== "Canceled" &&
                   (flowsCanManage || isAssigned);

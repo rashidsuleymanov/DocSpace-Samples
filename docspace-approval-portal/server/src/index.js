@@ -63,7 +63,7 @@ app.use((err, _req, res, _next) => {
 });
 
 const clientRoot = path.resolve(__dirname, "../../client");
-const port = process.env.PORT || 5173;
+const port = process.env.PORT || 8080;
 
 async function start() {
   if (!isProd) {

@@ -1556,10 +1556,10 @@ export default function Requests({
                     {status === "Completed" ? "Open result" : "Open"}
                   </button>
                   {(() => {
-                    const kind = String(flow?.kind || "").toLowerCase();
+                    const kind = normalizeKind(flow?.kind);
                     const canManage = canManageFlow(flow);
                     const canComplete =
-                      kind === "sharedsign" &&
+                      kind === "sharedSign" &&
                       status !== "Completed" &&
                       status !== "Canceled" &&
                       Boolean((flow && isAssignedToMe(flow)) || canManage);
@@ -1622,7 +1622,7 @@ export default function Requests({
           if (!flow) return null;
 
           const status = String(group?.status || flow?.status || "");
-          const kind = String(flow?.kind || "").toLowerCase();
+          const kind = normalizeKind(flow?.kind);
           const canManage = canManageFlow(flow);
           const isArchived = Boolean(flow?.archivedAt);
           const isTrashed = Boolean(flow?.trashedAt);
@@ -2765,14 +2765,14 @@ export default function Requests({
           if (!flow) return null;
 
           const status = String(group?.status || flow?.status || "");
-          const kind = String(flow?.kind || "").toLowerCase();
+          const kind = normalizeKind(flow?.kind);
           const canManage = canManageFlow(flow);
           const isArchived = Boolean(flow?.archivedAt);
           const isTrashed = Boolean(flow?.trashedAt);
           const canReopen = status === "Canceled" && canManage;
           const canCancel = canManage && status !== "Completed" && status !== "Canceled";
           const canComplete =
-            kind === "sharedsign" &&
+            kind === "sharedSign" &&
             status !== "Completed" &&
             status !== "Canceled" &&
             Boolean(isAssignedToMe(flow) || canManage);
@@ -3156,10 +3156,10 @@ export default function Requests({
         })()}
         canComplete={(() => {
           const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
-          const kind = String(flow?.kind || "").toLowerCase();
+          const kind = normalizeKind(flow?.kind);
           const status = String(detailsGroup?.status || flow?.status || "");
           return (
-            kind === "sharedsign" &&
+            kind === "sharedSign" &&
             status !== "Completed" &&
             status !== "Canceled" &&
             Boolean((flow && isAssignedToMe(flow)) || canManageFlow(flow))

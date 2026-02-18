@@ -43,11 +43,6 @@ export default function Login({ busy, error, onLogin, onRegister }) {
       <div className="auth-card">
         <h1 style={{ margin: "0 0 6px" }}>{title}</h1>
         <p className="muted" style={{ margin: 0 }}>{subtitle}</p>
-        {mode === "register" ? (
-          <p className="muted" style={{ margin: "10px 0 0" }}>
-            Requires an admin token in <strong>Settings</strong>.
-          </p>
-        ) : null}
 
         {error ? (
           <p className="error" style={{ marginTop: 10 }}>
@@ -98,7 +93,7 @@ export default function Login({ busy, error, onLogin, onRegister }) {
             disabled={busy || (mode === "register" && !canRegister)}
             title={mode === "register" && registerDisabledReason ? registerDisabledReason : undefined}
           >
-            {busy ? "Working..." : mode === "register" ? "Create account" : "Sign in"}
+            {busy ? "Loading..." : mode === "register" ? "Create account" : "Sign in"}
           </button>
 
           <div className="auth-switch">
@@ -108,13 +103,9 @@ export default function Login({ busy, error, onLogin, onRegister }) {
               </button>
             ) : (
               <button type="button" className="link" onClick={() => setMode("login")} disabled={busy}>
-                Back to sign in
+                Back to Sign in
               </button>
             )}
-
-            <span className="muted" style={{ fontSize: 13 }}>
-              {mode === "login" ? "No account yet?" : ""}
-            </span>
           </div>
         </form>
       </div>

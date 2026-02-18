@@ -320,7 +320,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       { id: "my", label: "My documents" },
       { id: "personal", label: "Personal" },
       { id: "team", label: "Team" },
-      { id: "trash", label: "Trash" }
+      { id: "trash", label: "Move to Trash" }
     ],
     []
   );
@@ -379,7 +379,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
           <div>
             <h3>
               {tab === "trash"
-                ? "Trash"
+                ? "Move to Trash"
                 : tab === "team"
                   ? "Team documents"
                   : tab === "personal"
