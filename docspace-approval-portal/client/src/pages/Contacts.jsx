@@ -234,6 +234,28 @@ export default function Contacts({ session, busy, onOpenBulk }) {
   }, [groupQuery, groups]);
 
   const rows = mode === "groups" ? groupMembers : people;
+  const shownEmails = useMemo(() => {
+    const items = Array.isArray(rows) ? rows : [];
+    return items.map((p) => normalizeEmail(p?.email)).filter(Boolean);
+  }, [rows]);
+
+  const allShownSelected = useMemo(() => {
+    if (!(pickedEmails instanceof Set)) return false;
+    if (!shownEmails.length) return false;
+    return shownEmails.every((e) => pickedEmails.has(e));
+  }, [pickedEmails, shownEmails]);
+
+  const toggleAllShown = (on) => {
+    setPickedEmails((prev) => {
+      const next = new Set(prev instanceof Set ? prev : []);
+      if (on) {
+        for (const em of shownEmails) next.add(em);
+      } else {
+        for (const em of shownEmails) next.delete(em);
+      }
+      return next;
+    });
+  };
   const selectedGroup = useMemo(() => {
     const gid = normalize(groupId);
     if (!gid) return null;
@@ -254,7 +276,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
     <div className="page-shell">
       <header className="topbar">
         <div>
-          <h2>Directory</h2>
+          <h2>Contacts</h2>
           <p className="muted">Use DocSpace people and groups as recipients.</p>
         </div>
         <div className="topbar-actions">
@@ -818,6 +840,18 @@ export default function Contacts({ session, busy, onOpenBulk }) {
           <div>
             <h3>Recipients</h3>
             <p className="muted">Pick people directly, or select a group and pick members.</p>
+            <p className="muted" style={{ margin: "6px 0 0" }}>
+              Select people to build a list for Bulk send.
+            </p>
+          </div>
+          <div className="card-header-actions" style={{ alignItems: "center" }}>
+            <span className="muted">{selectedCount} selected</span>
+            <button type="button" onClick={clearSelection} disabled={busy || loading || selectedCount === 0}>
+              Clear
+            </button>
+            <button type="button" className="primary" onClick={sendToBulk} disabled={busy || loading || selectedCount === 0} title="Send to Bulk send">
+              Bulk send
+            </button>
           </div>
         </div>
 
@@ -840,7 +874,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
               { id: "people", label: "People" },
               { id: "groups", label: "Groups" }
             ]}
-            ariaLabel="Directory mode"
+            ariaLabel="Contacts mode"
           />
 
           {mode === "people" ? (
@@ -941,100 +975,127 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         ) : null}
 
         {rows.length ? (
-          <div className="list">
-            {rows.map((p) => {
-              const email = normalizeEmail(p?.email);
-              const name = normalize(p?.displayName) || normalize(p?.name) || email || "User";
-              const checked = email && pickedEmails instanceof Set ? pickedEmails.has(email) : false;
-              return (
-                <div key={email || p?.id || Math.random()} className="list-row">
-                  <div className="list-main">
-                    <label className="muted" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(checked)}
-                        onChange={(e) => toggleEmail(email, Boolean(e.target.checked))}
-                        disabled={busy || loading || !email}
-                      />
-                      <span className="truncate">
-                        <strong>{name}</strong>
-                        <span className="muted">{" "}- {email || "-"}</span>
-                      </span>
-                    </label>
-                  </div>
-                  {mode === "people" ? (
-                    <div className="list-actions">
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={async () => {
-                          if (!token) return;
-                          const id = String(p?.id || "").trim();
-                          if (!id) {
-                            setError("User id is missing (cannot delete).");
-                            return;
-                          }
-                          const ok = window.confirm(`Delete ${email || name} from DocSpace?`);
-                          if (!ok) return;
-                          setLoading(true);
-                          setError("");
-                          setNotice("");
-                          try {
-                            await deleteDirectoryPerson({ token, userId: id });
-                            setNotice("User deleted.");
-                            await refreshPeople({ offset: 0, append: false });
-                          } catch (e) {
-                            setError(e?.message || "Failed to delete user");
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                        disabled={busy || loading || !canManageDirectory}
-                        title="Delete user from DocSpace (admin only)"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  ) : null}
-                  {mode === "groups" && normalize(groupId) ? (
-                    <div className="list-actions">
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={async () => {
-                          if (!token) return;
-                          const memberId = String(p?.id || "").trim();
-                          if (!memberId) {
-                            setError("Member id is missing (cannot remove).");
-                            return;
-                          }
-                          const ok = window.confirm(`Remove ${email || name} from this group?`);
-                          if (!ok) return;
-                          setLoading(true);
-                          setError("");
-                          setNotice("");
-                          try {
-                            await removeDirectoryGroupMembers({ token, groupId, members: [memberId] });
-                            setNotice("Member removed.");
-                            await refreshSelectedGroupMembers(groupId);
-                            await refreshGroups();
-                          } catch (e) {
-                            setError(e?.message || "Failed to remove member");
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                        disabled={busy || loading || !canManageDirectory}
-                        title="Remove user from group (admin only)"
-                      >
-                        Remove
-                      </button>
-                    </div>
+          <>
+            {shownEmails.length ? (
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "0 16px" }}>
+                <span className="muted">{allShownSelected ? "All shown selected" : ""}</span>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="link" onClick={() => toggleAllShown(true)} disabled={busy || loading || shownEmails.length === 0}>
+                    Select all shown
+                  </button>
+                  {selectedCount ? (
+                    <button type="button" className="link" onClick={clearSelection} disabled={busy || loading}>
+                      Clear selection
+                    </button>
                   ) : null}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            ) : null}
+
+            <div className="list">
+              {rows.map((p) => {
+                const email = normalizeEmail(p?.email);
+                const name = normalize(p?.displayName) || normalize(p?.name) || email || "User";
+                const checked = email && pickedEmails instanceof Set ? pickedEmails.has(email) : false;
+                return (
+                  <div
+                    key={email || p?.id || Math.random()}
+                    className={`select-row${checked ? " is-selected" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleEmail(email, !checked)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      toggleEmail(email, !checked);
+                    }}
+                    aria-pressed={checked}
+                    title={email ? `${name} — ${email}` : name}
+                  >
+                    <div className="select-row-main">
+                      <strong className="truncate">{name}</strong>
+                      <span className="muted truncate">{email || "No email"}</span>
+                    </div>
+
+                    <div className="list-actions">
+                      <span className="select-row-right" aria-hidden="true">
+                        {checked ? "✓" : ""}
+                      </span>
+
+                      {mode === "people" ? (
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!token) return;
+                            const id = String(p?.id || "").trim();
+                            if (!id) {
+                              setError("User id is missing (cannot delete).");
+                              return;
+                            }
+                            const ok = window.confirm(`Delete ${email || name} from DocSpace?`);
+                            if (!ok) return;
+                            setLoading(true);
+                            setError("");
+                            setNotice("");
+                            try {
+                              await deleteDirectoryPerson({ token, userId: id });
+                              setNotice("User deleted.");
+                              await refreshPeople({ offset: 0, append: false });
+                            } catch (e2) {
+                              setError(e2?.message || "Failed to delete user");
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                          disabled={busy || loading || !canManageDirectory}
+                          title="Delete user from DocSpace (admin only)"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+
+                      {mode === "groups" && normalize(groupId) ? (
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!token) return;
+                            const memberId = String(p?.id || "").trim();
+                            if (!memberId) {
+                              setError("Member id is missing (cannot remove).");
+                              return;
+                            }
+                            const ok = window.confirm(`Remove ${email || name} from this group?`);
+                            if (!ok) return;
+                            setLoading(true);
+                            setError("");
+                            setNotice("");
+                            try {
+                              await removeDirectoryGroupMembers({ token, groupId, members: [memberId] });
+                              setNotice("Member removed.");
+                              await refreshSelectedGroupMembers(groupId);
+                              await refreshGroups();
+                            } catch (e2) {
+                              setError(e2?.message || "Failed to remove member");
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                          disabled={busy || loading || !canManageDirectory}
+                          title="Remove user from group (admin only)"
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         ) : null}
 
         {mode === "people" && !normalize(peopleQuery) && peopleTotal > 0 && people.length < peopleTotal ? (

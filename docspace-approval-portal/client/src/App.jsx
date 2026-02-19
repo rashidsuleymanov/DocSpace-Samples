@@ -14,6 +14,7 @@ import BulkLinks from "./pages/BulkLinks.jsx";
 import SendDrafts from "./pages/SendDrafts.jsx";
 import Settings from "./pages/Settings.jsx";
 import { clearSession, loadSession, saveSession } from "./services/session.js";
+import { toast } from "./utils/toast.js";
 import {
   createFlowFromTemplate,
   getProjectsSidebar,
@@ -31,6 +32,26 @@ function isPdfFile(item) {
   return ext === "pdf" || ext === ".pdf" || title.endsWith(".pdf");
 }
 
+function viewFromHash() {
+  const raw = typeof window !== "undefined" ? String(window.location.hash || "") : "";
+  const hash = raw.replace(/^#\/?/, "").trim().toLowerCase();
+  if (!hash) return "";
+  const allowed = new Set([
+    "login",
+    "dashboard",
+    "documents",
+    "requests",
+    "projects",
+    "drafts",
+    "bulk",
+    "bulklinks",
+    "contacts",
+    "settings"
+  ]);
+  if (!allowed.has(hash)) return "";
+  return hash === "bulklinks" ? "bulkLinks" : hash;
+}
+
 export default function App() {
   const [view, setView] = useState("login");
   const [session, setSession] = useState(null);
@@ -39,8 +60,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [hasWebhookSecret, setHasWebhookSecret] = useState(false);
   const [branding, setBranding] = useState({
-    portalName: "DocSpace Approval Portal",
-    portalTagline: "Approval portal",
+    portalName: "Requests Center",
+    portalTagline: "Sign, approve, and track.",
     portalLogoUrl: "",
     portalAccent: ""
   });
@@ -59,9 +80,12 @@ export default function App() {
 
   useEffect(() => {
     const existing = loadSession();
+    const initial = viewFromHash();
     if (existing?.token && existing?.user?.id) {
       setSession(existing);
-      setView("dashboard");
+      setView(initial || "dashboard");
+    } else if (initial) {
+      setView(initial);
     }
     setBooting(false);
   }, []);
@@ -90,7 +114,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const name = String(branding?.portalName || "").trim() || "DocSpace Approval Portal";
+    const name = String(branding?.portalName || "").trim() || "Requests Center";
     if (typeof document !== "undefined") document.title = name;
 
     const accent = String(branding?.portalAccent || "").trim();
@@ -241,7 +265,7 @@ export default function App() {
           const next = await login({ email, password });
           setSession(next);
           saveSession(next);
-          setView("dashboard");
+          setView(viewFromHash() || "dashboard");
           await refreshFlows(next);
           await refreshActiveProject();
           await refreshDraftsSummary(next);
@@ -300,7 +324,9 @@ export default function App() {
             kind
           });
           await refreshFlows(session);
+          window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
           window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+          toast("Request created\nOpen Requests to track it.", "success");
           return result;
         } catch (e) {
           setError(e?.message || "Failed to start request");
@@ -375,7 +401,18 @@ export default function App() {
   if (!session) {
     return (
       <div className="app-shell">
-        <Login busy={busy} error={error} onLogin={actions.onLogin} onRegister={actions.onRegister} />
+        {view === "settings" ? (
+          <Settings busy={busy} onOpenDrafts={() => actions.navigate("login")} />
+        ) : (
+          <Login
+            branding={branding}
+            busy={busy}
+            error={error}
+            onLogin={actions.onLogin}
+            onRegister={actions.onRegister}
+            onOpenSettings={() => actions.navigate("settings")}
+          />
+        )}
       </div>
     );
   }
@@ -425,6 +462,7 @@ export default function App() {
             projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
             onOpenRequests={() => actions.openRequests("all", "all")}
             onOpenProjects={(opts) => actions.openProjects(opts)}
+            onOpenTemplates={() => actions.navigate("drafts")}
           />
         )}
         {view === "requests" && (
@@ -501,6 +539,7 @@ export default function App() {
             busy={busy}
             onOpenProject={actions.openProject}
             onOpenProjects={(opts) => actions.openProjects(opts)}
+            onOpenSettings={() => actions.navigate("settings")}
           />
         )}
         {view === "project" && (

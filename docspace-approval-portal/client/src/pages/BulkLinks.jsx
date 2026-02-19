@@ -5,6 +5,7 @@ import StatusPill from "../components/StatusPill.jsx";
 import { createBulkLinks } from "../services/portalApi.js";
 import { deleteBulkBatch, listBulkBatches, restoreBulkBatch, saveBulkBatch, trashBulkBatch } from "../services/bulkHistoryStore.js";
 import { saveLocalDraft } from "../services/draftsStore.js";
+import { toast } from "../utils/toast.js";
 
 function normalize(value) {
   return String(value || "").trim();
@@ -90,6 +91,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
+      toast("Copied", "success");
     } catch {
       // ignore
     }
@@ -136,6 +138,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
         });
         setHistoryTick((v) => v + 1);
       }
+      toast(next.length ? `Generated ${next.length} link(s)` : "No links generated", next.length ? "success" : "info");
     } catch (e) {
       setError(e?.message || "Bulk links failed");
     } finally {
@@ -391,7 +394,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
                 </label>
                 <div className="row-actions">
                   <button type="button" className="primary" onClick={run} disabled={busy || actionBusy || !selectedTemplate?.id}>
-                    {actionBusy ? "Working..." : "Generate links"}
+                    {actionBusy ? "Loading..." : "Generate links"}
                   </button>
                 </div>
                 <p className="muted" style={{ margin: 0 }}>

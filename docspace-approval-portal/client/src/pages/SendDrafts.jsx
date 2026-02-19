@@ -27,7 +27,7 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
   const [query, setQuery] = useState("");
   const [tick, setTick] = useState(0);
 
-  const drafts = useMemo(() => {
+  const { drafts, totalInTab } = useMemo(() => {
     const list = listLocalDrafts(session);
     const filteredByTab =
       tab === "request" ? list.filter((d) => d.type === "request") : tab === "bulkSend" ? list.filter((d) => d.type === "bulkSend") : tab === "bulkLinks" ? list.filter((d) => d.type === "bulkLinks") : list;
@@ -40,7 +40,7 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
         })
       : filteredByTab;
 
-    return filtered;
+    return { drafts: filtered, totalInTab: filteredByTab.length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, session, tab, tick]);
 
@@ -112,7 +112,21 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
         </div>
 
         {!drafts.length ? (
-          <EmptyState title="No drafts yet" description="Start a request or a bulk action, then click Save draft." />
+          <EmptyState
+            title={normalize(query) ? "Nothing found" : "No drafts yet"}
+            description={normalize(query) ? `No drafts match "${normalize(query)}".` : "Start a request or a bulk action, then click Save draft."}
+            actions={
+              normalize(query) ? (
+                <button type="button" onClick={() => setQuery("")} disabled={busy}>
+                  Clear search
+                </button>
+              ) : totalInTab ? null : (
+                <button type="button" className="primary" onClick={() => onOpenRequests?.()} disabled={busy}>
+                  New request
+                </button>
+              )
+            }
+          />
         ) : (
           <div className="list">
             {drafts.map((d) => {
@@ -150,4 +164,3 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
     </div>
   );
 }
-

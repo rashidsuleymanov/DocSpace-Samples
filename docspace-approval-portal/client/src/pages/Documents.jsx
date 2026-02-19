@@ -2,19 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import AuditModal from "../components/AuditModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
-import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
+import StepsCard from "../components/StepsCard.jsx";
 import Tabs from "../components/Tabs.jsx";
-import { activateProject, createProject, getProjectsPermissions, listFlows, listProjectFlows, trashFlow, untrashFlow } from "../services/portalApi.js";
+import { getProjectsPermissions, listFlows, listProjectFlows, trashFlow, untrashFlow } from "../services/portalApi.js";
+import { toast } from "../utils/toast.js";
 
 function normalize(value) {
   return String(value || "").trim();
-}
-
-function isPersonalTitle(title) {
-  const t = normalize(title).toLowerCase();
-  return t === "personal" || t.startsWith("personal -") || t.startsWith("personal:");
 }
 
 function flowTitle(flow) {
@@ -34,13 +30,13 @@ function statusTone(status) {
   return "gray";
 }
 
-export default function Documents({ session, busy, projects = [], onOpenRequests, onOpenProjects }) {
+export default function Documents({ session, busy, projects = [], onOpenRequests, onOpenProjects, onOpenTemplates }) {
   const token = normalize(session?.token);
   const meId = normalize(session?.user?.id);
   const meEmail = normalize(session?.user?.email).toLowerCase();
   const displayName = session?.user?.displayName || session?.user?.email || "User";
 
-  const [tab, setTab] = useState("my"); // my | personal | trash
+  const [tab, setTab] = useState("my"); // my | team | trash
   const [who, setWho] = useState("all"); // all | assigned | created
   const [query, setQuery] = useState("");
 
@@ -62,8 +58,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
   const [auditFlowId, setAuditFlowId] = useState("");
   const [auditTitle, setAuditTitle] = useState("Activity");
 
-  const [createPersonalOpen, setCreatePersonalOpen] = useState(false);
-  const [createPersonalTitle, setCreatePersonalTitle] = useState(() => `Personal - ${String(displayName || "User").trim()}`.trim());
+  // Personal workspace was removed from Documents; use Projects to create and manage projects.
 
   const roomTitleById = useMemo(() => {
     const list = Array.isArray(projects) ? projects : [];
@@ -74,16 +69,6 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       map.set(rid, String(p?.title || "").trim() || "Project");
     }
     return map;
-  }, [projects]);
-
-  const personalRoomIds = useMemo(() => {
-    const ids = new Set();
-    for (const p of Array.isArray(projects) ? projects : []) {
-      const rid = normalize(p?.roomId);
-      if (!rid) continue;
-      if (isPersonalTitle(p?.title)) ids.add(rid);
-    }
-    return ids;
   }, [projects]);
 
   useEffect(() => {
@@ -212,15 +197,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
         ? trashed
         : tab === "team"
           ? notTrashed
-        : tab === "personal"
-          ? notTrashed.filter((f) => {
-              const rid = normalize(f?.projectRoomId);
-              if (!rid) return false;
-              if (personalRoomIds.has(rid)) return true;
-              const title = roomTitleById.get(rid) || "";
-              return isPersonalTitle(title);
-            })
-          : notTrashed;
+        : notTrashed;
 
     const scoped =
       who === "created"
@@ -239,7 +216,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       const hay = `${flowTitle(f)} ${project}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [docs, meEmail, meId, personalRoomIds, query, roomTitleById, tab, teamDocs, who]);
+  }, [docs, meEmail, meId, query, roomTitleById, tab, teamDocs, who]);
 
   const groupsById = useMemo(() => {
     const items = Array.isArray(flows) ? flows : [];
@@ -265,30 +242,6 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     return map;
   }, [flows]);
 
-  const hasPersonalWorkspace = useMemo(() => {
-    return Array.isArray(projects) && projects.some((p) => isPersonalTitle(p?.title));
-  }, [projects]);
-
-  const personalProject = useMemo(() => {
-    return (Array.isArray(projects) ? projects : []).find((p) => isPersonalTitle(p?.title)) || null;
-  }, [projects]);
-
-  const activatePersonalWorkspace = async () => {
-    if (!personalProject?.id) return false;
-    setLoading(true);
-    setError("");
-    try {
-      await activateProject(personalProject.id);
-      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
-      return true;
-    } catch (e) {
-      setError(e?.message || "Failed to activate personal workspace");
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openDoc = (flow) => {
     const url = normalize(flow?.resultFileUrl || flow?.openUrl);
     if (!url) return;
@@ -302,6 +255,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
+      toast("Link copied", "success");
     } catch {
       // ignore
     }
@@ -317,10 +271,9 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
 
   const tabItems = useMemo(
     () => [
-      { id: "my", label: "My documents" },
-      { id: "personal", label: "Personal" },
+      { id: "my", label: "Results" },
       { id: "team", label: "Team" },
-      { id: "trash", label: "Move to Trash" }
+      { id: "trash", label: "Trash" }
     ],
     []
   );
@@ -338,35 +291,23 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     <div className="page-shell">
       <header className="topbar">
         <div>
-          <h2>Documents</h2>
-          <p className="muted">Your completed files across projects.</p>
+          <h2>Results</h2>
+          <p className="muted">Finished requests generate result files that appear here.</p>
         </div>
         <div className="topbar-actions">
+          <button type="button" onClick={() => onOpenProjects?.()} disabled={busy || loading}>
+            Projects
+          </button>
           <button
             type="button"
             className="primary"
             onClick={() => {
-              if (tab === "personal" && !hasPersonalWorkspace) {
-                setCreatePersonalOpen(true);
-                return;
-              }
-
-              const run = async () => {
-                if (tab === "personal") {
-                  const ok = await activatePersonalWorkspace();
-                  if (!ok) return;
-                }
-                onOpenRequests?.();
-                setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
-              };
-              run().catch(() => null);
+              onOpenRequests?.();
+              setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
             }}
             disabled={busy || loading}
           >
             New request
-          </button>
-          <button type="button" onClick={() => (tab === "personal" ? setCreatePersonalOpen(true) : onOpenProjects?.())} disabled={busy || loading}>
-            {tab === "personal" ? "Create personal workspace" : "Projects"}
           </button>
         </div>
       </header>
@@ -374,25 +315,52 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
       {error ? <p className="error">{error}</p> : null}
       {tab === "team" && teamError ? <p className="error">{teamError}</p> : null}
 
+      {token && tab === "my" ? (
+        <StepsCard
+          title="How to create documents"
+          subtitle="This page shows completed results, not drafts. Start a request to generate a result file."
+          steps={[
+            {
+              title: "Prepare a template",
+              description: "Create or upload a PDF template in Templates.",
+              actionLabel: "Open Templates",
+              onAction: () => onOpenTemplates?.(),
+              disabled: busy || loading || typeof onOpenTemplates !== "function"
+            },
+            {
+              title: "Start a request",
+              description: "Go to Requests and click New request to send it to recipients.",
+              actionLabel: "Open Requests",
+              actionTone: "primary",
+              onAction: () => {
+                onOpenRequests?.();
+                setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
+              },
+              disabled: busy || loading
+            },
+            {
+              title: "Open the result",
+              description: "After completion, the result file will appear in Results."
+            }
+          ]}
+        />
+      ) : null}
+
       <section className="card">
         <div className="card-header compact">
           <div>
             <h3>
               {tab === "trash"
-                ? "Move to Trash"
+                ? "Trash"
                 : tab === "team"
                   ? "Team documents"
-                  : tab === "personal"
-                    ? "Personal documents"
-                    : "My documents"}
+                  : "My results"}
             </h3>
             <p className="muted">
               {tab === "trash"
                 ? "Restore documents you moved to trash."
                 : tab === "team"
                   ? "Completed files across projects you manage."
-                : tab === "personal"
-                ? "A private workspace for personal signing tasks."
                 : "Documents where you participated (created or were assigned)."}
             </p>
           </div>
@@ -425,26 +393,22 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
                 </button>
               }
             />
-          ) : tab === "personal" && !hasPersonalWorkspace ? (
-            <EmptyState
-              title="No personal workspace yet"
-              description="Create a personal workspace for quick, one-off signing tasks."
-              actions={
-                <button type="button" className="primary" onClick={() => setCreatePersonalOpen(true)} disabled={busy}>
-                  Create personal workspace
-                </button>
-              }
-            />
           ) : filtered.length === 0 ? (
             <EmptyState
-              title={tab === "trash" ? "Trash is empty" : "No documents yet"}
+              title={query.trim() ? "Nothing found" : tab === "trash" ? "Trash is empty" : "No documents yet"}
               description={
-                tab === "trash"
+                query.trim()
+                  ? `No documents match "${query.trim()}".`
+                  : tab === "trash"
                   ? "Move completed documents to trash to hide them from your list."
                   : "Completed requests will appear here. Start a request to generate a signed or filled file."
               }
               actions={
-                tab === "trash" ? (
+                query.trim() ? (
+                  <button type="button" onClick={() => setQuery("")} disabled={busy}>
+                    Clear search
+                  </button>
+                ) : tab === "trash" ? (
                   <button type="button" onClick={() => setTab("my")} disabled={busy}>
                     Back to documents
                   </button>
@@ -560,7 +524,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
                         }}
                         disabled={busy || loading}
                       >
-                        Trash
+                        Move to Trash
                       </button>
                     )}
                   </div>
@@ -570,55 +534,6 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
           )}
         </div>
       </section>
-
-      <Modal
-        open={createPersonalOpen}
-        title="Create personal workspace"
-        onClose={() => {
-          if (loading) return;
-          setCreatePersonalOpen(false);
-        }}
-        footer={
-          <>
-            <button type="button" onClick={() => setCreatePersonalOpen(false)} disabled={busy || loading}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={async () => {
-                const title = normalize(createPersonalTitle);
-                if (!title || !token) return;
-                setLoading(true);
-                setError("");
-                try {
-                  await createProject({ token, title });
-                  setCreatePersonalOpen(false);
-                  window.dispatchEvent(new CustomEvent("portal:projectChanged"));
-                  setTab("personal");
-                } catch (e) {
-                  setError(e?.message || "Failed to create personal workspace");
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              disabled={busy || loading || !normalize(createPersonalTitle)}
-            >
-              {loading ? "Working..." : "Create"}
-            </button>
-          </>
-        }
-      >
-        <form className="auth-form" onSubmit={(e) => e.preventDefault()} style={{ marginTop: 0 }}>
-          <label>
-            <span>Name</span>
-            <input value={createPersonalTitle} onChange={(e) => setCreatePersonalTitle(e.target.value)} disabled={busy || loading} />
-          </label>
-          <p className="muted" style={{ margin: 0 }}>
-            Creates a private room in DocSpace and sets it as the current project.
-          </p>
-        </form>
-      </Modal>
 
       <RequestDetailsModal
         open={detailsOpen}

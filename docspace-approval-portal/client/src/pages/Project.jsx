@@ -6,6 +6,7 @@ import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
+import { toast } from "../utils/toast.js";
 import {
   activateProject,
   cancelFlow,
@@ -319,6 +320,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       setInviteOpen(false);
       setInvite((s) => ({ ...s, emails: "", message: "" }));
       setNotice(`Invited ${data?.invited || 0} user(s).`);
+      toast("Invites sent", "success");
       await refresh();
     } catch (e) {
       setError(e?.message || "Invite failed");
@@ -346,6 +348,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       setRemoveOpen(false);
       setRemoveEntry(null);
       setNotice("Member removed.");
+      toast("Member removed", "success");
       await refresh();
     } catch (e) {
       setError(e?.message || "Remove failed");
@@ -519,6 +522,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       const templatesRes = await listTemplates({ token }).catch(() => null);
       setTemplates(Array.isArray(templatesRes?.templates) ? templatesRes.templates : []);
       setNotice("Form added to this project.");
+      toast("Form added", "success");
       setAddFormOpen(false);
       setAddFormSelected(null);
     } catch (e) {
@@ -550,6 +554,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       setCancelOpen(false);
       setCancelEntry(null);
       setNotice("Request canceled.");
+      toast("Request canceled", "success");
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
       await refreshFlows();
     } catch (e) {
@@ -579,6 +584,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       setCompleteOpen(false);
       setCompleteEntry(null);
       setNotice("Request completed.");
+      toast("Request completed", "success");
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
       await refreshFlows();
     } catch (e) {
@@ -586,6 +592,29 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     } finally {
       setCompleteBusy(false);
     }
+  };
+
+  const groupFromResult = (result) => {
+    const flows = Array.isArray(result?.flows) ? result.flows : result?.flow ? [result.flow] : [];
+    if (!flows.length) return null;
+    const primaryFlow = flows[0] || null;
+    const statuses = flows.map((f) => String(f?.status || "")).filter(Boolean);
+    const status = statuses.every((s) => s === "Completed")
+      ? "Completed"
+      : statuses.every((s) => s === "Canceled")
+        ? "Canceled"
+        : statuses.some((s) => s === "InProgress")
+          ? "InProgress"
+          : String(primaryFlow?.status || "InProgress");
+    const counts = {
+      total: flows.length,
+      completed: flows.filter((f) => String(f?.status || "") === "Completed").length,
+      canceled: flows.filter((f) => String(f?.status || "") === "Canceled").length
+    };
+    const id =
+      normalize(primaryFlow?.groupId || result?.groupId || primaryFlow?.id || result?.id) ||
+      normalize(primaryFlow?.id);
+    return { id: id || String(Math.random()), flows, primaryFlow, createdAt: primaryFlow?.createdAt || null, status, counts };
   };
 
   const openFlow = (flow, urlOverride = "") => {
@@ -614,6 +643,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     try {
       await navigator.clipboard.writeText(value);
       setNotice("Link copied.");
+      toast("Link copied", "success");
     } catch {
       setError("Copy failed. Please copy the link manually.");
     }
@@ -675,6 +705,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         message
       });
       setNotice(reminder ? "Reminder sent." : "Notification sent.");
+      toast(reminder ? "Reminder sent" : "Notification sent", "success");
     } catch (e) {
       setError(e?.message || "Notify failed");
     }
@@ -711,7 +742,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             Invite people
           </button>
           {project?.roomUrl ? (
-            <a className="btn subtle" href={project.roomUrl} target="_blank" rel="noreferrer">
+            <a className="btn" href={project.roomUrl} target="_blank" rel="noreferrer">
               Open in DocSpace
             </a>
           ) : null}
@@ -965,12 +996,34 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                   </span>
                 </div>
                 <div className="list-actions">
-                  <button type="button" className="primary" onClick={() => onStartFlow(t.id)} disabled={busy || loading || !token}>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={async () => {
+                      const pid = normalize(project?.id || projectId);
+                      if (!pid || !token || typeof onStartFlow !== "function") return;
+                      setError("");
+                      setNotice("");
+                      const result = await onStartFlow(t.id, pid);
+                      if (!result) {
+                        toast("Request creation failed\nPlease check Settings and try again.", "error");
+                        return;
+                      }
+                      const group = groupFromResult(result);
+                      setTab("requests");
+                      if (group) {
+                        setDetailsGroup(group);
+                        setDetailsOpen(true);
+                      }
+                      refreshFlows().catch(() => null);
+                    }}
+                    disabled={busy || loading || !token}
+                  >
                     Create request
                   </button>
                   {t.webUrl ? (
-                    <a className="btn subtle" href={t.webUrl} target="_blank" rel="noreferrer">
-                      Open in new tab
+                    <a className="btn" href={t.webUrl} target="_blank" rel="noreferrer">
+                      Open in DocSpace
                     </a>
                   ) : null}
                 </div>
@@ -999,7 +1052,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               onClick={onInvite}
               disabled={busy || loading || !normalize(invite.emails) || !project?.id || !canManageProject}
             >
-              {loading ? "Working..." : "Send invites"}
+              {loading ? "Loading..." : "Send invites"}
             </button>
           </>
         }
@@ -1055,7 +1108,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               disabled={busy || loading || addFormLoading || !addFormSelected?.id || !canManageProject}
               title={!canManageProject ? "Only the project admin can add forms" : ""}
             >
-              {addFormLoading ? "Working..." : "Add to project"}
+              {addFormLoading ? "Loading..." : "Add to project"}
             </button>
           </>
         }
@@ -1140,7 +1193,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               onClick={onComplete}
               disabled={busy || loading || completeBusy || !(Array.isArray(completeEntry?.flows) && completeEntry.flows.length)}
             >
-              {completeBusy ? "Working..." : "Complete"}
+              {completeBusy ? "Loading..." : "Complete"}
             </button>
           </>
         }
@@ -1171,7 +1224,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               onClick={onCancel}
               disabled={busy || loading || cancelBusy || !(Array.isArray(cancelEntry?.flows) && cancelEntry.flows.length)}
             >
-              {cancelBusy ? "Working..." : "Cancel request"}
+              {cancelBusy ? "Loading..." : "Cancel request"}
             </button>
           </>
         }
@@ -1197,7 +1250,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
               Cancel
             </button>
             <button type="button" className="danger" onClick={onRemove} disabled={busy || loading || !removeEntry?.userId || !canManageProject}>
-              {loading ? "Working..." : "Remove"}
+              {loading ? "Loading..." : "Remove"}
             </button>
           </>
         }

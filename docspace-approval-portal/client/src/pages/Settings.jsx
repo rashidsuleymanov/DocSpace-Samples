@@ -2,6 +2,23 @@ import { useEffect, useState } from "react";
 import StatusPill from "../components/StatusPill.jsx";
 import { createRequiredRoom, getSettingsConfig, listRequiredRooms, testSettingsConfig, updateSettingsConfig } from "../services/portalApi.js";
 
+function normalize(value) {
+  return String(value || "").trim();
+}
+
+function normalizeBaseUrl(value) {
+  const raw = normalize(value);
+  if (!raw) return "";
+  const trimmed = raw.replace(/\/+$/, "");
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return trimmed;
+  } catch {
+    return "";
+  }
+}
+
 export default function Settings({ busy, onOpenDrafts }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -93,11 +110,17 @@ export default function Settings({ busy, onOpenDrafts }) {
   };
 
   const saveConnection = async () => {
+    const baseUrl = normalizeBaseUrl(conn.baseUrl);
+    if (!baseUrl) {
+      setError("DocSpace base URL is required (example: https://your-docspace.example.com).");
+      return;
+    }
+
     setConnLoading(true);
     setError("");
     setNotice("");
     try {
-      const patch = { baseUrl: conn.baseUrl };
+      const patch = { baseUrl };
       const token = String(conn.rawAuthTokenInput || "").trim();
       if (token) patch.rawAuthToken = token;
       if (!token && clearToken) {
@@ -144,6 +167,12 @@ export default function Settings({ busy, onOpenDrafts }) {
   };
 
   const testConnection = async () => {
+    const baseUrl = normalizeBaseUrl(conn.baseUrl);
+    if (!baseUrl) {
+      setError("DocSpace base URL is required before testing the connection.");
+      return;
+    }
+
     setConnLoading(true);
     setError("");
     setNotice("");
@@ -157,6 +186,8 @@ export default function Settings({ busy, onOpenDrafts }) {
       setConnLoading(false);
     }
   };
+
+  const canSave = Boolean(normalizeBaseUrl(conn.baseUrl));
 
   return (
     <div className="page-shell">
@@ -180,10 +211,12 @@ export default function Settings({ busy, onOpenDrafts }) {
           <label>
             <span>DocSpace base URL</span>
             <input
+              type="url"
               value={conn.baseUrl}
               onChange={(e) => setConn((s) => ({ ...s, baseUrl: e.target.value }))}
               placeholder="https://your-docspace.example.com"
               disabled={busy || connLoading}
+              required
             />
           </label>
 
@@ -250,10 +283,10 @@ export default function Settings({ busy, onOpenDrafts }) {
           </div>
 
           <div className="row-actions">
-            <button type="button" onClick={testConnection} disabled={busy || connLoading}>
+            <button type="button" onClick={testConnection} disabled={busy || connLoading || !canSave}>
               Test
             </button>
-            <button type="button" className="primary" onClick={saveConnection} disabled={busy || connLoading}>
+            <button type="button" className="primary" onClick={saveConnection} disabled={busy || connLoading || !canSave}>
               {connLoading ? "Saving..." : "Save"}
             </button>
           </div>
@@ -277,7 +310,7 @@ export default function Settings({ busy, onOpenDrafts }) {
               value={conn.portalTagline}
               onChange={(e) => setConn((s) => ({ ...s, portalTagline: e.target.value }))}
               disabled={busy || connLoading}
-              placeholder="Approval portal"
+              placeholder="Sign, approve, and track."
             />
           </label>
           <label>

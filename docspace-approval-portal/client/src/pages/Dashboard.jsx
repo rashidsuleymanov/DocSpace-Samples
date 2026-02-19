@@ -6,6 +6,7 @@ import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatCard from "../components/StatCard.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import StepsCard from "../components/StepsCard.jsx";
+import { toast } from "../utils/toast.js";
 
 function isPdfTemplate(t) {
   const ext = String(t?.fileExst || "").trim().toLowerCase();
@@ -124,6 +125,29 @@ export default function Dashboard({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsGroup, setDetailsGroup] = useState(null);
 
+  const groupFromResult = (result) => {
+    const flows = Array.isArray(result?.flows) ? result.flows : result?.flow ? [result.flow] : [];
+    if (!flows.length) return null;
+    const primaryFlow = flows[0] || null;
+    const statuses = flows.map((f) => String(f?.status || "")).filter(Boolean);
+    const status = statuses.every((s) => s === "Completed")
+      ? "Completed"
+      : statuses.every((s) => s === "Canceled")
+        ? "Canceled"
+        : statuses.some((s) => s === "InProgress")
+          ? "InProgress"
+          : String(primaryFlow?.status || "InProgress");
+    const counts = {
+      total: flows.length,
+      completed: flows.filter((f) => String(f?.status || "") === "Completed").length,
+      canceled: flows.filter((f) => String(f?.status || "") === "Canceled").length
+    };
+    const id =
+      String(primaryFlow?.groupId || result?.groupId || primaryFlow?.id || result?.id || "").trim() ||
+      String(primaryFlow?.id || "").trim();
+    return { id: id || String(Math.random()), flows, primaryFlow, createdAt: primaryFlow?.createdAt || null, status, counts };
+  };
+
   const openFlow = (flow) => {
     const status = String(flow?.status || "");
     const url = String((status === "Completed" ? flow?.resultFileUrl || flow?.openUrl : flow?.openUrl) || "").trim();
@@ -139,6 +163,7 @@ export default function Dashboard({
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
+      toast("Link copied", "success");
     } catch {
       // ignore; user can copy from input in Details modal
     }
@@ -240,7 +265,7 @@ export default function Dashboard({
             Refresh
           </button>
           {hasCurrentProject && currentProjectUrl ? (
-            <a className="btn subtle" href={currentProjectUrl} target="_blank" rel="noreferrer">
+            <a className="btn" href={currentProjectUrl} target="_blank" rel="noreferrer">
               Open in DocSpace
             </a>
           ) : null}
@@ -455,16 +480,21 @@ export default function Dashboard({
                     <strong className="truncate">{t.title || `File ${t.id}`}</strong>
                   </div>
                   <div className="list-actions">
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={async () => {
-                        await onStartFlow(t.id);
-                        setSendOpen(false);
-                        setSendQuery("");
-                      }}
-                      disabled={busy}
-                    >
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={async () => {
+                          const result = await onStartFlow?.(t.id, currentProjectId || null);
+                          const group = groupFromResult(result);
+                          if (group) {
+                            setDetailsGroup(group);
+                            setDetailsOpen(true);
+                          }
+                          setSendOpen(false);
+                          setSendQuery("");
+                        }}
+                        disabled={busy}
+                      >
                       Create request
                     </button>
                   </div>

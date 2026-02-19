@@ -4,10 +4,12 @@ function normalize(value) {
   return String(value || "").trim();
 }
 
-export default function Login({ busy, error, onLogin, onRegister }) {
+export default function Login({ branding, busy, error, onLogin, onRegister, onOpenSettings }) {
   const [mode, setMode] = useState("login"); // "login" | "register"
+  const [localError, setLocalError] = useState("");
 
-  const title = mode === "register" ? "Create account" : "Approval portal";
+  const portalName = String(branding?.portalName || "").trim() || "Requests Center";
+  const title = mode === "register" ? "Create account" : portalName;
   const subtitle = mode === "register" ? "Create a DocSpace user." : "Sign in with your DocSpace account.";
 
   const canRegister = typeof onRegister === "function";
@@ -19,6 +21,7 @@ export default function Login({ busy, error, onLogin, onRegister }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setLocalError("");
     const form = new FormData(event.currentTarget);
 
     if (mode === "register") {
@@ -27,16 +30,32 @@ export default function Login({ busy, error, onLogin, onRegister }) {
       const email = normalize(form.get("email"));
       const password = normalize(form.get("password"));
       const password2 = normalize(form.get("password2"));
-      if (!email || !password) return;
-      if (password !== password2) return;
+      if (!email) {
+        setLocalError("Email is required.");
+        return;
+      }
+      if (!password) {
+        setLocalError("Password is required.");
+        return;
+      }
+      if (password !== password2) {
+        setLocalError("Passwords do not match.");
+        return;
+      }
       await onRegister?.({ firstName, lastName, email, password });
       return;
     }
 
     const email = normalize(form.get("email"));
     const password = normalize(form.get("password"));
+    if (!email || !password) {
+      setLocalError("Email and password are required.");
+      return;
+    }
     await onLogin({ email, password });
   };
+
+  const displayError = error || localError;
 
   return (
     <div className="auth-shell">
@@ -44,9 +63,9 @@ export default function Login({ busy, error, onLogin, onRegister }) {
         <h1 style={{ margin: "0 0 6px" }}>{title}</h1>
         <p className="muted" style={{ margin: 0 }}>{subtitle}</p>
 
-        {error ? (
+        {displayError ? (
           <p className="error" style={{ marginTop: 10 }}>
-            {error}
+            {displayError}
           </p>
         ) : null}
 
@@ -98,11 +117,27 @@ export default function Login({ busy, error, onLogin, onRegister }) {
 
           <div className="auth-switch">
             {mode === "login" ? (
-              <button type="button" className="link" onClick={() => setMode("register")} disabled={busy || !canRegister}>
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setLocalError("");
+                  setMode("register");
+                }}
+                disabled={busy || !canRegister}
+              >
                 Create account
               </button>
             ) : (
-              <button type="button" className="link" onClick={() => setMode("login")} disabled={busy}>
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setLocalError("");
+                  setMode("login");
+                }}
+                disabled={busy}
+              >
                 Back to Sign in
               </button>
             )}

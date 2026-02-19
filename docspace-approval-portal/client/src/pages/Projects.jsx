@@ -3,6 +3,7 @@ import ContextMenu from "../components/ContextMenu.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
+import { toast } from "../utils/toast.js";
 import {
   activateProject,
   archiveProject,
@@ -133,6 +134,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       const result = await activateProject(project.id);
       setActiveRoomId(result?.activeRoomId || project.roomId || null);
       setNotice("Current project changed.");
+      toast("Current project changed", "success");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
     } catch (e) {
       setError(e?.message || "Failed to switch project");
@@ -179,6 +181,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       });
       setInviteOpen(false);
       setNotice(`Invited ${data?.invited || 0} user(s).`);
+      toast("Invites sent", "success");
     } catch (e) {
       setError(e?.message || "Invite failed");
     } finally {
@@ -198,6 +201,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       setCreateTitle("");
       await refresh();
       setNotice("Project created and set as current.");
+      toast("Project created", "success");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
     } catch (e) {
       setError(e?.message || "Create failed");
@@ -229,33 +233,34 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     setNotice("");
   };
 
-	  const doArchive = async ({ cancelOpenRequests } = {}) => {
-	    const project = archiveEntry;
-	    if (!project?.id) return;
-	    setLoading(true);
-	    setError("");
-	    setNotice("");
-	    try {
-	      const res = await archiveProject({ token, projectId: project.id, cancelOpenRequests: Boolean(cancelOpenRequests) });
-	      setArchiveOpen(false);
-	      setArchiveWarnOpen(false);
-	      setArchiveEntry(null);
-	      setArchiveOpenRequests(0);
-	      await refresh();
-	      setNotice(res?.warning ? `Project archived. ${res.warning}` : "Project archived.");
-	      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
-	    } catch (e) {
-	      if (e?.status === 409 && typeof e?.details?.openRequests === "number") {
-	        setArchiveOpen(false);
-        setArchiveOpenRequests(Number(e.details.openRequests) || 0);
-        setArchiveWarnOpen(true);
-      } else {
-        setError(e?.message || "Archive failed");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+ 	  const doArchive = async ({ cancelOpenRequests } = {}) => {
+ 	    const project = archiveEntry;
+ 	    if (!project?.id) return;
+ 	    setLoading(true);
+ 	    setError("");
+ 	    setNotice("");
+ 	    try {
+ 	      const res = await archiveProject({ token, projectId: project.id, cancelOpenRequests: Boolean(cancelOpenRequests) });
+ 	      setArchiveOpen(false);
+ 	      setArchiveWarnOpen(false);
+ 	      setArchiveEntry(null);
+ 	      setArchiveOpenRequests(0);
+ 	      await refresh();
+ 	      setNotice(res?.warning ? `Project archived. ${res.warning}` : "Project archived.");
+        toast("Project archived", "success");
+ 	      window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+ 	    } catch (e) {
+ 	      if (e?.status === 409 && typeof e?.details?.openRequests === "number") {
+ 	        setArchiveOpen(false);
+         setArchiveOpenRequests(Number(e.details.openRequests) || 0);
+         setArchiveWarnOpen(true);
+       } else {
+         setError(e?.message || "Archive failed");
+       }
+     } finally {
+       setLoading(false);
+     }
+   };
 
   const doRestore = async () => {
     const project = restoreEntry;
@@ -269,6 +274,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       setRestoreEntry(null);
       const refreshed = await refresh();
       setNotice("Project restored.");
+      toast("Project restored", "success");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
       if (!refreshed?.activeRoomId) {
         setSetCurrentEntry(project);
@@ -293,6 +299,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       setDeleteEntry(null);
       await refresh();
       setNotice("Project removed from portal list.");
+      toast("Project removed", "success");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
     } catch (e) {
       setError(e?.message || "Delete failed");
@@ -355,14 +362,20 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       {!filtered.length ? (
         <section className="card">
           <EmptyState
-            title={tab === "archived" ? "No archived projects" : "No projects yet"}
+            title={normalizeTitle(query) ? "Nothing found" : tab === "archived" ? "No archived projects" : "No projects yet"}
             description={
-              tab === "archived"
+              normalizeTitle(query)
+                ? `No projects match "${normalizeTitle(query)}".`
+                : tab === "archived"
                 ? "Archived projects will appear here after you archive them."
                 : "Create a project to publish templates and start approval requests."
             }
             actions={
-              tab === "archived" ? (
+              normalizeTitle(query) ? (
+                <button type="button" onClick={() => setQuery("")} disabled={busy || loading}>
+                  Clear search
+                </button>
+              ) : tab === "archived" ? (
                 <button type="button" onClick={() => setTab("active")} disabled={busy || loading}>
                   View active projects
                 </button>
@@ -651,7 +664,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               onClick={() => doArchive({ cancelOpenRequests: false })}
               disabled={busy || loading || !archiveEntry?.id || !permissions?.[String(archiveEntry?.id || "")]}
             >
-              {loading ? "Working..." : "Archive"}
+              {loading ? "Loading..." : "Archive"}
             </button>
           </>
         }
@@ -687,7 +700,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               onClick={() => doArchive({ cancelOpenRequests: true })}
               disabled={busy || loading || !archiveEntry?.id || !permissions?.[String(archiveEntry?.id || "")]}
             >
-              {loading ? "Working..." : "Archive and cancel requests"}
+              {loading ? "Loading..." : "Archive and cancel requests"}
             </button>
           </>
         }
@@ -718,7 +731,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               onClick={doRestore}
               disabled={busy || loading || !restoreEntry?.id || !permissions?.[String(restoreEntry?.id || "")]}
             >
-              {loading ? "Working..." : "Restore"}
+              {loading ? "Loading..." : "Restore"}
             </button>
           </>
         }
@@ -792,7 +805,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               Cancel
             </button>
             <button type="button" className="primary" onClick={onCreate} disabled={busy || loading || !normalizeTitle(createTitle)}>
-              {loading ? "Working..." : "Create"}
+              {loading ? "Loading..." : "Create"}
             </button>
           </>
         }
@@ -826,7 +839,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               onClick={onInvite}
               disabled={busy || loading || !inviteProjectEntry?.id || !normalizeTitle(invite.emails) || !permissions?.[String(inviteProjectEntry?.id || "")]}
             >
-              {loading ? "Working..." : "Send invites"}
+              {loading ? "Loading..." : "Send invites"}
             </button>
           </>
         }
@@ -894,7 +907,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               onClick={onDelete}
               disabled={busy || loading || !deleteEntry?.id || !permissions?.[String(deleteEntry?.id || "")]}
             >
-              {loading ? "Working..." : "Delete"}
+              {loading ? "Loading..." : "Delete"}
             </button>
           </>
         }

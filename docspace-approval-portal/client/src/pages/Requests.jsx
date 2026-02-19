@@ -7,6 +7,7 @@ import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
+import { toast } from "../utils/toast.js";
 import {
   archiveFlow,
   cancelFlow,
@@ -909,6 +910,7 @@ export default function Requests({
     try {
       await cancelFlow({ token, flowId: id });
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Request canceled", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to cancel request");
     } finally {
@@ -928,6 +930,7 @@ export default function Requests({
         await cancelFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Requests canceled", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to cancel request");
     } finally {
@@ -950,6 +953,7 @@ export default function Requests({
         await reopenFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Requests reopened", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to reopen request");
     } finally {
@@ -969,6 +973,7 @@ export default function Requests({
         await archiveFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Requests archived", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to archive request");
     } finally {
@@ -988,6 +993,7 @@ export default function Requests({
         await unarchiveFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Requests restored", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to restore request");
     } finally {
@@ -1007,6 +1013,7 @@ export default function Requests({
         await trashFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Moved to trash", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to move request to trash");
     } finally {
@@ -1026,6 +1033,7 @@ export default function Requests({
         await untrashFlow({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Restored from trash", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to restore request");
     } finally {
@@ -1045,6 +1053,7 @@ export default function Requests({
         await deleteFlowPermanently({ token, flowId: id }).catch(() => null);
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Requests deleted", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to delete request");
     } finally {
@@ -1067,6 +1076,7 @@ export default function Requests({
         }
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast(bulkMode === "restore" ? "Requests restored" : "Requests archived", "success");
     } catch (e) {
       setLocalError(e?.message || "Bulk action failed");
     } finally {
@@ -1084,6 +1094,7 @@ export default function Requests({
     try {
       await completeFlow({ token, flowId: id });
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
+      toast("Request completed", "success");
     } catch (e) {
       setLocalError(e?.message || "Failed to complete request");
     } finally {
@@ -1104,6 +1115,7 @@ export default function Requests({
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
+      toast("Link copied", "success");
     } catch {
       // ignore; user can copy manually
     }
@@ -1283,7 +1295,7 @@ export default function Requests({
         <div className="card-header compact">
           <div>
             <h3>Requests</h3>
-            <p className="muted">{scope === "current" ? "Showing only the current project." : "Showing all projects you can access."}</p>
+            <p className="muted">{scope === "current" ? "Showing requests from the current project." : "Showing requests from all projects you can access."}</p>
           </div>
           <div className="card-header-actions">
             <input
@@ -1444,7 +1456,17 @@ export default function Requests({
               }
             />
           ) : filteredGroups.length === 0 ? (
-            statusFilter === "archived" ? (
+            String(query || "").trim() ? (
+              <EmptyState
+                title="Nothing found"
+                description={`No requests match "${String(query || "").trim()}".`}
+                actions={
+                  <button type="button" onClick={() => setQuery("")} disabled={busy}>
+                    Clear search
+                  </button>
+                }
+              />
+            ) : statusFilter === "archived" ? (
               <EmptyState
                 title="No archived requests"
                 description="Archive completed or canceled requests to keep your inbox clean."
@@ -1666,20 +1688,20 @@ export default function Requests({
                 <span>Activity</span>
                 <span className="menu-item-meta">Timeline</span>
               </button>
-              {canCopyLink ? (
-                <button
-                  type="button"
-                  className="menu-item"
-                  onClick={() => {
-                    closeActionsMenu();
-                    onCopyLink(openUrl);
-                  }}
-                  disabled={busy || actionBusy || !openUrl}
-                >
-                  <span>Copy link</span>
-                  <span className="menu-item-meta">Share</span>
-                </button>
-              ) : null}
+                {canCopyLink ? (
+                  <button
+                    type="button"
+                    className="menu-item"
+                    onClick={() => {
+                      closeActionsMenu();
+                      onCopyLink(openUrl);
+                    }}
+                    disabled={busy || actionBusy || !openUrl}
+                  >
+                    <span>Copy link</span>
+                    <span className="menu-item-meta">Requires DocSpace sign-in</span>
+                  </button>
+                ) : null}
 
               {hasManageActions ? <div className="menu-sep" role="separator" /> : null}
 
@@ -1818,7 +1840,7 @@ export default function Requests({
               onClick={runBulk}
               disabled={busy || actionBusy || !bulkCandidates.length}
             >
-              {actionBusy ? "Working..." : bulkMode === "restore" ? "Restore" : "Archive"}
+              {actionBusy ? "Loading..." : bulkMode === "restore" ? "Restore" : "Archive"}
             </button>
           </>
         }
@@ -2210,50 +2232,77 @@ export default function Requests({
                           />
                         </label>
                       </div>
+
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -4 }}>
+                        <span className="muted">{pickedMemberIds.size} selected</span>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="link"
+                            onClick={() => {
+                              const next = new Set(pickedMemberIds);
+                              for (const m of filteredProjectMembers) next.add(m.id);
+                              setPickedMemberIds(next);
+                            }}
+                            disabled={busy || filteredProjectMembers.length === 0}
+                          >
+                            Select all shown
+                          </button>
+                          {pickedMemberIds.size ? (
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => {
+                                const next = new Set(pickedMemberIds);
+                                for (const m of filteredProjectMembers) next.delete(m.id);
+                                setPickedMemberIds(next);
+                              }}
+                              disabled={busy || filteredProjectMembers.length === 0}
+                            >
+                              Clear shown
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
                       {membersError ? <p className="error" style={{ margin: 0 }}>{membersError}</p> : null}
                       {!projectMembers.length ? (
                         <EmptyState title="No people found" description="Invite someone to this project to notify them." />
                       ) : !filteredProjectMembers.length ? (
                         <EmptyState title="No matches" description="Try a different search." />
                       ) : (
-                        <div className="member-list is-compact">
-                          <label className="check-row">
-                            <input
-                              type="checkbox"
-                              checked={filteredProjectMembers.length > 0 && filteredProjectMembers.every((m) => pickedMemberIds.has(m.id))}
-                              onChange={(e) => {
-                                if (e.target.checked) {
+                        <div className="member-list is-compact" role="listbox" aria-label="Project people" aria-multiselectable="true">
+                          {filteredProjectMembers.map((m) => {
+                            const selected = pickedMemberIds.has(m.id);
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                className={`select-row${selected ? " is-selected" : ""}`}
+                                onClick={() => {
                                   const next = new Set(pickedMemberIds);
-                                  for (const m of filteredProjectMembers) next.add(m.id);
-                                  setPickedMemberIds(next);
-                                  return;
-                                }
-                                const next = new Set(pickedMemberIds);
-                                for (const m of filteredProjectMembers) next.delete(m.id);
-                                setPickedMemberIds(next);
-                              }}
-                              disabled={busy}
-                            />
-                            <span>Select all shown</span>
-                          </label>
-                          {filteredProjectMembers.map((m) => (
-                            <label key={m.id} className="check-row">
-                              <input
-                                type="checkbox"
-                                checked={pickedMemberIds.has(m.id)}
-                                onChange={(e) => {
-                                  const next = new Set(pickedMemberIds);
-                                  if (e.target.checked) next.add(m.id);
-                                  else next.delete(m.id);
+                                  if (selected) next.delete(m.id);
+                                  else next.add(m.id);
                                   setPickedMemberIds(next);
                                 }}
                                 disabled={busy}
-                              />
-                              <span className="truncate">
-                                {m.name}{m.email ? ` — ${m.email}` : ""}{m.isOwner ? " (Admin)" : ""}
-                              </span>
-                            </label>
-                          ))}
+                                role="option"
+                                aria-selected={selected}
+                                title={m.email ? `${m.name} — ${m.email}` : m.name}
+                              >
+                                <div className="select-row-main">
+                                  <strong className="truncate">{m.name}</strong>
+                                  <span className="muted truncate">
+                                    {m.email ? m.email : "No email"}
+                                    {m.isOwner ? " (Admin)" : ""}
+                                  </span>
+                                </div>
+                                <span className="select-row-right" aria-hidden="true">
+                                  {selected ? "✓" : ""}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                       {!canManageProject ? (
@@ -2265,7 +2314,7 @@ export default function Requests({
 
                     <div className="recipient-panel">
                       <div className="recipient-head">
-                        <strong>DocSpace directory</strong>
+                        <strong>DocSpace contacts</strong>
                         <span className="muted">{directoryRows.length} shown</span>
                       </div>
 
@@ -2279,7 +2328,7 @@ export default function Requests({
                           { id: "people", label: "People" },
                           { id: "groups", label: "Groups" }
                         ]}
-                        ariaLabel="Directory source"
+                        ariaLabel="Contacts source"
                       />
 
                       <div className="auth-form" style={{ marginTop: 0 }}>
@@ -2342,107 +2391,134 @@ export default function Requests({
                       ) : null}
 
                       {!directoryLoading && dirMode === "groups" && filteredDirGroups.length ? (
-                        <div className="member-list is-compact" style={{ marginTop: 4 }}>
-                          <label className="check-row">
-                            <input
-                              type="checkbox"
-                              checked={filteredDirGroups.length > 0 && filteredDirGroups.every((g) => (dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.has(String(g?.id)) : false))}
-                              onChange={(e) => {
-                                const next = new Set(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds : []);
-                                if (e.target.checked) {
+                        <>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -4 }}>
+                            <span className="muted">{dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0} selected</span>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="link"
+                                onClick={() => {
+                                  const next = new Set(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds : []);
                                   for (const g of filteredDirGroups) {
                                     const gid = String(g?.id || "").trim();
                                     if (gid) next.add(gid);
                                   }
-                                } else {
-                                  for (const g of filteredDirGroups) {
-                                    const gid = String(g?.id || "").trim();
-                                    if (gid) next.delete(gid);
-                                  }
-                                }
-                                setDirSelectedGroupIds(next);
-                              }}
-                              disabled={busy || directoryLoading}
-                            />
-                            <span>Select all shown groups</span>
-                          </label>
+                                  setDirSelectedGroupIds(next);
+                                }}
+                                disabled={busy || directoryLoading || filteredDirGroups.length === 0}
+                              >
+                                Select all shown
+                              </button>
+                              {(dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0) ? (
+                                <button type="button" className="link" onClick={() => setDirSelectedGroupIds(new Set())} disabled={busy || directoryLoading}>
+                                  Clear
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
 
-                          {filteredDirGroups.map((g) => {
-                            const gid = String(g?.id || "").trim();
-                            if (!gid) return null;
-                            const name = String(g?.name || "").trim() || "Group";
-                            const count = Number.isFinite(Number(g?.membersCount)) ? Number(g.membersCount) : null;
-                            const selected = dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.has(gid) : false;
-                            const isLoading = dirGroupLoadingIds instanceof Set ? dirGroupLoadingIds.has(gid) : false;
-                            return (
-                              <label key={gid} className="check-row" title={name}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  onChange={() => toggleDirectoryGroup(gid)}
+                          <div className="member-list is-compact" style={{ marginTop: 4 }} role="listbox" aria-label="Groups" aria-multiselectable="true">
+                            {filteredDirGroups.map((g) => {
+                              const gid = String(g?.id || "").trim();
+                              if (!gid) return null;
+                              const name = String(g?.name || "").trim() || "Group";
+                              const count = Number.isFinite(Number(g?.membersCount)) ? Number(g.membersCount) : null;
+                              const selected = dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.has(gid) : false;
+                              const isLoading = dirGroupLoadingIds instanceof Set ? dirGroupLoadingIds.has(gid) : false;
+                              return (
+                                <button
+                                  key={gid}
+                                  type="button"
+                                  className={`select-row${selected ? " is-selected" : ""}`}
+                                  onClick={() => toggleDirectoryGroup(gid)}
                                   disabled={busy || directoryLoading || isLoading}
-                                />
-                                <span className="truncate">
-                                  {name}
-                                  {count !== null ? <span className="muted"> {" - "}{count} members</span> : null}
-                                  {isLoading ? <span className="muted"> {" - "}loading…</span> : null}
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                                  role="option"
+                                  aria-selected={selected}
+                                  title={name}
+                                >
+                                  <div className="select-row-main">
+                                    <strong className="truncate">{name}</strong>
+                                    <span className="muted truncate">
+                                      {count !== null ? `${count} members` : "Group"}
+                                      {isLoading ? " — loading…" : ""}
+                                    </span>
+                                  </div>
+                                  <span className="select-row-right" aria-hidden="true">
+                                    {selected ? "✓" : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
                       ) : null}
 
                       {!directoryLoading && directoryRows.length ? (
-                        <div className="member-list is-compact">
-                          <label className="check-row">
-                            <input
-                              type="checkbox"
-                              checked={
-                                directoryRows.length > 0 && directoryRows.map((r) => r.email).filter(Boolean).every((email) => pickedDirectoryEmails.has(email))
-                              }
-                              onChange={(e) => {
-                                const emails = directoryRows.map((r) => r.email).filter(Boolean);
-                                if (!emails.length) return;
-                                if (e.target.checked) {
+                        <>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -4 }}>
+                            <span className="muted">{pickedDirectoryEmails.size} selected</span>
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="link"
+                                onClick={() => {
+                                  const emails = directoryRows.map((r) => r.email).filter(Boolean);
                                   const next = new Set(pickedDirectoryEmails);
                                   for (const email of emails) next.add(email);
                                   setPickedDirectoryEmails(next);
-                                  return;
-                                }
-                                const next = new Set(pickedDirectoryEmails);
-                                for (const email of emails) next.delete(email);
-                                setPickedDirectoryEmails(next);
-                              }}
-                              disabled={busy}
-                            />
-                            <span>Select all shown</span>
-                          </label>
-                          {directoryRows.map((c) => {
-                            const email = String(c?.email || "").trim().toLowerCase();
-                            if (!email) return null;
-                            const name = String(c?.name || "").trim() || email;
-                            return (
-                              <label key={`${dirMode}:${email}`} className="check-row" title={email}>
-                                <input
-                                  type="checkbox"
-                                  checked={pickedDirectoryEmails.has(email)}
-                                  onChange={(e) => {
+                                }}
+                                disabled={busy || directoryRows.length === 0}
+                              >
+                                Select all shown
+                              </button>
+                              {pickedDirectoryEmails.size ? (
+                                <button
+                                  type="button"
+                                  className="link"
+                                  onClick={() => setPickedDirectoryEmails(new Set())}
+                                  disabled={busy}
+                                >
+                                  Clear
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="member-list is-compact" role="listbox" aria-label="Contacts" aria-multiselectable="true">
+                            {directoryRows.map((c) => {
+                              const email = String(c?.email || "").trim().toLowerCase();
+                              if (!email) return null;
+                              const name = String(c?.name || "").trim() || email;
+                              const selected = pickedDirectoryEmails.has(email);
+                              return (
+                                <button
+                                  key={`${dirMode}:${email}`}
+                                  type="button"
+                                  className={`select-row${selected ? " is-selected" : ""}`}
+                                  onClick={() => {
                                     const next = new Set(pickedDirectoryEmails);
-                                    if (e.target.checked) next.add(email);
-                                    else next.delete(email);
+                                    if (selected) next.delete(email);
+                                    else next.add(email);
                                     setPickedDirectoryEmails(next);
                                   }}
                                   disabled={busy}
-                                />
-                                <span className="truncate">
-                                  {name}
-                                  {email && name !== email ? <span className="muted"> {" - "}{email}</span> : null}
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                                  role="option"
+                                  aria-selected={selected}
+                                  title={email}
+                                >
+                                  <div className="select-row-main">
+                                    <strong className="truncate">{name}</strong>
+                                    <span className="muted truncate">{email}</span>
+                                  </div>
+                                  <span className="select-row-right" aria-hidden="true">
+                                    {selected ? "✓" : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
                       ) : null}
 
                       {!directoryLoading &&
@@ -2636,7 +2712,7 @@ export default function Requests({
                           Copy link
                         </button>
                         {sendKind === "sharedSign" && sendFlow?.documentRoomUrl ? (
-                          <a className="btn subtle" href={String(sendFlow.documentRoomUrl)} target="_blank" rel="noreferrer">
+                          <a className="btn" href={String(sendFlow.documentRoomUrl)} target="_blank" rel="noreferrer">
                             Open signing room
                           </a>
                         ) : null}
@@ -3030,7 +3106,7 @@ export default function Requests({
               }}
               disabled={busy || actionBusy || !(actionsGroup?.primaryFlow || actionsGroup?.flows?.[0])?.id}
             >
-              {actionBusy ? "Working..." : "Complete"}
+              {actionBusy ? "Loading..." : "Complete"}
             </button>
           </>
         }
@@ -3063,7 +3139,7 @@ export default function Requests({
               }}
               disabled={busy || actionBusy || !actionsGroup?.flows?.length}
             >
-              {actionBusy ? "Working..." : "Delete"}
+              {actionBusy ? "Loading..." : "Delete"}
             </button>
           </>
         }
@@ -3097,7 +3173,7 @@ export default function Requests({
               }}
               disabled={busy || actionBusy || !actionsGroup?.flows?.length}
             >
-              {actionBusy ? "Working..." : "Cancel request"}
+              {actionBusy ? "Loading..." : "Cancel request"}
             </button>
           </>
         }

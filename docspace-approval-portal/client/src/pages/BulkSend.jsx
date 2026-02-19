@@ -6,6 +6,7 @@ import Tabs from "../components/Tabs.jsx";
 import { createFlowFromTemplate } from "../services/portalApi.js";
 import { deleteBulkBatch, listBulkBatches, restoreBulkBatch, saveBulkBatch, trashBulkBatch } from "../services/bulkHistoryStore.js";
 import { saveLocalDraft } from "../services/draftsStore.js";
+import { toast } from "../utils/toast.js";
 
 function normalize(value) {
   return String(value || "").trim();
@@ -143,6 +144,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
+      toast("Copied", "success");
     } catch {
       // ignore
     }
@@ -201,6 +203,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
         });
         setHistoryTick((n) => n + 1);
       }
+      toast(flows.length ? `Created ${flows.length} request(s)` : "No requests created", flows.length ? "success" : "info");
     } catch (e) {
       setError(e?.message || "Bulk send failed");
     } finally {
@@ -445,7 +448,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                       onClick={createBulk}
                       disabled={busy || actionBusy || !selectedTemplate?.id || (kind === "fillSign" && recipients.length === 0)}
                     >
-                      {actionBusy ? "Working..." : "Create requests"}
+                      {actionBusy ? "Loading..." : "Create requests"}
                     </button>
                   </div>
 

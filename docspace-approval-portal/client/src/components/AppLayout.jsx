@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { activateProject, getProjectsSidebar } from "../services/portalApi.js";
+import ToastHost from "./ToastHost.jsx";
 
 function initialsFrom(value) {
   const text = String(value || "").trim();
@@ -15,27 +16,11 @@ const navSections = [
     title: "Workspace",
     items: [
       { id: "dashboard", label: "Home" },
-      { id: "documents", label: "Documents" },
-      { id: "requests", label: "Requests" }
-    ]
-  },
-  {
-    title: "Create",
-    items: [
+      { id: "requests", label: "Requests" },
       { id: "drafts", label: "Templates" },
-      { id: "sendDrafts", label: "Request drafts" }
+      { id: "documents", label: "Results" },
+      { id: "contacts", label: "Contacts" }
     ]
-  },
-  {
-    title: "Bulk tools",
-    items: [
-      { id: "bulk", label: "Bulk send" },
-      { id: "bulkLinks", label: "Bulk links" }
-    ]
-  },
-  {
-    title: "Directory",
-    items: [{ id: "contacts", label: "Directory" }]
   },
   {
     title: "System",
@@ -48,23 +33,41 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
   const token = session?.token || "";
   const projectsActive = active === "projects" || active === "project";
 
-  const portalName = String(branding?.portalName || "DocSpace Approval Portal").trim() || "DocSpace Approval Portal";
-  const portalTagline = String(branding?.portalTagline || "Approval portal").trim() || "Approval portal";
+  const portalName = String(branding?.portalName || "Requests Center").trim() || "Requests Center";
+  const portalTagline = String(branding?.portalTagline || "Sign, approve, and track.").trim() || "Sign, approve, and track.";
   const portalLogoUrl = String(branding?.portalLogoUrl || "").trim();
   const brandMark = initialsFrom(portalName.replace(/portal$/i, "").trim() || portalName);
 
   const [projectsOpen, setProjectsOpen] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem("portal:toolsOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState("");
   const [projects, setProjects] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState("");
   const [projectsQuery, setProjectsQuery] = useState("");
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("portal:toolsOpen", toolsOpen ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [toolsOpen]);
+
   const currentProject = useMemo(() => {
     const rid = String(activeRoomId || "").trim();
     if (!rid) return null;
     return projects.find((p) => String(p.roomId) === rid) || null;
   }, [activeRoomId, projects]);
+
+  const currentProjectTitle = String(currentProject?.title || "").trim();
+  const currentProjectLabel = currentProjectTitle || "No project selected";
 
   const filteredProjects = useMemo(() => {
     const q = String(projectsQuery || "").trim().toLowerCase();
@@ -135,35 +138,15 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
           </div>
         </button>
 
-        <nav className="nav" aria-label="Primary navigation">
-          {navSections.map((section) => (
-            <div key={section.title} className="nav-section">
-              <div className="nav-section-title" aria-hidden="true">
-                {section.title}
-              </div>
-              {section.items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`nav-item${active === item.id ? " is-active" : ""}`}
-                  onClick={() => onNavigate(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        <section className="projects-nav" aria-label="Projects">
+        <section className="projects-nav" aria-label="Project switcher">
           <div className="projects-nav-head">
             <button
               type="button"
               className={`nav-item projects-nav-link${projectsActive ? " is-active" : ""}`}
               onClick={() => onNavigate("projects")}
             >
-              <span>Projects</span>
-              <span className="muted truncate projects-nav-current">{currentProject?.title || ""}</span>
+              <span>Current project</span>
+              <span className="muted truncate projects-nav-current">{currentProjectLabel}</span>
             </button>
             <button
               type="button"
@@ -241,6 +224,55 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
           ) : null}
         </section>
 
+        <nav className="nav" aria-label="Primary navigation">
+          {navSections.map((section) => (
+            <div key={section.title} className="nav-section">
+              <div className="nav-section-title" aria-hidden="true">
+                {section.title}
+              </div>
+              {section.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`nav-item${active === item.id ? " is-active" : ""}`}
+                  onClick={() => onNavigate(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          <div className="nav-section">
+            <div className="nav-section-title">
+              <button type="button" className="nav-section-toggle" onClick={() => setToolsOpen((s) => !s)} aria-expanded={toolsOpen}>
+                <span>Tools</span>
+                <span className={`nav-section-chev${toolsOpen ? " is-open" : ""}`} aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+            </div>
+            {toolsOpen ? (
+              <>
+                {[
+                  { id: "sendDrafts", label: "Request drafts" },
+                  { id: "bulk", label: "Bulk send" },
+                  { id: "bulkLinks", label: "Bulk links" }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`nav-item${active === item.id ? " is-active" : ""}`}
+                    onClick={() => onNavigate(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </>
+            ) : null}
+          </div>
+        </nav>
+
         <div className="sidebar-footer">
           <div className="user">
             <div className="avatar" aria-hidden="true">
@@ -258,6 +290,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
       </aside>
 
       <main className="content">{children}</main>
+      <ToastHost />
     </div>
   );
 }

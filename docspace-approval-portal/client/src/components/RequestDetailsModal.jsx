@@ -204,6 +204,15 @@ export default function RequestDetailsModal({
             <strong>{linkLabel}</strong>
             <span className="muted">{isCopyableLink(kind) ? "Shareable link" : "Open from inbox"}</span>
           </div>
+          {isCopyableLink(kind) ? (
+            <p className="muted" style={{ margin: "6px 0 0" }}>
+              Requires DocSpace sign-in. Access depends on DocSpace permissions (typically limited to the recipients listed above). For completed requests, this link opens the result file when available.
+            </p>
+          ) : (
+            <p className="muted" style={{ margin: "6px 0 0" }}>
+              Recipients can open this request from their DocSpace Requests inbox after signing in.
+            </p>
+          )}
           {normalize(linkValue) ? (
             <div className="request-details-link">
               <input value={linkValue} readOnly />

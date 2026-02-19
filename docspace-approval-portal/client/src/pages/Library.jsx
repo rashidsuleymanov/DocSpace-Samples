@@ -7,6 +7,7 @@ import {
   publishLibraryFile
 } from "../services/portalApi.js";
 import StatusPill from "../components/StatusPill.jsx";
+import { toast } from "../utils/toast.js";
 
 export default function Library({ session, busy }) {
   const token = session?.token || "";
@@ -60,6 +61,7 @@ export default function Library({ session, busy }) {
       await createLibraryRoom({ title: newRoomTitle });
       await refresh();
       setNotice("Library room created.");
+      toast("Library room created", "success");
     } catch (e) {
       setError(e?.message || "Create failed");
     } finally {
@@ -80,6 +82,7 @@ export default function Library({ session, busy }) {
     try {
       await publishLibraryFile({ token, fileId: fid, targetRoomId });
       setNotice("Published to project room.");
+      toast("Published to project room", "success");
     } catch (e) {
       setError(e?.message || "Publish failed");
     } finally {

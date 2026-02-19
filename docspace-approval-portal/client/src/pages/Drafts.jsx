@@ -16,6 +16,7 @@ import {
   listDrafts,
   publishDraft,
 } from "../services/portalApi.js";
+import { toast } from "../utils/toast.js";
 
 function normalize(value) {
   return String(value || "").trim();
@@ -31,7 +32,7 @@ function ensurePdfTitle(value) {
   return `${title}.pdf`;
 }
 
-export default function Drafts({ session, busy, onOpenProject, onOpenProjects }) {
+export default function Drafts({ session, busy, onOpenProject, onOpenProjects, onOpenSettings }) {
   const token = session?.token || "";
 
   const [loading, setLoading] = useState(false);
@@ -170,6 +171,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
       await createDraft({ token, title });
       setCreateOpen(false);
       setNotice("Template created.");
+      toast(`Template created\n${title}`, "success");
       await refresh();
       window.dispatchEvent(new CustomEvent("portal:draftsChanged"));
     } catch (e) {
@@ -205,7 +207,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
     try {
       if (destination === "templatesRoom") {
         if (!templatesRoom?.id) {
-          throw new Error("Shared templates room is not available. Open Settings and configure an admin token.");
+          throw new Error("Shared templates room is not available. Open Settings and add an Admin token.");
         }
         const result = token
           ? await publishDraft({ token, fileId, destination: "templatesRoom", activate: false })
@@ -217,6 +219,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
             ? `Published to "${templatesRoom?.title || "Projects Templates"}". ${result.warning}`
             : `Published to "${templatesRoom?.title || "Projects Templates"}".`
         );
+        toast(`Published\n${normalize(publishFile?.title) || "Template"} → ${templatesRoom?.title || "Projects Templates"}`, "success");
         return;
       }
 
@@ -237,6 +240,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
           ? `Published to project and set as current. ${result.warning}`
           : "Published to project and set as current."
       );
+      toast(`Published\n${normalize(publishFile?.title) || "Template"} → ${project?.title || "Project"}`, "success");
     } catch (e) {
       setError(e?.message || "Publish failed");
     } finally {
@@ -295,6 +299,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
       setRequestTemplate(null);
       setRequestDueDate("");
       setNotice(flow ? `Request created: ${flow.fileTitle || flow.templateTitle || flow.id}` : "Request created.");
+      toast(`Request created\n${flow?.fileTitle || flow?.templateTitle || flow?.id || ""}`.trim(), "success");
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
     } catch (e) {
       setError(e?.message || "Failed to create request");
@@ -387,12 +392,30 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               ) : !templatesRoom?.id ? (
                 <EmptyState
                   title="Shared room is not available"
-                  description="Open Settings and configure an admin token so the portal can create/share the room."
+                  description="Open Settings and add an Admin token so the portal can create/share the room."
+                  actions={
+                    typeof onOpenSettings === "function" ? (
+                      <button type="button" onClick={onOpenSettings} disabled={busy || loading}>
+                        Open Settings
+                      </button>
+                    ) : null
+                  }
                 />
               ) : filteredShared.length === 0 ? (
                 <EmptyState
-                  title="No published templates yet"
-                  description="Publish a PDF template to the shared room to make it available for everyone."
+                  title={normalize(sharedQuery) ? "Nothing found" : "No published templates yet"}
+                  description={
+                    normalize(sharedQuery)
+                      ? `No published templates match "${normalize(sharedQuery)}".`
+                      : "Publish a PDF template to the shared room to make it available for everyone."
+                  }
+                  actions={
+                    normalize(sharedQuery) ? (
+                      <button type="button" onClick={() => setSharedQuery("")} disabled={busy || loading || sharedLoading}>
+                        Clear search
+                      </button>
+                    ) : null
+                  }
                 />
               ) : (
                 filteredShared.slice(0, 12).map((t) => (
@@ -405,8 +428,8 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                     </div>
                     <div className="list-actions">
                       {t.webUrl ? (
-                        <a className="btn subtle" href={t.webUrl} target="_blank" rel="noreferrer">
-                          Open in new tab
+                        <a className="btn" href={t.webUrl} target="_blank" rel="noreferrer">
+                          Open in DocSpace
                         </a>
                       ) : null}
                       {templatesRoom?.isOwner ? (
@@ -448,7 +471,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
 
       {tab === "drafts" ? (
         <>
-          {!loading && !error && filtered.length === 0 ? (
+          {!loading && !error && filtered.length === 0 && !normalize(query) ? (
             <StepsCard
               title="Quick start"
               subtitle="Create a draft template, publish it, then start a request."
@@ -456,7 +479,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                 {
                   title: "Create a PDF template",
                   description: 'Click "New template" to create a PDF, or upload an existing PDF form in DocSpace My documents.',
-                  hint: "PDF only"
+                  hint: "PDF"
                 },
                 {
                   title: "Publish to a project",
@@ -485,12 +508,22 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
             <div className="list">
               {!filtered.length ? (
                 <EmptyState
-                  title="No draft templates yet"
-                  description="Create a new template, or upload files in DocSpace My documents."
+                  title={normalize(query) ? "Nothing found" : "No draft templates yet"}
+                  description={
+                    normalize(query)
+                      ? `No draft templates match "${normalize(query)}".`
+                      : "Create a new template, or upload files in DocSpace My documents."
+                  }
                   actions={
-                    <button type="button" className="primary" onClick={() => setCreateOpen(true)} disabled={busy || loading || !token}>
-                      New template
-                    </button>
+                    normalize(query) ? (
+                      <button type="button" onClick={() => setQuery("")} disabled={busy || loading}>
+                        Clear search
+                      </button>
+                    ) : (
+                      <button type="button" className="primary" onClick={() => setCreateOpen(true)} disabled={busy || loading || !token}>
+                        New template
+                      </button>
+                    )
                   }
                 />
               ) : (
@@ -506,11 +539,6 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                       <button type="button" onClick={() => openDoc(d)} disabled={!d.webUrl || busy || loading}>
                         Edit
                       </button>
-                      {d.webUrl ? (
-                        <a className="btn subtle" href={d.webUrl} target="_blank" rel="noreferrer">
-                          Open in new tab
-                        </a>
-                      ) : null}
                       <button type="button" className="primary" onClick={() => openPublish(d)} disabled={busy || loading}>
                         Publish
                       </button>
@@ -546,7 +574,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                 !token
               }
             >
-              {loading ? "Working..." : "Create"}
+              {loading ? "Loading..." : "Create"}
             </button>
           </>
         }
@@ -556,9 +584,6 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
             <span>File name</span>
             <input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} disabled={busy || loading} />
           </label>
-          <p className="muted" style={{ margin: 0 }}>
-            PDF only: <code>.pdf</code> is enforced.
-          </p>
         </form>
       </Modal>
 
@@ -588,7 +613,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               }
             >
               {loading
-                ? "Working..."
+                ? "Loading..."
                 : publishDestination === "templatesRoom"
                   ? "Send to shared room"
                   : "Send to project"}
@@ -611,8 +636,15 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               <p className="muted" style={{ margin: "6px 0 0" }}>
                 {templatesRoom?.id
                   ? "The PDF will be copied into the shared room Templates folder. Everyone registered in this portal gets access."
-                  : "Open Settings and configure an admin token so the portal can create/share the room."}
+                  : "Open Settings and add an Admin token so the portal can create/share the room."}
               </p>
+              {typeof onOpenSettings === "function" && !templatesRoom?.id ? (
+                <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+                  <button type="button" onClick={onOpenSettings} disabled={busy || loading}>
+                    Open Settings
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>
@@ -636,14 +668,22 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                   Only the project admin can publish templates to this project.
                 </p>
               ) : null}
-              <div className="row-actions" style={{ justifyContent: "space-between" }}>
-                <button type="button" onClick={onOpenProjects} disabled={busy || loading}>
-                  Open Projects
-                </button>
-                <span className="muted" style={{ fontSize: 13 }}>
-                  Copies file to the project room.
-                </span>
-              </div>
+                <div className="row-actions" style={{ justifyContent: "space-between" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const base = `${window.location.origin}${window.location.pathname}`;
+                      window.open(`${base}#projects`, "_blank", "noopener,noreferrer");
+                    }}
+                    disabled={busy || loading}
+                    title="Opens Projects in a new tab"
+                  >
+                    Open Projects
+                  </button>
+                  <span className="muted" style={{ fontSize: 13 }}>
+                    A copy will be added to the selected project room.
+                  </span>
+                </div>
             </>
           )}
         </form>
@@ -677,7 +717,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               onClick={onCreateRequest}
               disabled={busy || requestBusy || !normalize(requestProjectId) || !requestTemplate?.id}
             >
-              {requestBusy ? "Working..." : "Create request"}
+              {requestBusy ? "Loading..." : "Create request"}
             </button>
           </>
         }
@@ -808,6 +848,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
                   setDeleteEntry(null);
                   await refreshSharedTemplates();
                   setNotice("Template deleted.");
+                  toast("Template deleted", "success");
                 } catch (e) {
                   setError(e?.message || "Delete failed");
                 } finally {
@@ -816,7 +857,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects })
               }}
               disabled={busy || loading || !token || !templatesRoom?.isOwner || !deleteEntry?.id}
             >
-              {loading ? "Working..." : "Delete"}
+              {loading ? "Loading..." : "Delete"}
             </button>
           </>
         }
