@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import EmptyState from "../components/EmptyState.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
 import { deleteLocalDraft, listLocalDrafts } from "../services/draftsStore.js";
@@ -26,6 +27,8 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
   const [tab, setTab] = useState("all"); // all | request | bulkSend | bulkLinks
   const [query, setQuery] = useState("");
   const [tick, setTick] = useState(0);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteDraft, setDeleteDraft] = useState(null);
 
   const { drafts, totalInTab } = useMemo(() => {
     const list = listLocalDrafts(session);
@@ -72,10 +75,8 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
   };
 
   const removeDraft = (draft) => {
-    const ok = typeof window !== "undefined" ? window.confirm(`Delete draft "${normalize(draft?.title) || "Draft"}"?`) : true;
-    if (!ok) return;
-    deleteLocalDraft(session, draft?.id);
-    setTick((n) => n + 1);
+    setDeleteDraft(draft || null);
+    setDeleteOpen(true);
   };
 
   return (
@@ -95,7 +96,7 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
         </div>
       </header>
 
-      <section className="card">
+      <section className="card page-card">
         <div className="card-header compact">
           <div>
             <h3>Saved drafts</h3>
@@ -128,7 +129,7 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
             }
           />
         ) : (
-          <div className="list">
+          <div className="list scroll-area">
             {drafts.map((d) => {
               const type = String(d.type || "request");
               const templateTitle = normalize(d.payload?.templateTitle);
@@ -161,6 +162,27 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
           </div>
         )}
       </section>
+
+      <ConfirmModal
+        open={deleteOpen}
+        title="Delete draft?"
+        message={`Delete draft "${normalize(deleteDraft?.title) || "Draft"}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        busy={busy}
+        onClose={() => {
+          if (busy) return;
+          setDeleteOpen(false);
+          setDeleteDraft(null);
+        }}
+        onConfirm={() => {
+          if (!deleteDraft?.id) return;
+          deleteLocalDraft(session, deleteDraft.id);
+          setTick((n) => n + 1);
+          setDeleteOpen(false);
+          setDeleteDraft(null);
+        }}
+      />
     </div>
   );
 }

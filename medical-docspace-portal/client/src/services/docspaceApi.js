@@ -20,7 +20,7 @@ export async function loginUser({ email, password }) {
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data?.error || "DocSpace login failed");
+    throw new Error(data?.error || "Sign-in failed");
   }
 
   const session = buildSessionFromBackend(data);
@@ -43,7 +43,7 @@ export async function registerPatient(payload) {
         : data?.details
         ? JSON.stringify(data.details)
         : "";
-    const message = data?.error || "DocSpace registration failed";
+    const message = data?.error || "Registration failed";
     throw new Error(details ? `${message}: ${details}` : message);
   }
 
@@ -118,7 +118,7 @@ function buildSessionFromBackend({ user, room, token }) {
       : user.sex || "";
   const nameFromParts = [user.firstName, user.lastName].filter(Boolean).join(" ");
   const fullName =
-    nameFromParts || user.displayName || user.fullName || "DocSpace user";
+    nameFromParts || user.displayName || user.fullName || "Patient";
   const email = user.email || "";
   const phone = resolvedPhone;
   const initials = fullName

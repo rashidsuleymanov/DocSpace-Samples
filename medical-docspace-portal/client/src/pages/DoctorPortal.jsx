@@ -34,14 +34,14 @@ function loadDocSpaceSdk(src) {
       return;
     }
     if (!src) {
-      reject(new Error("DocSpace URL is missing"));
+      reject(new Error("Workspace URL is missing"));
       return;
     }
     const script = document.createElement("script");
     script.src = `${src}/static/scripts/sdk/2.0.0/api.js`;
     script.async = true;
     script.onload = () => resolve(window.DocSpace?.SDK);
-    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
+    script.onerror = () => reject(new Error("Failed to load editor SDK"));
     document.head.appendChild(script);
   });
   return sdkLoaderPromise;
@@ -1259,7 +1259,7 @@ export default function DoctorPortal({ doctor, onExit }) {
           >
             <form className="auth-form" onSubmit={handleGenericDocument}>
               <p className="muted">
-                Creates a new document in <strong>{activeFolderTitle || "the selected folder"}</strong> and opens it in DocSpace.
+                Creates a new document in <strong>{activeFolderTitle || "the selected folder"}</strong> and opens it in the editor.
               </p>
               <label>
                 Title

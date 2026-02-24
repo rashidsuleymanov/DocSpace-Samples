@@ -94,7 +94,7 @@ export default function FillSign({ session, onLogout, onNavigate }) {
 
   const handleDocModalClose = () => {
     setDocModal({ open: false, title: "", url: "" });
-    // DocSpace can update folder/status asynchronously after closing the editor;
+    // Workspace can update folder/status asynchronously after closing the editor;
     // refresh twice to avoid requiring a full page reload.
     loadItems();
     setTimeout(() => loadItems(), 1500);

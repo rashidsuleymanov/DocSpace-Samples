@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import EmptyState from "../components/EmptyState.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import Modal from "../components/Modal.jsx";
 import Tabs from "../components/Tabs.jsx";
 import {
@@ -76,6 +77,20 @@ export default function Contacts({ session, busy, onOpenBulk }) {
   const [pickerTotal, setPickerTotal] = useState(0);
   const [createPickedMemberIds, setCreatePickedMemberIds] = useState(() => new Set());
   const [managePickedMemberIds, setManagePickedMemberIds] = useState(() => new Set());
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("Confirm");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const confirmActionRef = useRef(null);
+
+  const openConfirm = ({ title, message, onConfirm }) => {
+    confirmActionRef.current = typeof onConfirm === "function" ? onConfirm : null;
+    setConfirmTitle(String(title || "Confirm"));
+    setConfirmMessage(String(message || ""));
+    setConfirmBusy(false);
+    setConfirmOpen(true);
+  };
 
   const [pickedEmails, setPickedEmails] = useState(() => new Set());
 
@@ -277,7 +292,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
       <header className="topbar">
         <div>
           <h2>Contacts</h2>
-          <p className="muted">Use DocSpace people and groups as recipients.</p>
+          <p className="muted">Use people and groups as recipients.</p>
         </div>
         <div className="topbar-actions">
           {mode === "people" ? (
@@ -289,7 +304,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                 setError("");
               }}
               disabled={busy || loading || !canManageDirectory}
-              title="Manage people in DocSpace (requires permissions)"
+              title="Manage people (requires permissions)"
             >
               Manage people
             </button>
@@ -306,7 +321,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                 refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
               }}
               disabled={busy || loading || !canManageDirectory}
-              title="Create a DocSpace group (requires permissions)"
+              title="Create a group (requires permissions)"
             >
               Create group
             </button>
@@ -353,7 +368,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
               <div>
                 <strong>Add person</strong>
                 <p className="muted" style={{ marginTop: 4 }}>
-                  Creates a DocSpace user profile (if your token has permissions).
+                  Creates a user profile (if your token has permissions).
                 </p>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12 }}>
@@ -390,7 +405,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                       firstName: normalize(personFirstName),
                       lastName: normalize(personLastName)
                     });
-                    setNotice("User created in DocSpace.");
+                    setNotice("User created.");
                     setPersonEmail("");
                     setPersonFirstName("");
                     setPersonLastName("");
@@ -411,7 +426,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
               <div>
                 <strong>Invite people</strong>
                 <p className="muted" style={{ marginTop: 4 }}>
-                  Sends DocSpace invites (if enabled on the server).
+                  Sends invites (if enabled on the server).
                 </p>
               </div>
               <label>
@@ -432,7 +447,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                   setNotice("");
                   try {
                     await inviteDirectoryPeople({ token, emails });
-                    setNotice("Invites sent (if allowed by DocSpace).");
+                    setNotice("Invites sent.");
                     setInviteEmails("");
                   } catch (e) {
                     setError(e?.message || "Failed to invite people");
@@ -581,7 +596,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                     memberEmails: newGroupMemberEmails,
                     memberIds
                   });
-                  setNotice("Group created in DocSpace.");
+                  setNotice("Group created.");
                   setNewGroupName("");
                   setNewGroupManagerEmail("");
                   setNewGroupMemberEmails("");
@@ -663,23 +678,30 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                   className="danger"
                   onClick={async () => {
                     if (!token) return;
-                    const ok = window.confirm(`Delete group "${selectedGroup?.name || groupId}" from DocSpace?`);
-                    if (!ok) return;
-                    setLoading(true);
-                    setError("");
-                    setNotice("");
-                    try {
-                      await deleteDirectoryGroup({ token, groupId });
-                      setNotice("Group deleted.");
-                      setManageGroupOpen(false);
-                      setGroupId("");
-                      setGroupMembers([]);
-                      await refreshGroups();
-                    } catch (e) {
-                      setError(e?.message || "Failed to delete group");
-                    } finally {
-                      setLoading(false);
-                    }
+                    openConfirm({
+                      title: "Delete group?",
+                      message: `Delete group "${selectedGroup?.name || groupId}"?`,
+                      onConfirm: async () => {
+                        setConfirmBusy(true);
+                        setLoading(true);
+                        setError("");
+                        setNotice("");
+                        try {
+                          await deleteDirectoryGroup({ token, groupId });
+                          setNotice("Group deleted.");
+                          setManageGroupOpen(false);
+                          setGroupId("");
+                          setGroupMembers([]);
+                          await refreshGroups();
+                        } catch (e) {
+                          setError(e?.message || "Failed to delete group");
+                        } finally {
+                          setLoading(false);
+                          setConfirmBusy(false);
+                          setConfirmOpen(false);
+                        }
+                      }
+                    });
                   }}
                   disabled={busy || loading}
                 >
@@ -835,7 +857,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         </div>
       </Modal>
 
-      <section className="card">
+      <section className="card page-card">
         <div className="card-header compact">
           <div>
             <h3>Recipients</h3>
@@ -843,15 +865,6 @@ export default function Contacts({ session, busy, onOpenBulk }) {
             <p className="muted" style={{ margin: "6px 0 0" }}>
               Select people to build a list for Bulk send.
             </p>
-          </div>
-          <div className="card-header-actions" style={{ alignItems: "center" }}>
-            <span className="muted">{selectedCount} selected</span>
-            <button type="button" onClick={clearSelection} disabled={busy || loading || selectedCount === 0}>
-              Clear
-            </button>
-            <button type="button" className="primary" onClick={sendToBulk} disabled={busy || loading || selectedCount === 0} title="Send to Bulk send">
-              Bulk send
-            </button>
           </div>
         </div>
 
@@ -878,7 +891,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
           />
 
           {mode === "people" ? (
-            <div className="card-header-actions" style={{ padding: "0 16px 12px" }}>
+            <div className="card-header-actions" style={{ alignItems: "center" }}>
               <input
                 value={peopleQuery}
                 onChange={(e) => setPeopleQuery(e.target.value)}
@@ -889,7 +902,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
               <span className="muted">{rows.length} shown</span>
             </div>
           ) : (
-            <div className="card-header-actions" style={{ padding: "0 16px 12px" }}>
+            <div className="card-header-actions" style={{ alignItems: "center" }}>
               <input
                 value={groupQuery}
                 onChange={(e) => setGroupQuery(e.target.value)}
@@ -903,21 +916,21 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         </div>
 
         {mode === "people" && !rows.length && !loading ? (
-          <EmptyState title="No people found" description="Your DocSpace directory is empty, or this user has no access." />
+          <EmptyState title="No people found" description="The directory is empty, or this user has no access." />
         ) : null}
 
         {mode === "groups" && !filteredGroups.length && !loading ? (
-          <EmptyState title="No groups found" description="Your DocSpace may hide groups for this user, or there are no groups yet." />
+          <EmptyState title="No groups found" description="Groups may be hidden for this user, or there are no groups yet." />
         ) : null}
 
         {mode === "people" && normalize(peopleQuery) && !rows.length && !loading ? <EmptyState title="No results" description="Try a different search." /> : null}
 
-        {mode === "groups" && filteredGroups.length ? (
-          <div className="list">
-            {filteredGroups.map((g) => {
-              const id = normalize(g?.id);
-              if (!id) return null;
-              const selected = id === normalize(groupId);
+          {mode === "groups" && filteredGroups.length ? (
+            <div className="list scroll-area">
+              {filteredGroups.map((g) => {
+                const id = normalize(g?.id);
+                if (!id) return null;
+                const selected = id === normalize(groupId);
               return (
                 <div key={id} className="list-row">
                   <div className="list-main">
@@ -977,22 +990,27 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         {rows.length ? (
           <>
             {shownEmails.length ? (
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "0 16px" }}>
-                <span className="muted">{allShownSelected ? "All shown selected" : ""}</span>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button type="button" className="link" onClick={() => toggleAllShown(true)} disabled={busy || loading || shownEmails.length === 0}>
-                    Select all shown
+              <div className="card-header-actions" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 6 }}>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={allShownSelected}
+                    onChange={(e) => toggleAllShown(Boolean(e.target.checked))}
+                    disabled={busy || loading || shownEmails.length === 0}
+                  />
+                  <span>Select all shown</span>
+                </label>
+                {selectedCount ? (
+                  <button type="button" className="link" onClick={clearSelection} disabled={busy || loading}>
+                    Clear selection
                   </button>
-                  {selectedCount ? (
-                    <button type="button" className="link" onClick={clearSelection} disabled={busy || loading}>
-                      Clear selection
-                    </button>
-                  ) : null}
-                </div>
+                ) : (
+                  <span className="muted">{allShownSelected ? "All shown selected" : ""}</span>
+                )}
               </div>
             ) : null}
 
-            <div className="list">
+            <div className="list scroll-area">
               {rows.map((p) => {
                 const email = normalizeEmail(p?.email);
                 const name = normalize(p?.displayName) || normalize(p?.name) || email || "User";
@@ -1010,7 +1028,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                       toggleEmail(email, !checked);
                     }}
                     aria-pressed={checked}
-                    title={email ? `${name} — ${email}` : name}
+                    title={email ? `${name} \u2014 ${email}` : name}
                   >
                     <div className="select-row-main">
                       <strong className="truncate">{name}</strong>
@@ -1019,7 +1037,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
 
                     <div className="list-actions">
                       <span className="select-row-right" aria-hidden="true">
-                        {checked ? "✓" : ""}
+                        {checked ? "\u2713" : ""}
                       </span>
 
                       {mode === "people" ? (
@@ -1034,23 +1052,30 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                               setError("User id is missing (cannot delete).");
                               return;
                             }
-                            const ok = window.confirm(`Delete ${email || name} from DocSpace?`);
-                            if (!ok) return;
-                            setLoading(true);
-                            setError("");
-                            setNotice("");
-                            try {
-                              await deleteDirectoryPerson({ token, userId: id });
-                              setNotice("User deleted.");
-                              await refreshPeople({ offset: 0, append: false });
-                            } catch (e2) {
-                              setError(e2?.message || "Failed to delete user");
-                            } finally {
-                              setLoading(false);
-                            }
+                            openConfirm({
+                              title: "Delete user?",
+                              message: `Delete ${email || name}?`,
+                              onConfirm: async () => {
+                                setConfirmBusy(true);
+                                setLoading(true);
+                                setError("");
+                                setNotice("");
+                                try {
+                                  await deleteDirectoryPerson({ token, userId: id });
+                                  setNotice("User deleted.");
+                                  await refreshPeople({ offset: 0, append: false });
+                                } catch (e2) {
+                                  setError(e2?.message || "Failed to delete user");
+                                } finally {
+                                  setLoading(false);
+                                  setConfirmBusy(false);
+                                  setConfirmOpen(false);
+                                }
+                              }
+                            });
                           }}
                           disabled={busy || loading || !canManageDirectory}
-                          title="Delete user from DocSpace (admin only)"
+                          title="Delete user (admin only)"
                         >
                           Delete
                         </button>
@@ -1068,21 +1093,28 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                               setError("Member id is missing (cannot remove).");
                               return;
                             }
-                            const ok = window.confirm(`Remove ${email || name} from this group?`);
-                            if (!ok) return;
-                            setLoading(true);
-                            setError("");
-                            setNotice("");
-                            try {
-                              await removeDirectoryGroupMembers({ token, groupId, members: [memberId] });
-                              setNotice("Member removed.");
-                              await refreshSelectedGroupMembers(groupId);
-                              await refreshGroups();
-                            } catch (e2) {
-                              setError(e2?.message || "Failed to remove member");
-                            } finally {
-                              setLoading(false);
-                            }
+                            openConfirm({
+                              title: "Remove member?",
+                              message: `Remove ${email || name} from this group?`,
+                              onConfirm: async () => {
+                                setConfirmBusy(true);
+                                setLoading(true);
+                                setError("");
+                                setNotice("");
+                                try {
+                                  await removeDirectoryGroupMembers({ token, groupId, members: [memberId] });
+                                  setNotice("Member removed.");
+                                  await refreshSelectedGroupMembers(groupId);
+                                  await refreshGroups();
+                                } catch (e2) {
+                                  setError(e2?.message || "Failed to remove member");
+                                } finally {
+                                  setLoading(false);
+                                  setConfirmBusy(false);
+                                  setConfirmOpen(false);
+                                }
+                              }
+                            });
                           }}
                           disabled={busy || loading || !canManageDirectory}
                           title="Remove user from group (admin only)"
@@ -1114,6 +1146,28 @@ export default function Contacts({ session, busy, onOpenBulk }) {
           </div>
         ) : null}
       </section>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title={confirmTitle}
+        message={confirmMessage}
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+        busy={confirmBusy}
+        onClose={() => {
+          if (confirmBusy) return;
+          setConfirmOpen(false);
+        }}
+        onConfirm={async () => {
+          if (confirmBusy) return;
+          const fn = confirmActionRef.current;
+          if (typeof fn !== "function") {
+            setConfirmOpen(false);
+            return;
+          }
+          await fn();
+        }}
+      />
     </div>
   );
 }

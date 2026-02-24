@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
+import EmptyState from "../components/EmptyState.jsx";
 import StatusPill from "../components/StatusPill.jsx";
+import Tabs from "../components/Tabs.jsx";
 import { createRequiredRoom, getSettingsConfig, listRequiredRooms, testSettingsConfig, updateSettingsConfig } from "../services/portalApi.js";
 
 function normalize(value) {
@@ -22,6 +24,7 @@ function normalizeBaseUrl(value) {
 export default function Settings({ busy, onOpenDrafts }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("connection");
 
   const [connLoading, setConnLoading] = useState(false);
   const [roomsLoading, setRoomsLoading] = useState(false);
@@ -112,7 +115,7 @@ export default function Settings({ busy, onOpenDrafts }) {
   const saveConnection = async () => {
     const baseUrl = normalizeBaseUrl(conn.baseUrl);
     if (!baseUrl) {
-      setError("DocSpace base URL is required (example: https://your-docspace.example.com).");
+      setError("Base URL is required (example: https://your-workspace.example.com).");
       return;
     }
 
@@ -169,7 +172,7 @@ export default function Settings({ busy, onOpenDrafts }) {
   const testConnection = async () => {
     const baseUrl = normalizeBaseUrl(conn.baseUrl);
     if (!baseUrl) {
-      setError("DocSpace base URL is required before testing the connection.");
+      setError("Base URL is required before testing the connection.");
       return;
     }
 
@@ -192,16 +195,31 @@ export default function Settings({ busy, onOpenDrafts }) {
   return (
     <div className="page-shell">
       <header className="topbar">
-          <div>
+        <div>
           <h2>Settings</h2>
-          <p className="muted">Connect this portal to your DocSpace.</p>
+          <p className="muted">Connect this portal to your workspace.</p>
         </div>
       </header>
 
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
 
-      <section className="card">
+      <div className="settings-tabs">
+        <Tabs
+          value={tab}
+          onChange={(v) => setTab(String(v || "connection"))}
+          ariaLabel="Settings sections"
+          items={[
+            { id: "connection", label: "Connection" },
+            { id: "branding", label: "Branding" },
+            { id: "rooms", label: "Rooms" }
+          ]}
+        />
+      </div>
+
+      <div className="page-scroll">
+        {tab === "connection" ? (
+          <section className="card">
         <div className="card-header">
           <h3>Connection</h3>
           <p className="muted">Saved on the server. The token is never returned to the browser.</p>
@@ -209,7 +227,7 @@ export default function Settings({ busy, onOpenDrafts }) {
 
         <form className="auth-form" onSubmit={(e) => e.preventDefault()}>
           <label>
-            <span>DocSpace base URL</span>
+            <span>Workspace base URL</span>
             <input
               type="url"
               value={conn.baseUrl}
@@ -259,7 +277,7 @@ export default function Settings({ busy, onOpenDrafts }) {
               {conn.hasWebhookSecret ? "Webhooks enabled" : "Webhooks not configured"}
             </StatusPill>
             <span>
-              If you don’t configure DocSpace webhooks, the portal still works — request statuses update on Refresh / page load.
+              If you don't configure webhooks, the portal still works — request statuses update on Refresh / page load.
             </span>
           </p>
 
@@ -276,9 +294,9 @@ export default function Settings({ busy, onOpenDrafts }) {
           ) : null}
 
           <div className="empty-state" style={{ marginTop: 6 }}>
-            <strong>DocSpace webhook endpoint</strong>
+            <strong>Webhook endpoint</strong>
             <p className="muted">
-              Use <strong>/api/webhooks/docspace</strong> as the payload URL. Configure the same secret here and in DocSpace to verify requests.
+              Use <strong>/api/webhooks/docspace</strong> as the payload URL. Configure the same secret here and in your workspace to verify requests.
             </p>
           </div>
 
@@ -289,14 +307,32 @@ export default function Settings({ busy, onOpenDrafts }) {
             <button type="button" className="primary" onClick={saveConnection} disabled={busy || connLoading || !canSave}>
               {connLoading ? "Saving..." : "Save"}
             </button>
-          </div>
-        </form>
-      </section>
+              </div>
+            </form>
+          </section>
+        ) : null}
 
-      <section className="card">
-        <div className="card-header">
-          <h3>Branding</h3>
-          <p className="muted">Customize the portal name and accent color.</p>
+        {tab === "connection" && typeof onOpenDrafts === "function" ? (
+          <section className="card compact">
+            <div className="card-header compact">
+              <div>
+                <h3>Next steps</h3>
+                <p className="muted">Open Templates to publish a PDF form, then start a request from a project.</p>
+              </div>
+              <div className="card-header-actions">
+                <button type="button" onClick={onOpenDrafts} disabled={busy || connLoading}>
+                  Open Templates
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "branding" ? (
+          <section className="card">
+            <div className="card-header">
+              <h3>Branding</h3>
+              <p className="muted">Customize the portal name and accent color.</p>
         </div>
 
         <form className="auth-form" onSubmit={(e) => e.preventDefault()}>
@@ -340,13 +376,15 @@ export default function Settings({ busy, onOpenDrafts }) {
             </button>
           </div>
         </form>
-      </section>
+          </section>
+        ) : null}
 
-      <section className="card">
+        {tab === "rooms" ? (
+          <section className="card">
         <div className="card-header compact">
           <div>
             <h3>Required rooms</h3>
-            <p className="muted">The portal expects these shared rooms to exist in DocSpace (by ID or by title).</p>
+            <p className="muted">The portal expects these shared rooms to exist in the workspace (by ID or by title).</p>
           </div>
           <div className="card-header-actions">
             <button type="button" onClick={refreshRequiredRooms} disabled={busy || roomsLoading}>
@@ -395,9 +433,7 @@ export default function Settings({ busy, onOpenDrafts }) {
 
                   <div className="list-actions">
                     {webUrl ? (
-                      <a className="link" href={webUrl} target="_blank" rel="noreferrer">
-                        Open
-                      </a>
+                      <a className="link" href={webUrl} target="_blank" rel="noreferrer">Open room</a>
                     ) : null}
                     {!found ? (
                       <button type="button" className="primary" onClick={() => createRoom(r.key)} disabled={busy || roomsLoading || !canCreate}>
@@ -410,23 +446,9 @@ export default function Settings({ busy, onOpenDrafts }) {
             })}
           </div>
         ) : null}
-      </section>
-
-      <section className="card">
-        <div className="empty">
-          <strong>Next</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Go to <strong>Projects</strong> to select a project room, then send forms from the dashboard.
-          </p>
-          {typeof onOpenDrafts === "function" ? (
-            <div className="row-actions" style={{ justifyContent: "flex-start" }}>
-              <button type="button" onClick={onOpenDrafts} disabled={busy || connLoading}>
-                Open Drafts
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </section>
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }

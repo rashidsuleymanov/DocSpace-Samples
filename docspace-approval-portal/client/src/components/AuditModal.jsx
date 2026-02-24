@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import EmptyState from "./EmptyState.jsx";
 import Modal from "./Modal.jsx";
 import { getFlowAudit } from "../services/portalApi.js";
 
@@ -53,10 +54,7 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
     const header = ["timestamp", "type", "method", "actor", "details"];
     const rows = sorted.map((e) => {
       const actor = String(e?.actorName || e?.actorUserId || "");
-      const details =
-        e?.type === "completed"
-          ? `result=${String(e?.resultFileTitle || e?.resultFileId || "")}`
-          : "";
+      const details = e?.type === "completed" ? `result=${String(e?.resultFileTitle || e?.resultFileId || "")}` : "";
       return [toCsvValue(e?.ts), toCsvValue(e?.type), toCsvValue(e?.method || ""), toCsvValue(actor), toCsvValue(details)];
     });
     return [header, ...rows];
@@ -91,19 +89,9 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
     >
       {error ? <p className="error">{error}</p> : null}
       {loading ? (
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>Loading activity...</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Just a moment.
-          </p>
-        </div>
+        <EmptyState title="Loading activity..." description="Just a moment." />
       ) : sorted.length === 0 ? (
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>No activity yet</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Actions like create, cancel, and complete will appear here.
-          </p>
-        </div>
+        <EmptyState title="No activity yet" description="Actions like create, cancel, and complete will appear here." />
       ) : (
         <div className="audit-list">
           {sorted.map((e, idx) => {
@@ -112,9 +100,7 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
             const actor = String(e?.actorName || "");
             const method = String(e?.method || "");
             const detail =
-              type === "completed" && (e?.resultFileTitle || e?.resultFileId)
-                ? `Result: ${String(e.resultFileTitle || e.resultFileId)}`
-                : "";
+              type === "completed" && (e?.resultFileTitle || e?.resultFileId) ? `Result: ${String(e.resultFileTitle || e.resultFileId)}` : "";
             return (
               <div key={`${type}-${idx}-${e?.ts || ""}`} className="audit-row">
                 <div className="audit-main">
@@ -131,7 +117,7 @@ export default function AuditModal({ open, onClose, token, flowId, title = "Acti
                   </strong>
                   <span className="muted">
                     {ts}
-                    {actor ? ` · ${actor}` : ""}
+                    {actor ? ` \u00B7 ${actor}` : ""}
                   </span>
                   {detail ? (
                     <span className="muted" style={{ marginTop: 4, display: "block" }}>

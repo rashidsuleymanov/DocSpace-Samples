@@ -40,9 +40,9 @@ export default function DocSpaceActivationBanner({ userId, roomId, roomUrl }) {
   return (
     <div className="activation-overlay" role="dialog" aria-modal="true">
       <div className="activation-card">
-        <h3>Activate DocSpace access</h3>
+        <h3>Activate document access</h3>
         <p className="muted">
-          Required one-time step: open DocSpace in a new tab and sign in once. Then come back here.
+          One-time step: open the document workspace in a new tab and sign in once. Then come back here.
         </p>
         <div className="banner-actions">
           <button
@@ -50,7 +50,7 @@ export default function DocSpaceActivationBanner({ userId, roomId, roomUrl }) {
             type="button"
             onClick={() => window.open(activationUrl, "_blank", "noopener,noreferrer")}
           >
-            Open DocSpace
+            Open workspace
           </button>
           <button
             className="secondary"
@@ -64,7 +64,7 @@ export default function DocSpaceActivationBanner({ userId, roomId, roomUrl }) {
           </button>
         </div>
         <p className="muted">
-          Tip: keep the DocSpace tab open while working with documents in this portal.
+          Tip: keep the workspace tab open while working with documents in this portal.
         </p>
       </div>
     </div>

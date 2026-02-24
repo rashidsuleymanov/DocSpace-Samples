@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
 import { createFlowFromTemplate } from "../services/portalApi.js";
@@ -62,10 +63,21 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
   const [draftId, setDraftId] = useState("");
   const [view, setView] = useState("create"); // create | history | trash
   const [historyTick, setHistoryTick] = useState(0);
+  const viewItems = useMemo(
+    () => [
+      { id: "create", label: "Create" },
+      { id: "history", label: "History" },
+      { id: "trash", label: "Trash" }
+    ],
+    []
+  );
 
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Document");
   const [docUrl, setDocUrl] = useState("");
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBatchId, setDeleteBatchId] = useState("");
 
   useEffect(() => {
     const handler = (evt) => {
@@ -144,7 +156,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast("Copied", "success");
+      toast("Link copied", "success");
     } catch {
       // ignore
     }
@@ -238,19 +250,11 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
           <p className="muted">Send the same template to multiple recipients.</p>
         </div>
         <div className="topbar-actions">
-          <button type="button" onClick={() => setView("create")} disabled={busy || actionBusy}>
-            Create
-          </button>
-          <button type="button" onClick={() => setView("history")} disabled={busy || actionBusy}>
-            History
-          </button>
-          <button type="button" onClick={() => setView("trash")} disabled={busy || actionBusy}>
-            Trash
-          </button>
+          <Tabs value={view} onChange={(next) => setView(String(next || "create"))} items={viewItems} ariaLabel="Bulk send view" />
           <button type="button" onClick={() => onOpenRequests?.()} disabled={busy || actionBusy}>
             Open Requests
           </button>
-          <button type="button" onClick={saveDraft} disabled={busy || actionBusy || !selectedId}>
+          <button type="button" className="subtle" onClick={saveDraft} disabled={busy || actionBusy || !selectedId}>
             Save draft
           </button>
           <button
@@ -265,24 +269,24 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
               setDraftId("");
             }}
             disabled={busy || actionBusy}
-          >
-            New batch
-          </button>
+            >
+              New batch
+            </button>
         </div>
       </header>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <div className="alert alert-error">{error}</div> : null}
 
       {!hasProject ? (
-        <section className="card">
+        <section className="card page-card">
           <EmptyState title="Select a project first" description="Pick a project in the left sidebar. Bulk send works inside the current project (including Personal workspace)." />
         </section>
       ) : (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>{projectTitle}</h3>
-              <p className="muted">Template → recipients → create</p>
+              <p className="muted">Template {"\u2192"} recipients {"\u2192"} create</p>
             </div>
             <div className="card-header-actions">
               <Tabs value={kind} onChange={(next) => setKind(String(next || "fillSign"))} items={kindItems} ariaLabel="Request type" />
@@ -290,7 +294,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
           </div>
 
           {view !== "create" ? (
-            <div className="list">
+            <div className="list scroll-area">
               {(view === "history" ? activeHistory : trashedHistory).length === 0 ? (
                 <EmptyState
                   title={view === "trash" ? "Trash is empty" : "No batches yet"}
@@ -363,10 +367,8 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                           type="button"
                           className="danger"
                           onClick={() => {
-                            const ok = typeof window !== "undefined" ? window.confirm("Delete this batch permanently?") : true;
-                            if (!ok) return;
-                            deleteBulkBatch(session, "bulkSend", b.id);
-                            setHistoryTick((n) => n + 1);
+                            setDeleteBatchId(String(b?.id || ""));
+                            setDeleteOpen(true);
                           }}
                           disabled={busy || actionBusy}
                         >
@@ -379,53 +381,101 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
               )}
             </div>
           ) : step !== "done" ? (
-            <div className="wizard">
+            <div className="wizard scroll-area">
+              <div className="wizard-stepper" aria-label="Bulk send steps">
+                <span className={`wizard-step${step === "template" ? " is-active" : ""}`}>Template</span>
+                <span className="wizard-step-sep" aria-hidden="true" />
+                <span className={`wizard-step${step === "recipients" ? " is-active" : ""}`}>Recipients</span>
+                <span className="wizard-step-sep" aria-hidden="true" />
+                <span className={`wizard-step${step === "done" ? " is-active" : ""}`}>Done</span>
+              </div>
               <div className="wizard-section">
                 <div className="wizard-head">
-                  <strong>1) Choose template</strong>
-                  <span className="muted">{selectedTemplate?.title ? "Selected" : "Pick a PDF template"}</span>
-                </div>
-                <div className="auth-form" style={{ marginTop: 0 }}>
-                  <label>
-                    <span>Search</span>
-                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search templates..." disabled={busy || actionBusy} />
-                  </label>
-                </div>
-                {!templateItems.length ? (
-                  <EmptyState title="No templates found" description="Publish a PDF form template to this project first." />
-                ) : (
-                  <div className="select-list">
-                    {templateItems.slice(0, 12).map((t) => {
-                      const selected = String(selectedId) === String(t.id);
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          className={`select-row${selected ? " is-selected" : ""}`}
-                          onClick={() => {
-                            setSelectedId(String(t.id));
-                            setStep("recipients");
-                          }}
-                          disabled={busy || actionBusy}
-                        >
-                          <div className="select-row-main">
-                            <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                          </div>
-                          <span className="select-row-right" aria-hidden="true">
-                            {selected ? "Selected" : ">"}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="wizard-head-left">
+                    <span className="wizard-badge" aria-hidden="true">
+                      1
+                    </span>
+                    <div className="wizard-head-text">
+                      <p className="wizard-title">Choose template</p>
+                      <p className="wizard-subtitle">Pick a PDF template to send.</p>
+                    </div>
                   </div>
-                )}
+                  {step !== "template" && selectedTemplate?.title ? (
+                    <button type="button" className="link" onClick={() => setStep("template")} disabled={busy || actionBusy}>
+                      Change
+                    </button>
+                  ) : (
+                    <span className="muted">Pick a PDF template</span>
+                  )}
+                </div>
+                {step === "template" ? (
+                  <>
+                    <div className="wizard-toolbar">
+                      <input
+                        className="wizard-search"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search templates..."
+                        disabled={busy || actionBusy}
+                      />
+                      <span className="muted wizard-meta">{templateItems.length} template(s)</span>
+                    </div>
+                    {!templateItems.length ? (
+                      <EmptyState title="No templates found" description="Publish a PDF form template to this project first." />
+                    ) : (
+                      <div className="member-list is-compact" role="listbox" aria-label="Templates">
+                        {templateItems.map((t) => {
+                          const selected = String(selectedId) === String(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              className={`select-row${selected ? " is-selected" : ""}`}
+                              onClick={() => {
+                                setSelectedId(String(t.id));
+                                setStep("recipients");
+                              }}
+                              disabled={busy || actionBusy}
+                              role="option"
+                              aria-selected={selected}
+                            >
+                              <div className="select-row-main">
+                                <strong className="truncate">{t.title || `File ${t.id}`}</strong>
+                                <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
+                              </div>
+                              <span className="select-row-right" aria-hidden="true">
+                                {selected ? "\u2713" : ""}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : selectedTemplate ? (
+                  <div className="select-row is-selected" style={{ cursor: "default" }}>
+                    <div className="select-row-main">
+                      <strong className="truncate">{selectedTemplate.title || `File ${selectedTemplate.id}`}</strong>
+                      <span className="muted truncate">PDF template {"\u2022"} ID {selectedTemplate.id}</span>
+                    </div>
+                    <span className="select-row-right" aria-hidden="true">
+                      {"\u2713"}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="wizard-divider" />
-
               <div className="wizard-section">
                 <div className="wizard-head">
-                  <strong>2) Add recipients</strong>
+                  <div className="wizard-head-left">
+                    <span className="wizard-badge" aria-hidden="true">
+                      2
+                    </span>
+                    <div className="wizard-head-text">
+                      <p className="wizard-title">Add recipients</p>
+                      <p className="wizard-subtitle">{kind === "fillSign" ? "Required for Fill & Sign." : "Optional for Approval."}</p>
+                    </div>
+                  </div>
                   <span className="muted">{kind === "fillSign" ? "Required" : "Optional"}</span>
                 </div>
 
@@ -452,9 +502,17 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                     </button>
                   </div>
 
-                  <div className="row-actions" style={{ justifyContent: "space-between" }}>
-                    <label className="checkbox">
-                      <input type="checkbox" checked={Boolean(dueDate)} onChange={(e) => setDueDate(e.target.checked ? new Date().toISOString().slice(0, 10) : "")} disabled={busy || actionBusy} />
+                  <div
+                    className="row-actions"
+                    style={{ justifyContent: dueDate ? "space-between" : "flex-start", alignItems: "center" }}
+                  >
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(dueDate)}
+                        onChange={(e) => setDueDate(e.target.checked ? new Date().toISOString().slice(0, 10) : "")}
+                        disabled={busy || actionBusy}
+                      />
                       <span>Set due date</span>
                     </label>
                     {dueDate ? (
@@ -462,9 +520,10 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                     ) : null}
                   </div>
 
-                  <p className="muted" style={{ margin: 0 }}>
-                    Tip: select contacts in Contacts, then click Bulk send.
-                  </p>
+                  <div className="note">
+                    <strong>Tip</strong>
+                    <p className="muted">Select contacts in Contacts, then click Bulk send.</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -547,6 +606,28 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
       )}
 
       <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
+
+      <ConfirmModal
+        open={deleteOpen}
+        title="Delete batch?"
+        message="Delete this batch permanently? This cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        busy={busy || actionBusy}
+        onClose={() => {
+          if (busy || actionBusy) return;
+          setDeleteOpen(false);
+          setDeleteBatchId("");
+        }}
+        onConfirm={() => {
+          const id = String(deleteBatchId || "").trim();
+          if (!id) return;
+          deleteBulkBatch(session, "bulkSend", id);
+          setHistoryTick((n) => n + 1);
+          setDeleteOpen(false);
+          setDeleteBatchId("");
+        }}
+      />
     </div>
   );
 }

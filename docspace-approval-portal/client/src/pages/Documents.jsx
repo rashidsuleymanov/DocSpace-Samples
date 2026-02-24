@@ -346,7 +346,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
         />
       ) : null}
 
-      <section className="card">
+      <section className="card page-card">
         <div className="card-header compact">
           <div>
             <h3>
@@ -382,7 +382,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
           <Tabs value={who} onChange={setWho} items={whoItems} ariaLabel="Documents filter" />
         </div>
 
-        <div className="list">
+        <div className="list scroll-area">
           {tab === "team" && manageableProjects.length === 0 ? (
             <EmptyState
               title="No team projects yet"

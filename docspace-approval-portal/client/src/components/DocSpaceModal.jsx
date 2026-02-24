@@ -64,19 +64,14 @@ export default function DocSpaceModal({ open, onClose, title = "Document", url }
   };
 
   return (
-    <div
-      className={`editor-modal${open ? "" : " is-hidden"}`}
-      role="dialog"
-      aria-modal="true"
-      aria-hidden={!open}
-    >
+    <div className={`editor-modal${open ? "" : " is-hidden"}`} role="dialog" aria-modal="true" aria-hidden={!open}>
       <div className="editor-shell">
         <div className="editor-header">
           <strong className="editor-title">{title}</strong>
           <div className="editor-actions">
             {url ? (
               <a className="btn" href={url} target="_blank" rel="noreferrer">
-                Open in DocSpace
+                Open in new tab
               </a>
             ) : null}
             <button className="editor-close" type="button" onClick={onClose} aria-label="Close">
@@ -95,16 +90,16 @@ export default function DocSpaceModal({ open, onClose, title = "Document", url }
             onLoad={onFrameLoad}
           />
           {open && blocked ? (
-            <div className="docspace-overlay" role="note" aria-label="DocSpace sign-in required">
+            <div className="docspace-overlay" role="note" aria-label="Sign-in required">
               <div className="docspace-overlay-card">
-                <strong className="docspace-overlay-title">Sign in to DocSpace to continue</strong>
+                <strong className="docspace-overlay-title">Sign in to continue</strong>
                 <p className="muted docspace-overlay-desc">
-                  If you aren’t signed in to DocSpace in this browser, the embedded editor may not open. Sign in in a new tab, then reload this document.
+                  If you aren't signed in in this browser, the embedded editor may not open. Sign in in a new tab, then reload this document.
                 </p>
                 <div className="docspace-overlay-actions">
                   {signInUrl ? (
                     <button type="button" className="primary" onClick={() => window.open(signInUrl, "_blank", "noopener,noreferrer")}>
-                      Sign in to DocSpace
+                      Open sign-in page
                     </button>
                   ) : null}
                   <button

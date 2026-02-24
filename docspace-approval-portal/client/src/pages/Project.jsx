@@ -142,6 +142,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   const [addFormMyDocs, setAddFormMyDocs] = useState([]);
   const [addFormShared, setAddFormShared] = useState([]);
   const [addFormSelected, setAddFormSelected] = useState(null);
+  const [creatingTemplateId, setCreatingTemplateId] = useState("");
 
   const refresh = async () => {
     const pid = normalize(projectId);
@@ -743,7 +744,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </button>
           {project?.roomUrl ? (
             <a className="btn" href={project.roomUrl} target="_blank" rel="noreferrer">
-              Open in DocSpace
+              Open room
             </a>
           ) : null}
         </div>
@@ -772,7 +773,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         </section>
 
       {tab === "people" ? (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>People</h3>
@@ -783,11 +784,11 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             </div>
           </div>
 
-          <div className="list">
+          <div className="list scroll-area">
             {!normalizedMembers.length ? (
               <EmptyState
                 title="No members data"
-                description="Invite someone, or open the room in DocSpace to manage access."
+                description="Invite someone, or open the room to manage access."
               />
             ) : filteredMembers.length === 0 ? (
               <EmptyState title="No matches" description="Try a different search." />
@@ -824,7 +825,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         </div>
         </section>
       ) : tab === "requests" ? (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>Requests</h3>
@@ -858,7 +859,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
 
           {flowsError ? <p className="error">{flowsError}</p> : null}
 
-          <div className="list">
+          <div className="list scroll-area">
             {!normalize(token) ? (
               <EmptyState title="Sign in to view requests" description="Log in to load project requests." />
             ) : flowsLoading ? (
@@ -953,7 +954,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </div>
         </section>
       ) : (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>Forms</h3>
@@ -973,7 +974,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             </div>
           </div>
 
-          <div className="list">
+          <div className="list scroll-area">
             {!filteredTemplates.length ? (
               <EmptyState
                 title="No forms found"
@@ -1000,30 +1001,35 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                     type="button"
                     className="primary"
                     onClick={async () => {
+                      setCreatingTemplateId(String(t?.id || ""));
                       const pid = normalize(project?.id || projectId);
                       if (!pid || !token || typeof onStartFlow !== "function") return;
                       setError("");
                       setNotice("");
-                      const result = await onStartFlow(t.id, pid);
-                      if (!result) {
-                        toast("Request creation failed\nPlease check Settings and try again.", "error");
-                        return;
+                      try {
+                        const result = await onStartFlow(t.id, pid);
+                        if (!result) {
+                          toast("Request creation failed\nPlease check Settings and try again.", "error");
+                          return;
+                        }
+                        const group = groupFromResult(result);
+                        setTab("requests");
+                        if (group) {
+                          setDetailsGroup(group);
+                          setDetailsOpen(true);
+                        }
+                        refreshFlows().catch(() => null);
+                      } finally {
+                        setCreatingTemplateId("");
                       }
-                      const group = groupFromResult(result);
-                      setTab("requests");
-                      if (group) {
-                        setDetailsGroup(group);
-                        setDetailsOpen(true);
-                      }
-                      refreshFlows().catch(() => null);
                     }}
-                    disabled={busy || loading || !token}
+                    disabled={busy || loading || !token || String(creatingTemplateId) === String(t?.id || "")}
                   >
-                    Create request
+                    {String(creatingTemplateId) === String(t?.id || "") ? "Creating..." : "Create request"}
                   </button>
                   {t.webUrl ? (
                     <a className="btn" href={t.webUrl} target="_blank" rel="noreferrer">
-                      Open in DocSpace
+                      Open in new tab
                     </a>
                   ) : null}
                 </div>
@@ -1117,7 +1123,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           <div className="wizard-section">
             <div className="wizard-head">
               <strong>Source</strong>
-              <span className="muted">Pick a PDF from your DocSpace.</span>
+              <span className="muted">Pick a PDF file.</span>
             </div>
             <Tabs value={addFormSource} onChange={(v) => setAddFormSource(v)} items={addFormTabs} ariaLabel="Form source" />
           </div>
@@ -1198,12 +1204,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This will mark the request as completed in the portal.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Use this when the shared signing is done.
-          </p>
-        </div>
+        <EmptyState title="This will mark the request as completed in the portal." description="Use this when the shared signing is done." />
       </Modal>
 
       <Modal
@@ -1229,12 +1230,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This will stop the request in the portal.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            It will not delete any files in DocSpace.
-          </p>
-        </div>
+        <EmptyState title="This will stop the request in the portal." description="It will not delete any files." />
       </Modal>
 
       <Modal
@@ -1255,12 +1251,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This revokes access to the DocSpace room.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            The user can be re-invited later.
-          </p>
-        </div>
+        <EmptyState title="This revokes access to the project room." description="The user can be re-invited later." />
       </Modal>
 
       <RequestDetailsModal

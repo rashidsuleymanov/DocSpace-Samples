@@ -138,127 +138,100 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
           </div>
         </button>
 
-        <section className="projects-nav" aria-label="Project switcher">
-          <div className="projects-nav-head">
-            <button
-              type="button"
-              className={`nav-item projects-nav-link${projectsActive ? " is-active" : ""}`}
-              onClick={() => onNavigate("projects")}
-            >
-              <span>Current project</span>
-              <span className="muted truncate projects-nav-current">{currentProjectLabel}</span>
-            </button>
-            <button
-              type="button"
-              className="projects-nav-expand"
-              onClick={() => setProjectsOpen((s) => !s)}
-              aria-label={projectsOpen ? "Collapse project list" : "Expand project list"}
-              title={projectsOpen ? "Collapse" : "Expand"}
-            >
-              <svg
-                className={`chevron${projectsOpen ? " is-open" : ""}`}
-                width="18"
-                height="18"
-                viewBox="0 0 20 20"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                aria-hidden="true"
+        <div className="sidebar-body">
+          <section className="projects-nav" aria-label="Project switcher">
+            <div className="projects-nav-head">
+              <button
+                type="button"
+                className={`nav-item projects-nav-link${projectsActive ? " is-active" : ""}`}
+                onClick={() => onNavigate("projects")}
               >
-                <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
-
-          {projectsOpen ? (
-            <div className="projects-nav-list">
-              {projectsError ? <div className="projects-nav-error">{projectsError}</div> : null}
-              {projects.length ? (
-                <input
-                  className="projects-nav-search"
-                  value={projectsQuery}
-                  onChange={(e) => setProjectsQuery(e.target.value)}
-                  placeholder="Search projects..."
-                  disabled={projectsLoading}
-                />
-              ) : null}
-              {!projectsLoading && projects.length === 0 ? (
-                <button type="button" className="projects-nav-item" onClick={() => onNavigate("projects")}>
-                  <span className="projects-nav-title truncate">Create your first project</span>
-                  <span className="projects-nav-meta muted">Publish templates, then start requests.</span>
-                  <span className="projects-nav-right" aria-hidden="true">
-                    +
-                  </span>
-                </button>
-              ) : null}
-              {filteredProjects.map((p) => {
-                const isCurrent = Boolean(activeRoomId) && String(p.roomId) === String(activeRoomId);
-                const inProgress = Number(p?.counts?.inProgress || 0);
-                const total = Number(p?.counts?.total || 0);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className={`projects-nav-item${isCurrent ? " is-current" : ""}`}
-                    onClick={() => {
-                      if (typeof onOpenProject === "function" && p?.id) {
-                        onOpenProject(p.id);
-                        return;
-                      }
-                      onPickProject(p);
-                    }}
-                    disabled={projectsLoading}
-                    title={p?.title ? `Open ${p.title}` : "Open project"}
-                  >
-                    <span className="projects-nav-title truncate">{p.title || "Untitled"}</span>
-                    <span className="projects-nav-meta muted">
-                      {inProgress ? `${inProgress} in progress` : "No active requests"}
-                      {total ? ` - ${total} total` : ""}
-                    </span>
-                    <span className="projects-nav-right" aria-hidden="true">
-                      {isCurrent ? "Current" : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </section>
-
-        <nav className="nav" aria-label="Primary navigation">
-          {navSections.map((section) => (
-            <div key={section.title} className="nav-section">
-              <div className="nav-section-title" aria-hidden="true">
-                {section.title}
-              </div>
-              {section.items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`nav-item${active === item.id ? " is-active" : ""}`}
-                  onClick={() => onNavigate(item.id)}
+                <span>Current project</span>
+                <span className="muted truncate projects-nav-current">{currentProjectLabel}</span>
+              </button>
+              <button
+                type="button"
+                className="projects-nav-expand"
+                onClick={() => setProjectsOpen((s) => !s)}
+                aria-label={projectsOpen ? "Collapse project list" : "Expand project list"}
+                title={projectsOpen ? "Collapse" : "Expand"}
+              >
+                <svg
+                  className={`chevron${projectsOpen ? " is-open" : ""}`}
+                  width="18"
+                  height="18"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
                 >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ))}
-
-          <div className="nav-section">
-            <div className="nav-section-title">
-              <button type="button" className="nav-section-toggle" onClick={() => setToolsOpen((s) => !s)} aria-expanded={toolsOpen}>
-                <span>Tools</span>
-                <span className={`nav-section-chev${toolsOpen ? " is-open" : ""}`} aria-hidden="true">
-                  ▾
-                </span>
+                  <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
             </div>
-            {toolsOpen ? (
-              <>
-                {[
-                  { id: "sendDrafts", label: "Request drafts" },
-                  { id: "bulk", label: "Bulk send" },
-                  { id: "bulkLinks", label: "Bulk links" }
-                ].map((item) => (
+
+            {projectsOpen ? (
+              <div className="projects-nav-list">
+                {projectsError ? <div className="projects-nav-error">{projectsError}</div> : null}
+                {projects.length ? (
+                  <input
+                    className="projects-nav-search"
+                    value={projectsQuery}
+                    onChange={(e) => setProjectsQuery(e.target.value)}
+                    placeholder="Search projects..."
+                    disabled={projectsLoading}
+                  />
+                ) : null}
+                {!projectsLoading && projects.length === 0 ? (
+                  <button type="button" className="projects-nav-item" onClick={() => onNavigate("projects")}>
+                    <span className="projects-nav-title truncate">Create your first project</span>
+                    <span className="projects-nav-meta muted">Publish templates, then start requests.</span>
+                    <span className="projects-nav-right" aria-hidden="true">
+                      +
+                    </span>
+                  </button>
+                ) : null}
+                {filteredProjects.map((p) => {
+                  const isCurrent = Boolean(activeRoomId) && String(p.roomId) === String(activeRoomId);
+                  const inProgress = Number(p?.counts?.inProgress || 0);
+                  const total = Number(p?.counts?.total || 0);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`projects-nav-item${isCurrent ? " is-current" : ""}`}
+                      onClick={() => {
+                        if (typeof onOpenProject === "function" && p?.id) {
+                          onOpenProject(p.id);
+                          return;
+                        }
+                        onPickProject(p);
+                      }}
+                      disabled={projectsLoading}
+                      title={p?.title ? `Open ${p.title}` : "Open project"}
+                    >
+                      <span className="projects-nav-title truncate">{p.title || "Untitled"}</span>
+                      <span className="projects-nav-meta muted">
+                        {inProgress ? `${inProgress} in progress` : "No active requests"}
+                        {total ? ` - ${total} total` : ""}
+                      </span>
+                      <span className="projects-nav-right" aria-hidden="true">
+                        {isCurrent ? "Current" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
+          <nav className="nav" aria-label="Primary navigation">
+            {navSections.map((section) => (
+              <div key={section.title} className="nav-section">
+                <div className="nav-section-title" aria-hidden="true">
+                  {section.title}
+                </div>
+                {section.items.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -268,10 +241,48 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     {item.label}
                   </button>
                 ))}
-              </>
-            ) : null}
-          </div>
-        </nav>
+              </div>
+            ))}
+
+            <div className="nav-section">
+              <div className="nav-section-title">
+                <button type="button" className="nav-section-toggle" onClick={() => setToolsOpen((s) => !s)} aria-expanded={toolsOpen}>
+                  <span>Tools</span>
+                  <span className={`nav-section-chev${toolsOpen ? " is-open" : ""}`} aria-hidden="true">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      aria-hidden="true"
+                    >
+                      <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+              </div>
+              {toolsOpen ? (
+                <>
+                  {[
+                    { id: "sendDrafts", label: "Request drafts" },
+                    { id: "bulk", label: "Bulk send" },
+                    { id: "bulkLinks", label: "Bulk links" }
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`nav-item${active === item.id ? " is-active" : ""}`}
+                      onClick={() => onNavigate(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </>
+              ) : null}
+            </div>
+          </nav>
+        </div>
 
         <div className="sidebar-footer">
           <div className="user">
@@ -283,7 +294,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
               <span className="muted truncate">{session?.user?.email || session?.user?.userName || ""}</span>
             </div>
           </div>
-          <button type="button" className="nav-item subtle" onClick={onLogout}>
+          <button type="button" className="btn subtle sidebar-signout" onClick={onLogout}>
             Sign out
           </button>
         </div>

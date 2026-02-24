@@ -27,7 +27,7 @@ export default function ToastHost() {
 
   const [title, ...rest] = String(toast.message || "").split("\n");
   const details = rest.join("\n").trim();
-  const icon = toast.tone === "success" ? "✓" : toast.tone === "error" ? "!" : "i";
+  const icon = toast.tone === "success" ? "\u2713" : toast.tone === "error" ? "!" : "i";
 
   return (
     <div className="toast-host" role="status" aria-live="polite" key={toast.id}>
@@ -40,7 +40,7 @@ export default function ToastHost() {
           {details ? <span className="toast-details">{details}</span> : null}
         </span>
         <button type="button" className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">
-          ×
+          {"\u00D7"}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
+import EmptyState from "../components/EmptyState.jsx";
 import Modal from "../components/Modal.jsx";
 import QuickActions from "../components/QuickActions.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
@@ -46,7 +47,7 @@ export default function Dashboard({
   onOpenRequests,
   onOpenProject
 }) {
-  const userLabel = session?.user?.displayName || session?.user?.email || "DocSpace user";
+  const userLabel = session?.user?.displayName || session?.user?.email || "User";
   const meEmail = session?.user?.email ? String(session.user.email).trim().toLowerCase() : "";
 
   const hasCurrentProject = Boolean(String(activeRoomId || "").trim());
@@ -124,6 +125,7 @@ export default function Dashboard({
   const [docUrl, setDocUrl] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsGroup, setDetailsGroup] = useState(null);
+  const [creatingTemplateId, setCreatingTemplateId] = useState("");
 
   const groupFromResult = (result) => {
     const flows = Array.isArray(result?.flows) ? result.flows : result?.flow ? [result.flow] : [];
@@ -213,11 +215,11 @@ export default function Dashboard({
 
     if (!draftsPdfCount) {
       steps.push({
-        title: "Create a template",
-        description: "Make a PDF template in your DocSpace My documents.",
-        actionLabel: "New template",
-        onAction: onOpenDrafts
-      });
+         title: "Create a template",
+         description: "Make a PDF template in your files.",
+         actionLabel: "New template",
+         onAction: onOpenDrafts
+       });
     }
 
     if (hasCurrentProject && pdfTemplateCount === 0) {
@@ -264,11 +266,11 @@ export default function Dashboard({
           <button type="button" onClick={onRefresh} disabled={busy}>
             Refresh
           </button>
-          {hasCurrentProject && currentProjectUrl ? (
-            <a className="btn" href={currentProjectUrl} target="_blank" rel="noreferrer">
-              Open in DocSpace
-            </a>
-          ) : null}
+           {hasCurrentProject && currentProjectUrl ? (
+             <a className="btn" href={currentProjectUrl} target="_blank" rel="noreferrer">
+               Open room
+             </a>
+           ) : null}
         </div>
       </header>
 
@@ -291,7 +293,7 @@ export default function Dashboard({
             <StatCard className="stat-total" title="Total" value={stats.total} meta="Requests assigned to you" onClick={() => openRequests("all")} />
           </section>
 
-          <section className="card">
+          <section className="card page-card">
             <div className="card-header compact">
               <div>
                 <h3>Recent requests</h3>
@@ -304,14 +306,9 @@ export default function Dashboard({
               </div>
             </div>
 
-            <div className="list recent-list">
+            <div className="list scroll-area recent-list">
               {!recentRequests.length ? (
-                <div className="empty">
-                  <strong>No assigned requests yet</strong>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>
-                    When someone assigns you a request, it will show up here.
-                  </p>
-                </div>
+                <EmptyState title="No assigned requests yet" description="When someone assigns you a request, it will show up here." />
               ) : (
                 recentRequests.map((group) => {
                   const flow = group?.primaryFlow || group?.flows?.[0] || null;
@@ -420,26 +417,24 @@ export default function Dashboard({
                         Open
                       </button>
                     ) : null}
-                    {currentProjectUrl ? (
-                      <a className="btn" href={currentProjectUrl} target="_blank" rel="noreferrer">
-                        DocSpace
-                      </a>
-                    ) : null}
+                     {currentProjectUrl ? (
+                        <a className="btn" href={currentProjectUrl} target="_blank" rel="noreferrer">
+                          Open room
+                        </a>
+                      ) : null}
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="empty" style={{ marginTop: 10 }}>
-                <strong>No project selected</strong>
-                <p className="muted" style={{ margin: "6px 0 0" }}>
-                  Pick a project to publish templates and create requests.
-                </p>
-                <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+              <EmptyState
+                title="No project selected"
+                description="Pick a project to publish templates and create requests."
+                actions={
                   <button type="button" className="primary" onClick={onOpenProjects} disabled={busy}>
                     Open Projects
                   </button>
-                </div>
-              </div>
+                }
+              />
             )}
           </section>
         </div>
@@ -461,12 +456,7 @@ export default function Dashboard({
         }
       >
         {!templateItems.length ? (
-          <div className="empty" style={{ marginTop: 0 }}>
-            <strong>No templates in the current project</strong>
-            <p className="muted" style={{ margin: "6px 0 0" }}>
-              Open Templates and publish a PDF form to the current project.
-            </p>
-          </div>
+          <EmptyState title="No templates in the current project" description="Open Templates and publish a PDF form to the current project." />
         ) : (
           <div className="auth-form" style={{ marginTop: 0 }}>
             <label>
@@ -482,8 +472,10 @@ export default function Dashboard({
                   <div className="list-actions">
                       <button
                         type="button"
-                        className="primary"
-                        onClick={async () => {
+                      className="primary"
+                      onClick={async () => {
+                        setCreatingTemplateId(String(t.id || ""));
+                        try {
                           const result = await onStartFlow?.(t.id, currentProjectId || null);
                           const group = groupFromResult(result);
                           if (group) {
@@ -492,10 +484,13 @@ export default function Dashboard({
                           }
                           setSendOpen(false);
                           setSendQuery("");
-                        }}
-                        disabled={busy}
-                      >
-                      Create request
+                        } finally {
+                          setCreatingTemplateId("");
+                        }
+                      }}
+                      disabled={busy || String(creatingTemplateId) === String(t.id)}
+                    >
+                      {String(creatingTemplateId) === String(t.id) ? "Creating..." : "Create request"}
                     </button>
                   </div>
                 </div>

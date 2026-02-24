@@ -364,7 +364,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
               Shared templates room: <strong>{templatesRoom?.title || "Projects Templates"}</strong>{" "}
               {templatesRoom?.roomUrl ? (
                 <a className="btn link" href={templatesRoom.roomUrl} target="_blank" rel="noreferrer">
-                  Open in DocSpace
+                  Open room
                 </a>
               ) : null}
             </p>
@@ -372,7 +372,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
             <p className="muted" style={{ marginTop: -6 }}>Checking shared templates room...</p>
           ) : null}
 
-          <section className="card">
+          <section className="card page-card">
             <div className="card-header compact">
               <div>
                 <h3>Published templates</h3>
@@ -386,7 +386,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
               </div>
             </div>
 
-            <div className="list">
+            <div className="list scroll-area">
               {sharedLoading ? (
                 <EmptyState title="Loading..." />
               ) : !templatesRoom?.id ? (
@@ -429,7 +429,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
                     <div className="list-actions">
                       {t.webUrl ? (
                         <a className="btn" href={t.webUrl} target="_blank" rel="noreferrer">
-                          Open in DocSpace
+                          Open in new tab
                         </a>
                       ) : null}
                       {templatesRoom?.isOwner ? (
@@ -462,7 +462,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
 
             {filteredShared.length > 12 ? (
               <p className="muted" style={{ marginTop: 10 }}>
-                Showing 12 of {filteredShared.length}. Open the room in DocSpace to browse all templates.
+                Showing 12 of {filteredShared.length}. Open the room to browse all templates.
               </p>
             ) : null}
           </section>
@@ -478,7 +478,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
               steps={[
                 {
                   title: "Create a PDF template",
-                  description: 'Click "New template" to create a PDF, or upload an existing PDF form in DocSpace My documents.',
+                  description: 'Click "New template" to create a PDF, or upload an existing PDF form in your files.',
                   hint: "PDF"
                 },
                 {
@@ -494,25 +494,25 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
             />
           ) : null}
 
-          <section className="card">
+          <section className="card page-card">
             <div className="card-header compact">
               <div>
                 <h3>Draft templates</h3>
-                <p className="muted">PDF forms in your DocSpace My documents.</p>
+                <p className="muted">PDF forms in your files.</p>
               </div>
               <div className="card-header-actions">
                 <span className="muted">{filtered.length} shown</span>
               </div>
             </div>
 
-            <div className="list">
+            <div className="list scroll-area">
               {!filtered.length ? (
                 <EmptyState
                   title={normalize(query) ? "Nothing found" : "No draft templates yet"}
                   description={
                     normalize(query)
                       ? `No draft templates match "${normalize(query)}".`
-                      : "Create a new template, or upload files in DocSpace My documents."
+                      : "Create a new template, or upload files in your files."
                   }
                   actions={
                     normalize(query) ? (
@@ -631,21 +631,21 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
           </label>
 
           {publishDestination === "templatesRoom" ? (
-            <div className="empty" style={{ marginTop: 0 }}>
-              <strong>{templatesRoom?.id ? "Shared room selected" : "Shared room is not available"}</strong>
-              <p className="muted" style={{ margin: "6px 0 0" }}>
-                {templatesRoom?.id
+            <EmptyState
+              title={templatesRoom?.id ? "Shared room selected" : "Shared room is not available"}
+              description={
+                templatesRoom?.id
                   ? "The PDF will be copied into the shared room Templates folder. Everyone registered in this portal gets access."
-                  : "Open Settings and add an Admin token so the portal can create/share the room."}
-              </p>
-              {typeof onOpenSettings === "function" && !templatesRoom?.id ? (
-                <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+                  : "Open Settings and add an Admin token so the portal can create/share the room."
+              }
+              actions={
+                typeof onOpenSettings === "function" && !templatesRoom?.id ? (
                   <button type="button" onClick={onOpenSettings} disabled={busy || loading}>
                     Open Settings
                   </button>
-                </div>
-              ) : null}
-            </div>
+                ) : null
+              }
+            />
           ) : (
             <>
               <label>
@@ -724,17 +724,15 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
       >
         <form className="auth-form" onSubmit={(e) => e.preventDefault()} style={{ marginTop: 0 }}>
           {!requestProjects.length ? (
-            <div className="empty" style={{ marginTop: 0 }}>
-              <strong>No projects</strong>
-              <p className="muted" style={{ margin: "6px 0 0" }}>
-                Create a project first, then try again.
-              </p>
-              <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+            <EmptyState
+              title="No projects"
+              description="Create a project first, then try again."
+              actions={
                 <button type="button" className="primary" onClick={() => onOpenProjects?.({ create: true })} disabled={busy || requestBusy}>
                   Create project
                 </button>
-              </div>
-            </div>
+              }
+            />
           ) : (
             <>
               <label>
@@ -862,12 +860,10 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>Only the room owner can delete published templates.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            This removes the file from the shared templates room.
-          </p>
-        </div>
+        <EmptyState
+          title="Only the room owner can delete published templates."
+          description="This removes the file from the shared templates room."
+        />
       </Modal>
 
       <DocSpaceModal

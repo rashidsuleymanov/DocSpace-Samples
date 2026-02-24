@@ -35,7 +35,7 @@ function loadDocSpaceSdk(src) {
 
     if (!src) {
 
-      reject(new Error("DocSpace URL is missing"));
+      reject(new Error("Workspace URL is missing"));
 
       return;
 
@@ -49,7 +49,7 @@ function loadDocSpaceSdk(src) {
 
     script.onload = () => resolve(window.DocSpace?.SDK);
 
-    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
+    script.onerror = () => reject(new Error("Failed to load editor SDK"));
 
     document.head.appendChild(script);
 
@@ -120,8 +120,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
   const [doctorInfo, setDoctorInfo] = useState(null);
 
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("");
 
   const [ticketMessage, setTicketMessage] = useState("");
+  const [ticketMessageType, setTicketMessageType] = useState("");
   const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
   const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
@@ -267,6 +269,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     if (!docspaceUrl) {
 
       setTicketMessage("VITE_DOCSPACE_URL is not set.");
+      setTicketMessageType("error");
 
       return;
 
@@ -276,7 +279,8 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
     if (!token) {
 
-      setTicketMessage("DocSpace token is missing.");
+      setTicketMessage("Access token is missing.");
+      setTicketMessageType("error");
 
       return;
 
@@ -315,6 +319,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
             if (!frameInstance) {
 
               setTicketMessage("Editor frame is not available.");
+              setTicketMessageType("error");
 
               destroyEditor();
 
@@ -528,9 +533,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
           onAppError: (error) => {
 
-            console.error("DocSpace editor error", error);
+            console.error("Editor error", error);
 
             setTicketMessage(`Editor error: ${error?.message || error}`);
+            setTicketMessageType("error");
 
             setTimeout(() => destroyEditor(), 1500);
 
@@ -545,6 +551,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     } catch (error) {
 
       setTicketMessage(error?.message || "Failed to open editor.");
+      setTicketMessageType("error");
 
     }
 
@@ -575,6 +582,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     if (!form.date || !form.time || !form.doctor) {
 
       setMessage("Please fill date, time, and doctor.");
+      setMessageType("error");
 
       submitRef.current = false;
       setSubmitting(false);
@@ -603,8 +611,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     setForm({ date: "", time: "", doctor: "", reason: "" });
 
     setMessage("Appointment scheduled.");
+    setMessageType("success");
 
     setTicketMessage("");
+    setTicketMessageType("");
 
     try {
 
@@ -650,12 +660,14 @@ export default function Appointments({ session, onLogout, onNavigate }) {
       const title = file?.title || "ticket";
 
       setTicketMessage(`Ticket created in room: ${title}`);
+      setTicketMessageType("success");
 
       await fillTicketHidden(file, draft);
 
     } catch (error) {
 
       setTicketMessage(error?.message || "Ticket not created");
+      setTicketMessageType("error");
 
     }
     finally {
@@ -814,9 +826,33 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
           </form>
 
-          {message && <p className="muted">{message}</p>}
+          {message && (
+            <div
+              className={
+                messageType === "error"
+                  ? "error-banner"
+                  : messageType === "success"
+                  ? "success-banner"
+                  : "notice-banner"
+              }
+            >
+              {message}
+            </div>
+          )}
 
-          {ticketMessage && <p className="muted">{ticketMessage}</p>}
+          {ticketMessage && (
+            <div
+              className={
+                ticketMessageType === "error"
+                  ? "error-banner"
+                  : ticketMessageType === "success"
+                  ? "success-banner"
+                  : "notice-banner"
+              }
+            >
+              {ticketMessage}
+            </div>
+          )}
 
         </section>
 

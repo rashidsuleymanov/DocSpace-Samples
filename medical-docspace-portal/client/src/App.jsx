@@ -15,6 +15,8 @@ import {
   updateProfile
 } from "./services/docspaceApi.js";
 import { getDoctorSession } from "./services/doctorApi.js";
+import ToastHost from "./components/ToastHost.jsx";
+import { toast } from "./utils/toast.js";
 
 export default function App() {
   const settingsEnabled = true;
@@ -57,8 +59,11 @@ export default function App() {
           const next = await loginUser(credentials);
           setSession(next);
           setView("dashboard");
+          toast.success("Signed in.");
         } catch (error) {
-          setAuthError(error?.message || "DocSpace login failed");
+          const message = error?.message || "Sign-in failed";
+          setAuthError(message);
+          toast.error(message);
         } finally {
           setBusy(false);
         }
@@ -70,8 +75,11 @@ export default function App() {
           await registerPatient(payload);
           setRegisterSuccess("Registration complete. Please sign in.");
           setView("login");
+          toast.success("Registration complete. Please sign in.");
         } catch (error) {
-          setRegisterError(error?.message || "DocSpace registration failed");
+          const message = error?.message || "Registration failed";
+          setRegisterError(message);
+          toast.error(message);
         } finally {
           setBusy(false);
         }
@@ -111,6 +119,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <ToastHost />
       {view === "login" && (
         <Login
           busy={busy}

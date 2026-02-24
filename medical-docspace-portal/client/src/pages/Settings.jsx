@@ -15,14 +15,14 @@ function loadDocSpaceSdk(src) {
       return;
     }
     if (!src) {
-      reject(new Error("DocSpace URL is missing"));
+      reject(new Error("Workspace URL is missing"));
       return;
     }
     const script = document.createElement("script");
     script.src = `${src}/static/scripts/sdk/2.0.0/api.js`;
     script.async = true;
     script.onload = () => resolve(window.DocSpace?.SDK);
-    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
+    script.onerror = () => reject(new Error("Failed to load editor SDK"));
     document.head.appendChild(script);
   });
   return sdkLoaderPromise;
@@ -49,8 +49,10 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("");
   const [requestBusy, setRequestBusy] = useState(false);
   const [requestMessage, setRequestMessage] = useState("");
+  const [requestMessageType, setRequestMessageType] = useState("");
   const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
   useEffect(() => {
@@ -91,12 +93,14 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
     if (!file?.id) return;
     if (!docspaceUrl) {
       setRequestMessage("VITE_DOCSPACE_URL is not set.");
+      setRequestMessageType("error");
       return;
     }
 
     const token = file?.shareToken || session?.user?.token || "";
     if (!token) {
-      setRequestMessage("DocSpace token is missing.");
+      setRequestMessage("Access token is missing.");
+      setRequestMessageType("error");
       return;
     }
 
@@ -115,6 +119,7 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
           const frameInstance = window.DocSpace?.SDK?.frames?.[editorFrameId];
           if (!frameInstance) {
             setRequestMessage("Editor frame is not available.");
+            setRequestMessageType("error");
             destroyEditor();
             return;
           }
@@ -243,15 +248,18 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
     if (typeof onSave !== "function") return;
     setSaving(true);
     setMessage("");
+    setMessageType("");
     try {
       const updated = await onSave(form);
       const name = updated?.user?.fullName || form.fullName;
       const phone = updated?.user?.phone || form.phone || "-";
       setMessage(
-        `Saved. Sent: ${form.fullName || "-"}, ${form.phone || "-"} | DocSpace returned: ${name}, ${phone}`
+        `Saved. Sent: ${form.fullName || "-"}, ${form.phone || "-"} | Workspace returned: ${name}, ${phone}`
       );
+      setMessageType("success");
     } catch (error) {
       setMessage(error?.message || "Failed to update profile");
+      setMessageType("error");
     } finally {
       setSaving(false);
     }
@@ -260,6 +268,7 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
   const generateRequest = async () => {
     setRequestBusy(true);
     setRequestMessage("");
+    setRequestMessageType("");
     try {
       const token = String(session?.user?.token || "").trim();
       if (!token) throw new Error("Authorization token is missing");
@@ -300,9 +309,11 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
       if (file?.openUrl) {
         setDocModal({ open: true, title: file.title || "Contact change request", url: file.openUrl });
       }
-      setRequestMessage("Request document created in Contracts. Export to PDF in DocSpace if needed.");
+      setRequestMessage("Request document created in Contracts. Export to PDF in the editor if needed.");
+      setRequestMessageType("success");
     } catch (error) {
       setRequestMessage(error?.message || "Failed to create request document");
+      setRequestMessageType("error");
     } finally {
       setRequestBusy(false);
     }
@@ -321,7 +332,7 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
         <div className="panel-head">
           <div>
             <h3>Profile settings</h3>
-            <p className="muted">Update your personal data stored in DocSpace.</p>
+            <p className="muted">Update your personal data stored in your workspace.</p>
           </div>
         </div>
 
@@ -384,7 +395,7 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
               onChange={(e) => setForm({ ...form, comment: e.target.value })}
             />
           </label>
-          <div className="quick-actions" style={{ justifyContent: "flex-start" }}>
+          <div className="quick-actions is-start">
             <button className="primary" type="submit" disabled={saving}>
               {saving ? "Saving..." : "Save changes"}
             </button>
@@ -403,8 +414,14 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
           </div>
         </form>
 
-        {message && <p className="muted">{message}</p>}
-        {requestMessage && <p className="muted">{requestMessage}</p>}
+        {message && (
+          <div className={messageType === "error" ? "error-banner" : "success-banner"}>{message}</div>
+        )}
+        {requestMessage && (
+          <div className={requestMessageType === "error" ? "error-banner" : "success-banner"}>
+            {requestMessage}
+          </div>
+        )}
       </section>
 
       <DocSpaceModal

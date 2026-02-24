@@ -329,7 +329,9 @@ export default function App() {
           toast("Request created\nOpen Requests to track it.", "success");
           return result;
         } catch (e) {
-          setError(e?.message || "Failed to start request");
+          const msg = e?.message || "Failed to start request";
+          setError(msg);
+          toast(`Request creation failed\n${msg}`, "error");
           return null;
         } finally {
           setBusy(false);

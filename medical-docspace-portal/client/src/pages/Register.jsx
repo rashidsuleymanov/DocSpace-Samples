@@ -1,4 +1,5 @@
-﻿import { useState } from "react";
+import { useState } from "react";
+import { toast } from "../utils/toast.js";
 
 export default function Register({ busy, error, onRegister, onGoLogin }) {
   const [form, setForm] = useState({
@@ -10,7 +11,35 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
 
   const submit = (event) => {
     event.preventDefault();
-    onRegister(form);
+    const payload = {
+      fullName: String(form.fullName || "").trim(),
+      email: String(form.email || "").trim(),
+      phone: String(form.phone || "").trim(),
+      password: String(form.password || "")
+    };
+
+    if (!payload.fullName) {
+      toast.error("Please enter your full name.");
+      return;
+    }
+    if (!payload.email) {
+      toast.error("Please enter your email.");
+      return;
+    }
+    if (!payload.phone) {
+      toast.error("Please enter your phone number.");
+      return;
+    }
+    if (!payload.password) {
+      toast.error("Please create a password.");
+      return;
+    }
+    if (payload.password.length < 6) {
+      toast.error("Password must be at least 6 characters.");
+      return;
+    }
+
+    onRegister(payload);
   };
 
   return (
@@ -61,13 +90,14 @@ export default function Register({ busy, error, onRegister, onGoLogin }) {
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               required
+              minLength={6}
             />
           </label>
           <button className="primary" type="submit" disabled={busy}>
             {busy ? "Registering..." : "Register"}
           </button>
         </form>
-        {error && <p className="muted">Registration error: {error}</p>}
+        {error && <div className="error-banner">Registration error: {error}</div>}
         <button className="link" onClick={onGoLogin}>
           Already have an account? Sign in
         </button>

@@ -16,7 +16,7 @@ export default function ShareQrModal({ open, title, link, loading, error, onClos
         </div>
 
         {loading && <p className="muted">Creating share link...</p>}
-        {error && !loading && <p className="muted">Error: {formatError(error)}</p>}
+        {error && !loading && <div className="error-banner">Error: {formatError(error)}</div>}
 
         {!loading && !error && link && (
           <div className="share-modal-body qr-only">

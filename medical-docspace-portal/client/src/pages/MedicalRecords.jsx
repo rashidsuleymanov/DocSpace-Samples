@@ -7,6 +7,12 @@ import ShareQrModal from "../components/ShareQrModal.jsx";
 import folderStructure from "../data/folderStructure.js";
 import { createFileShareLink } from "../services/docspaceApi.js";
 
+function isErrorText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /(failed|error|missing|not set|not created|not available|refused)/i.test(text);
+}
+
 const appointmentsStorageKey = "medical.portal.appointments";
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
 const insuranceEditorFrameId = "insurance-request-editor-hidden";
@@ -23,14 +29,14 @@ function loadDocSpaceSdk(src) {
       return;
     }
     if (!src) {
-      reject(new Error("DocSpace URL is missing"));
+      reject(new Error("Workspace URL is missing"));
       return;
     }
     const script = document.createElement("script");
     script.src = `${src}/static/scripts/sdk/2.0.0/api.js`;
     script.async = true;
     script.onload = () => resolve(window.DocSpace?.SDK);
-    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
+    script.onerror = () => reject(new Error("Failed to load editor SDK"));
     document.head.appendChild(script);
   });
   return sdkLoaderPromise;
@@ -115,7 +121,7 @@ export default function MedicalRecords({
     if (!file?.id) return;
     if (!docspaceUrl) throw new Error("VITE_DOCSPACE_URL is not set.");
     const token = file?.shareToken || session?.user?.token || "";
-    if (!token) throw new Error("DocSpace token is missing.");
+    if (!token) throw new Error("Access token is missing.");
 
     destroyEditor();
     await loadDocSpaceSdk(docspaceUrl);
@@ -374,7 +380,7 @@ export default function MedicalRecords({
       if (file?.openUrl) {
         setDocModal({ open: true, title: file.title || "Insurance update request", url: file.openUrl });
       }
-      setInsuranceMessage("Request created in Insurance. Export to PDF in DocSpace if needed.");
+      setInsuranceMessage("Request created in Insurance. Export to PDF in the editor if needed.");
       setInsuranceModalOpen(false);
       setInsuranceForm({ provider: "", policyNumber: "", validTo: "", note: "" });
     } catch (error) {
@@ -388,7 +394,7 @@ export default function MedicalRecords({
     if (!file?.id) return;
     if (!docspaceUrl) throw new Error("VITE_DOCSPACE_URL is not set.");
     const token = file?.shareToken || session?.user?.token || "";
-    if (!token) throw new Error("DocSpace token is missing.");
+    if (!token) throw new Error("Access token is missing.");
 
     destroyEditor();
     await loadDocSpaceSdk(docspaceUrl);
@@ -561,7 +567,7 @@ export default function MedicalRecords({
       if (file?.openUrl) {
         setDocModal({ open: true, title: file.title || "Sick leave request", url: file.openUrl });
       }
-      setSickLeaveMessage("Request created in Sick Leave. Export to PDF in DocSpace if needed.");
+      setSickLeaveMessage("Request created in Sick Leave. Export to PDF in the editor if needed.");
       setSickLeaveModalOpen(false);
       setSickLeaveForm({ startDate: "", endDate: "", reason: "", note: "" });
     } catch (error) {
@@ -575,7 +581,7 @@ export default function MedicalRecords({
     if (!file?.id) return;
     if (!docspaceUrl) throw new Error("VITE_DOCSPACE_URL is not set.");
     const token = file?.shareToken || session?.user?.token || "";
-    if (!token) throw new Error("DocSpace token is missing.");
+    if (!token) throw new Error("Access token is missing.");
 
     destroyEditor();
     await loadDocSpaceSdk(docspaceUrl);
@@ -749,7 +755,7 @@ export default function MedicalRecords({
       if (file?.openUrl) {
         setDocModal({ open: true, title: file.title || "Imaging upload request", url: file.openUrl });
       }
-      setImagingMessage("Request created in Imaging. Upload files to the Imaging folder in DocSpace and export to PDF if needed.");
+      setImagingMessage("Request created in Imaging. Upload files to the Imaging folder in your workspace and export to PDF if needed.");
       setImagingModalOpen(false);
       setImagingForm({ modality: "", studyDate: "", facility: "", link: "", note: "" });
     } catch (error) {
@@ -841,7 +847,7 @@ export default function MedicalRecords({
             </p>
           </div>
           {activeFolder && (
-            <div className="quick-actions" style={{ justifyContent: "flex-end" }}>
+            <div className="quick-actions is-end">
               {isInsuranceFolder && (
                 <button
                   className="primary"
@@ -977,10 +983,26 @@ export default function MedicalRecords({
         onClose={() => setDocModal({ open: false, title: "", url: "" })}
       />
 
-      {insuranceMessage && <p className="muted">{insuranceMessage}</p>}
-      {sickLeaveMessage && <p className="muted">{sickLeaveMessage}</p>}
-      {imagingMessage && <p className="muted">{imagingMessage}</p>}
-      {imagingUploadMessage && <p className="muted">{imagingUploadMessage}</p>}
+      {insuranceMessage && (
+        <div className={isErrorText(insuranceMessage) ? "error-banner" : "success-banner"}>
+          {insuranceMessage}
+        </div>
+      )}
+      {sickLeaveMessage && (
+        <div className={isErrorText(sickLeaveMessage) ? "error-banner" : "success-banner"}>
+          {sickLeaveMessage}
+        </div>
+      )}
+      {imagingMessage && (
+        <div className={isErrorText(imagingMessage) ? "error-banner" : "success-banner"}>
+          {imagingMessage}
+        </div>
+      )}
+      {imagingUploadMessage && (
+        <div className={isErrorText(imagingUploadMessage) ? "error-banner" : "success-banner"}>
+          {imagingUploadMessage}
+        </div>
+      )}
       {insuranceModalOpen ? (
         <div className="editor-modal" role="dialog" aria-modal="true">
           <div className="editor-shell" style={{ maxWidth: 720, margin: "8vh auto", height: "auto" }}>
@@ -1046,7 +1068,7 @@ export default function MedicalRecords({
                     disabled={insuranceBusy}
                   />
                 </label>
-                <div className="quick-actions" style={{ justifyContent: "flex-start" }}>
+                <div className="quick-actions is-start">
                   <button className="primary" type="submit" disabled={insuranceBusy}>
                     {insuranceBusy ? "Generating..." : "Generate"}
                   </button>
@@ -1130,7 +1152,7 @@ export default function MedicalRecords({
                     disabled={sickLeaveBusy}
                   />
                 </label>
-                <div className="quick-actions" style={{ justifyContent: "flex-start" }}>
+                <div className="quick-actions is-start">
                   <button className="primary" type="submit" disabled={sickLeaveBusy}>
                     {sickLeaveBusy ? "Generating..." : "Generate"}
                   </button>
@@ -1225,9 +1247,9 @@ export default function MedicalRecords({
                   />
                 </label>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  After generating the request, upload your files into the <strong>Imaging</strong> folder in DocSpace.
+                  After generating the request, upload your files into the <strong>Imaging</strong> folder in your workspace.
                 </p>
-                <div className="quick-actions" style={{ justifyContent: "flex-start" }}>
+                <div className="quick-actions is-start">
                   <button className="primary" type="submit" disabled={imagingBusy}>
                     {imagingBusy ? "Generating..." : "Generate"}
                   </button>
@@ -1280,9 +1302,9 @@ export default function MedicalRecords({
                   />
                 </label>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Max 15 MB (sample limitation). For larger studies, upload in DocSpace directly.
+                  Max 15 MB (sample limitation). For larger studies, upload in the workspace directly.
                 </p>
-                <div className="quick-actions" style={{ justifyContent: "flex-start" }}>
+                <div className="quick-actions is-start">
                   <button className="primary" type="submit" disabled={imagingUploadBusy || !imagingUploadFile}>
                     {imagingUploadBusy ? "Uploading..." : "Upload"}
                   </button>

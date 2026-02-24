@@ -388,7 +388,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           />
         </section>
       ) : (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>{tab === "archived" ? "Archived projects" : "Project rooms"}</h3>
@@ -424,7 +424,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             </div>
           </div>
 
-          <div className="projects-grid" aria-label="Projects grid">
+          <div className="projects-grid scroll-area" aria-label="Projects grid">
             {filtered.map((p) => {
               const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
               const disabled = busy || loading;
@@ -607,7 +607,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   >
                     <div className="action-item-text">
                       <strong>Archive project</strong>
-                      <span className="muted">{canManage ? "Moves DocSpace rooms to archive." : "Only the project admin can archive."}</span>
+                      <span className="muted">{canManage ? "Moves project rooms to archive." : "Only the project admin can archive."}</span>
                     </div>
                     <span className="action-item-right" aria-hidden="true">&gt;</span>
                   </button>
@@ -616,7 +616,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                 {p.roomUrl ? (
                   <a className="action-item" href={p.roomUrl} target="_blank" rel="noreferrer" role="menuitem">
                     <div className="action-item-text">
-                      <strong>Open in DocSpace</strong>
+                      <strong>Open room</strong>
                       <span className="muted">Manage the room and permissions.</span>
                     </div>
                     <span className="action-item-right" aria-hidden="true">New tab</span>
@@ -636,7 +636,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                 >
                   <div className="action-item-text">
                     <strong>Remove from portal</strong>
-                    <span className="muted">{canManage ? "This does not delete the DocSpace room." : "Only the project admin can remove."}</span>
+                    <span className="muted">{canManage ? "This does not delete the project room." : "Only the project admin can remove."}</span>
                   </div>
                   <span className="action-item-right" aria-hidden="true">&gt;</span>
                 </button>
@@ -674,12 +674,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             Only the room admin can archive projects.
           </p>
         ) : null}
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This archives the related DocSpace rooms.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            If the project has open requests, you will be asked to cancel them first.
-          </p>
-        </div>
+        <EmptyState title="This archives the related project rooms." description="If the project has open requests, you will be asked to cancel them first." />
       </Modal>
 
       <Modal
@@ -705,12 +700,10 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>{archiveOpenRequests || "Some"} request(s) are still open.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Archiving will cancel open requests in the portal and move the related DocSpace rooms to archive.
-          </p>
-        </div>
+        <EmptyState
+          title={`${archiveOpenRequests || "Some"} request(s) are still open.`}
+          description="Archiving will cancel open requests in the portal and move the related project rooms to archive."
+        />
       </Modal>
 
       <Modal
@@ -741,12 +734,10 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             Only the room admin can restore projects.
           </p>
         ) : null}
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This restores the related DocSpace rooms from archive.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            You can set it as the current project afterwards.
-          </p>
-        </div>
+        <EmptyState
+          title="This restores the related project rooms from archive."
+          description="You can set it as the current project afterwards."
+        />
       </Modal>
 
       <Modal
@@ -784,12 +775,10 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>No current project is selected.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            Setting a current project makes it the default target for new requests.
-          </p>
-        </div>
+        <EmptyState
+          title="No current project is selected."
+          description="Setting a current project makes it the default target for new requests."
+        />
       </Modal>
 
       <Modal
@@ -816,7 +805,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             <input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} disabled={busy || loading} />
           </label>
           <p className="muted" style={{ margin: 0 }}>
-            Creates a new DocSpace room and makes it active.
+            Creates a new project room and makes it active.
           </p>
         </form>
       </Modal>
@@ -867,7 +856,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             {invite.access === "RoomManager"
               ? "Admins can invite people and cancel requests."
               : invite.access === "ReadWrite"
-                ? "Editors can work with files in DocSpace (if allowed by the room)."
+                ? "Editors can work with files (if allowed by the room)."
                 : invite.access === "Read"
                   ? "Viewers can open project files and track requests."
                   : "Respondents can fill forms and complete requests assigned to them."}
@@ -917,12 +906,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             Only the room admin can remove projects.
           </p>
         ) : null}
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This only removes the project from the portal list.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            The DocSpace room itself is not deleted.
-          </p>
-        </div>
+        <EmptyState title="This only removes the project from the portal list." description="The project room itself is not deleted." />
       </Modal>
     </div>
   );

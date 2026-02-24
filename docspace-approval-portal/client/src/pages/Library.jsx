@@ -6,6 +6,7 @@ import {
   listLibraryFiles,
   publishLibraryFile
 } from "../services/portalApi.js";
+import EmptyState from "../components/EmptyState.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import { toast } from "../utils/toast.js";
 
@@ -134,11 +135,12 @@ export default function Library({ session, busy }) {
             </div>
           </form>
         ) : (
-          <div className="empty">
-            <strong>Library room configured</strong>
-            <p className="muted" style={{ margin: "6px 0 0" }}>Ready to use.</p>
-            <details style={{ marginTop: 10 }}>
-              <summary className="muted" style={{ cursor: "pointer" }}>Advanced</summary>
+          <div style={{ display: "grid", gap: 10 }}>
+            <EmptyState title="Library room configured" description="Ready to use." />
+            <details>
+              <summary className="muted" style={{ cursor: "pointer" }}>
+                Advanced
+              </summary>
               <p className="muted" style={{ margin: "8px 0 0" }}>
                 Room ID: {status.libraryRoomId}
               </p>
@@ -172,21 +174,16 @@ export default function Library({ session, busy }) {
         </form>
       </section>
 
-      <section className="card">
+      <section className="card page-card">
         <div className="card-header">
           <h3>Draft files</h3>
           <p className="muted">Publish a file to make it available in the active project room.</p>
         </div>
 
         {!files.length ? (
-          <div className="empty">
-            <strong>No files</strong>
-            <p className="muted" style={{ margin: "6px 0 0" }}>
-              Add draft files to the library room in DocSpace, then click Refresh.
-            </p>
-          </div>
+          <EmptyState title="No files" description="Add draft files to the library room, then click Refresh." />
         ) : (
-          <div className="list">
+          <div className="list scroll-area">
             {files.map((f) => (
               <div key={f.id} className="list-row">
                 <div className="list-main">

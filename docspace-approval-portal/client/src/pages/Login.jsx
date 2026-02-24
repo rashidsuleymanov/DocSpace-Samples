@@ -10,7 +10,7 @@ export default function Login({ branding, busy, error, onLogin, onRegister, onOp
 
   const portalName = String(branding?.portalName || "").trim() || "Requests Center";
   const title = mode === "register" ? "Create account" : portalName;
-  const subtitle = mode === "register" ? "Create a DocSpace user." : "Sign in with your DocSpace account.";
+  const subtitle = mode === "register" ? "Create an account." : "Sign in with your account.";
 
   const canRegister = typeof onRegister === "function";
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import { createBulkLinks } from "../services/portalApi.js";
 import { deleteBulkBatch, listBulkBatches, restoreBulkBatch, saveBulkBatch, trashBulkBatch } from "../services/bulkHistoryStore.js";
@@ -50,10 +51,21 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
   const [draftId, setDraftId] = useState("");
   const [view, setView] = useState("create"); // create | history | trash
   const [historyTick, setHistoryTick] = useState(0);
+  const viewItems = useMemo(
+    () => [
+      { id: "create", label: "Create" },
+      { id: "history", label: "History" },
+      { id: "trash", label: "Trash" }
+    ],
+    []
+  );
 
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("Document");
   const [docUrl, setDocUrl] = useState("");
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBatchId, setDeleteBatchId] = useState("");
 
   const templateItems = useMemo(() => {
     const list = Array.isArray(templates) ? templates : [];
@@ -91,7 +103,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast("Copied", "success");
+      toast("Link copied", "success");
     } catch {
       // ignore
     }
@@ -183,19 +195,11 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
           <p className="muted">Generate multiple unique approval links from one template.</p>
         </div>
         <div className="topbar-actions">
-          <button type="button" onClick={() => setView("create")} disabled={busy || actionBusy}>
-            Create
-          </button>
-          <button type="button" onClick={() => setView("history")} disabled={busy || actionBusy}>
-            History
-          </button>
-          <button type="button" onClick={() => setView("trash")} disabled={busy || actionBusy}>
-            Trash
-          </button>
+          <Tabs value={view} onChange={(next) => setView(String(next || "create"))} items={viewItems} ariaLabel="Bulk links view" />
           <button type="button" onClick={() => onOpenRequests?.()} disabled={busy || actionBusy}>
             Open Requests
           </button>
-          <button type="button" onClick={saveDraft} disabled={busy || actionBusy || !selectedId}>
+          <button type="button" className="subtle" onClick={saveDraft} disabled={busy || actionBusy || !selectedId}>
             Save draft
           </button>
           <button
@@ -213,14 +217,14 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
         </div>
       </header>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <div className="alert alert-error">{error}</div> : null}
 
       {!hasProject ? (
-        <section className="card">
+        <section className="card page-card">
           <EmptyState title="Select a project first" description="Pick a project in the left sidebar. Links are created inside the current project (including Personal workspace)." />
         </section>
       ) : (
-        <section className="card">
+        <section className="card page-card">
           <div className="card-header compact">
             <div>
               <h3>{projectTitle}</h3>
@@ -263,7 +267,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
           </div>
 
           {view !== "create" ? (
-            <div className="list">
+            <div className="list scroll-area">
               {(view === "history" ? activeHistory : trashedHistory).length === 0 ? (
                 <EmptyState
                   title={view === "trash" ? "Trash is empty" : "No batches yet"}
@@ -330,10 +334,8 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
                           type="button"
                           className="danger"
                           onClick={() => {
-                            const ok = typeof window !== "undefined" ? window.confirm("Delete this batch permanently?") : true;
-                            if (!ok) return;
-                            deleteBulkBatch(session, "bulkLinks", b.id);
-                            setHistoryTick((v) => v + 1);
+                            setDeleteBatchId(String(b?.id || ""));
+                            setDeleteOpen(true);
                           }}
                           disabled={busy || actionBusy}
                         >
@@ -346,45 +348,77 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
               )}
             </div>
           ) : (
-          <div className="wizard">
+          <div className="wizard scroll-area">
+            <div className="wizard-stepper" aria-label="Bulk links steps">
+              <span className={`wizard-step${!flows.length ? " is-active" : ""}`}>Template</span>
+              <span className="wizard-step-sep" aria-hidden="true" />
+              <span className={`wizard-step${!flows.length ? "" : " is-active"}`}>Links</span>
+            </div>
             <div className="wizard-section">
               <div className="wizard-head">
-                <strong>1) Choose template</strong>
-                <span className="muted">{selectedTemplate?.title ? "Selected" : "Pick a PDF template"}</span>
+                <div className="wizard-head-left">
+                  <span className="wizard-badge" aria-hidden="true">
+                    1
+                  </span>
+                  <div className="wizard-head-text">
+                    <p className="wizard-title">Choose template</p>
+                    <p className="wizard-subtitle">Pick a PDF template to generate links.</p>
+                  </div>
+                </div>
+                <span className="muted">Pick a PDF template</span>
               </div>
-              <div className="auth-form" style={{ marginTop: 0 }}>
-                <label>
-                  <span>Search</span>
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search templates..." disabled={busy || actionBusy} />
-                </label>
+              <div className="wizard-toolbar">
+                <input
+                  className="wizard-search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search templates..."
+                  disabled={busy || actionBusy}
+                />
+                <span className="muted wizard-meta">{templateItems.length} template(s)</span>
               </div>
 
-              {!templateItems.length ? (
-                <EmptyState title="No templates found" description="Publish a PDF form template to this project first." />
-              ) : (
-                <div className="select-list">
-                  {templateItems.slice(0, 10).map((t) => {
+               {!templateItems.length ? (
+                 <EmptyState title="No templates found" description="Publish a PDF form template to this project first." />
+               ) : (
+                <div className="member-list is-compact" role="listbox" aria-label="Templates">
+                  {templateItems.map((t) => {
                     const selected = String(selectedId) === String(t.id);
                     return (
-                      <button key={t.id} type="button" className={`select-row${selected ? " is-selected" : ""}`} onClick={() => setSelectedId(String(t.id))} disabled={busy || actionBusy}>
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`select-row${selected ? " is-selected" : ""}`}
+                        onClick={() => setSelectedId(String(t.id))}
+                        disabled={busy || actionBusy}
+                        role="option"
+                        aria-selected={selected}
+                      >
                         <div className="select-row-main">
                           <strong className="truncate">{t.title || `File ${t.id}`}</strong>
+                          <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
                         </div>
                         <span className="select-row-right" aria-hidden="true">
-                          {selected ? "Selected" : ">"}
+                          {selected ? "\u2713" : ""}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-              )}
-            </div>
-
-            <div className="wizard-divider" />
+               )}
+             </div>
 
             <div className="wizard-section">
               <div className="wizard-head">
-                <strong>2) How many links</strong>
+                <div className="wizard-head-left">
+                  <span className="wizard-badge" aria-hidden="true">
+                    2
+                  </span>
+                  <div className="wizard-head-text">
+                    <p className="wizard-title">How many links</p>
+                    <p className="wizard-subtitle">Choose how many unique links to create.</p>
+                  </div>
+                </div>
                 <span className="muted">1 to 50</span>
               </div>
               <div className="auth-form" style={{ marginTop: 0 }}>
@@ -397,9 +431,10 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
                     {actionBusy ? "Loading..." : "Generate links"}
                   </button>
                 </div>
-                <p className="muted" style={{ margin: 0 }}>
-                  Each link is a separate file copy in the project, so you can track them in Requests.
-                </p>
+                <div className="note">
+                  <strong>Note</strong>
+                  <p className="muted">Each link creates a separate file copy in the project, so you can track them in Requests.</p>
+                </div>
               </div>
             </div>
           </div>
@@ -435,6 +470,28 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
       )}
 
       <DocSpaceModal open={docOpen} title={docTitle} url={docUrl} onClose={() => setDocOpen(false)} />
+
+      <ConfirmModal
+        open={deleteOpen}
+        title="Delete batch?"
+        message="Delete this batch permanently? This cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        busy={busy || actionBusy}
+        onClose={() => {
+          if (busy || actionBusy) return;
+          setDeleteOpen(false);
+          setDeleteBatchId("");
+        }}
+        onConfirm={() => {
+          const id = String(deleteBatchId || "").trim();
+          if (!id) return;
+          deleteBulkBatch(session, "bulkLinks", id);
+          setHistoryTick((v) => v + 1);
+          setDeleteOpen(false);
+          setDeleteBatchId("");
+        }}
+      />
     </div>
   );
 }

@@ -741,7 +741,7 @@ export default function Requests({
         setDirGroups(Array.isArray(groupsRes.value?.groups) ? groupsRes.value.groups : []);
       } else {
         setDirGroups([]);
-        nextError = groupsRes?.reason?.message || "Failed to load DocSpace directory";
+        nextError = groupsRes?.reason?.message || "Failed to load directory";
       }
 
       const peopleRes = results[1];
@@ -753,7 +753,7 @@ export default function Requests({
       } else {
         setDirPeople([]);
         setDirPeopleTotal(0);
-        if (!nextError) nextError = peopleRes?.reason?.message || "Failed to load DocSpace directory";
+        if (!nextError) nextError = peopleRes?.reason?.message || "Failed to load directory";
       }
 
       setDirectoryError(nextError);
@@ -1291,78 +1291,75 @@ export default function Requests({
 
       {error || localError ? <p className="error">{error || localError}</p> : null}
 
-      <section className="card">
+      <section className="card page-card">
         <div className="card-header compact">
           <div>
             <h3>Requests</h3>
             <p className="muted">{scope === "current" ? "Showing requests from the current project." : "Showing requests from all projects you can access."}</p>
           </div>
-          <div className="card-header-actions">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search..."
-              disabled={busy || (scope === "current" && !hasProject)}
-              style={{ maxWidth: 260 }}
-            />
-            {flowsRefreshing ? (
-              <span className="muted" style={{ fontSize: 12 }}>
-                Updating...
-              </span>
-            ) : updatedLabel ? (
-              <span className="muted" style={{ fontSize: 12 }}>
-                Updated {updatedLabel}
-              </span>
-            ) : null}
-            <span className="muted">{filteredGroups.length} shown</span>
-            {(() => {
-              const candidates =
-                statusFilter === "archived"
-                  ? filteredGroups.filter((g) => {
-                      const f = g?.primaryFlow || g?.flows?.[0] || null;
-                      return f && Boolean(f?.archivedAt) && canManageFlow(f);
-                    })
-                  : statusFilter === "completed" || statusFilter === "other"
+          <div className="card-header-actions request-header-actions">
+            <div className="request-header-tools">
+              {flowsRefreshing ? (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Updating...
+                </span>
+              ) : updatedLabel ? (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Updated {updatedLabel}
+                </span>
+              ) : null}
+              <span className="muted">{filteredGroups.length} shown</span>
+              {(() => {
+                const candidates =
+                  statusFilter === "archived"
                     ? filteredGroups.filter((g) => {
                         const f = g?.primaryFlow || g?.flows?.[0] || null;
-                        const st = String(g?.status || f?.status || "");
-                        if (!f) return false;
-                        if (st !== "Completed" && st !== "Canceled") return false;
-                        return canManageFlow(f);
+                        return f && Boolean(f?.archivedAt) && canManageFlow(f);
                       })
-                    : [];
+                    : statusFilter === "completed" || statusFilter === "other"
+                      ? filteredGroups.filter((g) => {
+                          const f = g?.primaryFlow || g?.flows?.[0] || null;
+                          const st = String(g?.status || f?.status || "");
+                          if (!f) return false;
+                          if (st !== "Completed" && st !== "Canceled") return false;
+                          return canManageFlow(f);
+                        })
+                      : [];
 
-              if (!candidates.length) return null;
-              return (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBulkCandidates(candidates);
-                    setBulkMode(statusFilter === "archived" ? "restore" : "archive");
-                    setBulkOpen(true);
-                  }}
-                  disabled={busy || actionBusy}
-                >
-                  {statusFilter === "archived" ? `Restore shown (${candidates.length})` : `Archive shown (${candidates.length})`}
-                </button>
-              );
-            })()}
-            <button
-              type="button"
-              onClick={() => (typeof onRefreshFlows === "function" ? onRefreshFlows() : null)}
-              disabled={busy || flowsRefreshing || !token}
-            >
-              Refresh
-            </button>
-            <label className="inline-check" style={{ marginLeft: 6 }}>
-              <input
-                type="checkbox"
-                checked={Boolean(autoRefresh)}
-                onChange={(e) => setAutoRefresh(Boolean(e.target.checked))}
-                disabled={busy || !token}
-              />
-              <span>Auto-refresh</span>
-            </label>
+                if (!candidates.length) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkCandidates(candidates);
+                      setBulkMode(statusFilter === "archived" ? "restore" : "archive");
+                      setBulkOpen(true);
+                    }}
+                    disabled={busy || actionBusy}
+                  >
+                    {statusFilter === "archived"
+                      ? `Restore shown (${candidates.length})`
+                      : `Archive shown (${candidates.length})`}
+                  </button>
+                );
+              })()}
+              <button
+                type="button"
+                onClick={() => (typeof onRefreshFlows === "function" ? onRefreshFlows() : null)}
+                disabled={busy || flowsRefreshing || !token}
+              >
+                Refresh
+              </button>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={Boolean(autoRefresh)}
+                  onChange={(e) => setAutoRefresh(Boolean(e.target.checked))}
+                  disabled={busy || !token}
+                />
+                <span>Auto-refresh</span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -1435,9 +1432,16 @@ export default function Requests({
               Archived
             </button>
           </div>
+          <input
+            className="request-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search..."
+            disabled={busy || (scope === "current" && !hasProject)}
+          />
         </div>
 
-        <div className="list">
+        <div className="list scroll-area">
           {statusFilter === "archived" && archivedError ? <p className="error">{archivedError}</p> : null}
           {statusFilter === "trash" && trashedError ? <p className="error">{trashedError}</p> : null}
           {scope === "current" && !hasProject ? (
@@ -1531,11 +1535,15 @@ export default function Requests({
                 String(flow?.dueDate || "").trim() ||
                 String((Array.isArray(group?.flows) ? group.flows.find((f) => String(f?.dueDate || "").trim())?.dueDate : "") || "").trim();
               const isOverdue = (Array.isArray(group?.flows) ? group.flows : []).some((f) => isOverdueFlow(f));
+              const createdAt = String(group.createdAt || flow.createdAt || "")
+                .slice(0, 19)
+                .replace("T", " ")
+                .trim();
 
               return (
-              <div key={group.id} className="list-row request-row">
-                <div className="list-main">
-                  <strong className="truncate">{title}</strong>
+               <div key={group.id} className="list-row request-row">
+                 <div className="list-main">
+                   <strong className="truncate">{title}</strong>
                   <span className="muted request-row-meta">
                       {isFillSign ? <StatusPill tone="blue">Fill &amp; Sign</StatusPill> : null}{" "}
                       {isSharedSign ? <StatusPill tone="gray">Contract</StatusPill> : null}{" "}
@@ -1555,16 +1563,16 @@ export default function Requests({
                     {statusFilter === "archived" && flow?.archivedAt ? (
                       <StatusPill tone="gray">{`Archived: ${String(flow.archivedAt).slice(0, 10)}`}</StatusPill>
                     ) : null}{" "}
-                    {scope !== "current" ? (
-                      <StatusPill tone="gray">
-                        {(() => {
-                          const rid = String(flow?.projectRoomId || group?.projectRoomId || "").trim();
-                          if (!rid) return "Unassigned";
-                          return roomTitleById.get(rid) || "Project";
-                        })()}
-                      </StatusPill>
-                    ) : null}{" "}
-                    <span className="muted">Created {(group.createdAt || flow.createdAt || "").slice(0, 19).replace("T", " ")}</span>
+                     {scope !== "current" ? (
+                       <StatusPill tone="gray">
+                         {(() => {
+                           const rid = String(flow?.projectRoomId || group?.projectRoomId || "").trim();
+                           if (!rid) return "Unassigned";
+                           return roomTitleById.get(rid) || "Project";
+                         })()}
+                       </StatusPill>
+                     ) : null}{" "}
+                    {createdAt ? <StatusPill tone="gray">{`Created: ${createdAt}`}</StatusPill> : null}
                   </span>
                 </div>
                 <div className="list-actions">
@@ -1699,7 +1707,7 @@ export default function Requests({
                     disabled={busy || actionBusy || !openUrl}
                   >
                     <span>Copy link</span>
-                    <span className="menu-item-meta">Requires DocSpace sign-in</span>
+                    <span className="menu-item-meta">Requires sign-in</span>
                   </button>
                 ) : null}
 
@@ -1845,14 +1853,12 @@ export default function Requests({
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>{bulkCandidates.length} request(s) will be updated.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            {bulkMode === "restore"
-              ? "This returns requests to the active list."
-              : "This moves completed or canceled requests out of the active list."}
-          </p>
-        </div>
+        <EmptyState
+          title={`${bulkCandidates.length} request(s) will be updated.`}
+          description={
+            bulkMode === "restore" ? "This returns requests to the active list." : "This moves completed or canceled requests out of the active list."
+          }
+        />
       </Modal>
 
       <Modal
@@ -2314,7 +2320,7 @@ export default function Requests({
 
                     <div className="recipient-panel">
                       <div className="recipient-head">
-                        <strong>DocSpace contacts</strong>
+                        <strong>Contacts</strong>
                         <span className="muted">{directoryRows.length} shown</span>
                       </div>
 
@@ -2375,7 +2381,7 @@ export default function Requests({
                       {directoryLoading ? <EmptyState title="Loading directory..." /> : null}
 
                       {!directoryLoading && dirMode === "people" && !String(dirPeopleQuery || "").trim() && directoryRows.length === 0 ? (
-                        <EmptyState title="No people found" description="Your DocSpace directory is empty, or this user has no access." />
+                        <EmptyState title="No people found" description="The directory is empty, or this user has no access." />
                       ) : null}
 
                       {!directoryLoading && dirMode === "groups" && (dirSelectedGroupIds instanceof Set ? dirSelectedGroupIds.size : 0) === 0 ? (
@@ -2713,7 +2719,7 @@ export default function Requests({
                         </button>
                         {sendKind === "sharedSign" && sendFlow?.documentRoomUrl ? (
                           <a className="btn" href={String(sendFlow.documentRoomUrl)} target="_blank" rel="noreferrer">
-                            Open signing room
+                            Open room
                           </a>
                         ) : null}
                         <button
@@ -3111,12 +3117,10 @@ export default function Requests({
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>Confirm that you finished signing.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            This updates the status in the portal for your recipient entry.
-          </p>
-        </div>
+        <EmptyState
+          title="Confirm that you finished signing."
+          description="This updates the status in the portal for your recipient entry."
+        />
       </Modal>
 
       <Modal
@@ -3144,12 +3148,7 @@ export default function Requests({
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This removes the request from portal lists.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            DocSpace files and room access stay unchanged.
-          </p>
-        </div>
+        <EmptyState title="This removes the request from portal lists." description="Files and room access stay unchanged." />
       </Modal>
 
       <Modal
@@ -3178,12 +3177,7 @@ export default function Requests({
           </>
         }
       >
-        <div className="empty" style={{ marginTop: 0 }}>
-          <strong>This marks the request as canceled in the portal.</strong>
-          <p className="muted" style={{ margin: "6px 0 0" }}>
-            It won't delete any DocSpace files or revoke access.
-          </p>
-        </div>
+        <EmptyState title="This marks the request as canceled in the portal." description="It won't delete any files or revoke access." />
       </Modal>
 
       <RequestDetailsModal

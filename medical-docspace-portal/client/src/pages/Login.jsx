@@ -1,11 +1,22 @@
-﻿import { useState } from "react";
+import { useState } from "react";
+import { toast } from "../utils/toast.js";
 
 export default function Login({ busy, error, success, onLogin, onGoRegister, onGoDoctor }) {
   const [form, setForm] = useState({ email: "", password: "" });
 
   const submit = (event) => {
     event.preventDefault();
-    onLogin(form);
+    const email = String(form.email || "").trim();
+    const password = String(form.password || "");
+    if (!email) {
+      toast.error("Please enter your email.");
+      return;
+    }
+    if (!password) {
+      toast.error("Please enter your password.");
+      return;
+    }
+    onLogin({ email, password });
   };
 
   return (
@@ -16,9 +27,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           City Clinic
         </div>
         <h1>Patient sign in</h1>
-        <p className="muted">
-          Sign in to access your medical room, documents, and upcoming appointments.
-        </p>
+        <p className="muted">Sign in to access your medical room, documents, and upcoming appointments.</p>
         <form className="auth-form" onSubmit={submit}>
           <label>
             Email
@@ -43,12 +52,12 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           <button className="primary" type="submit" disabled={busy}>
             {busy ? "Signing in..." : "Sign in"}
           </button>
-          <button className="secondary" type="button">
-            Sign in with Google
+          <button className="secondary" type="button" disabled title="Coming soon">
+            Sign in with Google (coming soon)
           </button>
         </form>
-        {success && <p className="muted">{success}</p>}
-        {error && <p className="muted">Sign-in error: {error}</p>}
+        {success && <div className="success-banner">{success}</div>}
+        {error && <div className="error-banner">Sign-in error: {error}</div>}
         <div className="auth-footer">
           <button className="link" onClick={onGoRegister}>
             Create a new patient account
