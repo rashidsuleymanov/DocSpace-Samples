@@ -71,6 +71,26 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
     return map;
   }, [projects]);
 
+  const projectIdByRoomId = useMemo(() => {
+    const list = Array.isArray(projects) ? projects : [];
+    const map = new Map();
+    for (const p of list) {
+      const rid = normalize(p?.roomId);
+      const pid = normalize(p?.id);
+      if (!rid || !pid) continue;
+      map.set(rid, pid);
+    }
+    return map;
+  }, [projects]);
+
+  const canManageFlow = (flow) => {
+    const perms = projectPerms && typeof projectPerms === "object" ? projectPerms : {};
+    const rid = normalize(flow?.projectRoomId);
+    const pid = rid ? projectIdByRoomId.get(rid) : "";
+    if (!pid) return false;
+    return Boolean(perms?.[String(pid)]);
+  };
+
   useEffect(() => {
     if (!token) return;
     setLoading(true);
@@ -435,6 +455,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
               const completedAt = String(flow?.completedAt || flow?.updatedAt || flow?.createdAt || "");
               const archivedAt = normalize(flow?.archivedAt);
               const trashedAt = normalize(flow?.trashedAt);
+              const canManage = canManageFlow(flow);
               return (
                 <div key={normalize(flow?.resultFileId) || normalize(flow?.id)} className="list-row request-row">
                   <div className="list-main">
@@ -474,59 +495,68 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
                     >
                       Activity
                     </button>
-                    {tab === "trash" ? (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const id = normalize(flow?.id);
-                          if (!id || !token) return;
-                          setLoading(true);
-                          setError("");
-                          try {
-                            await untrashFlow({ token, flowId: id });
-                            if (tab === "team") {
-                              await refreshTeam().catch(() => null);
-                            } else {
-                              const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
-                              setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                    {canManage ? (
+                      tab === "trash" ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const id = normalize(flow?.id);
+                            if (!id || !token) return;
+                            setLoading(true);
+                            setError("");
+                            try {
+                              await untrashFlow({ token, flowId: id });
+                              toast("Restored", "success");
+                              if (tab === "team") {
+                                await refreshTeam().catch(() => null);
+                              } else {
+                                const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
+                                setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                              }
+                            } catch (e) {
+                              const msg = e?.message || "Restore failed";
+                              setError(msg);
+                              toast(msg, "error");
+                            } finally {
+                              setLoading(false);
                             }
-                          } catch (e) {
-                            setError(e?.message || "Restore failed");
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                        disabled={busy || loading}
-                      >
-                        Restore
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const id = normalize(flow?.id);
-                          if (!id || !token) return;
-                          setLoading(true);
-                          setError("");
-                          try {
-                            await trashFlow({ token, flowId: id });
-                            if (tab === "team") {
-                              await refreshTeam().catch(() => null);
-                            } else {
-                              const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
-                              setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                          }}
+                          disabled={busy || loading}
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const id = normalize(flow?.id);
+                            if (!id || !token) return;
+                            setLoading(true);
+                            setError("");
+                            try {
+                              await trashFlow({ token, flowId: id });
+                              toast("Moved to Trash", "success");
+                              if (tab === "team") {
+                                await refreshTeam().catch(() => null);
+                              } else {
+                                const data = await listFlows({ token, includeArchived: true, includeTrashed: true }).catch(() => null);
+                                setFlows(Array.isArray(data?.flows) ? data.flows : []);
+                              }
+                            } catch (e) {
+                              const msg = e?.message || "Trash failed";
+                              setError(msg);
+                              toast(msg, "error");
+                            } finally {
+                              setLoading(false);
                             }
-                          } catch (e) {
-                            setError(e?.message || "Trash failed");
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
-                        disabled={busy || loading}
-                      >
-                        Move to Trash
-                      </button>
-                    )}
+                          }}
+                          disabled={busy || loading}
+                          title="Admins can hide results by moving them to Trash."
+                        >
+                          Move to Trash
+                        </button>
+                      )
+                    ) : null}
                   </div>
                 </div>
               );

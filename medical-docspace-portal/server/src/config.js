@@ -21,6 +21,8 @@ const labRoomTitleFallbacks = (process.env.DOCSPACE_LAB_ROOM_TITLE_FALLBACKS || 
   .filter(Boolean);
 const medicalRecordTemplateId = process.env.DOCSPACE_MEDICAL_RECORD_TEMPLATE_ID || "3174060";
 const autoFillSignTemplateId = process.env.DOCSPACE_AUTO_FILL_SIGN_TEMPLATE_ID || "3174323";
+const clientTemplatesFolderTitle = process.env.DOCSPACE_CLIENT_TEMPLATES_FOLDER_TITLE || "Client Templates";
+const clientTemplatesFolderId = process.env.DOCSPACE_CLIENT_TEMPLATES_FOLDER_ID || "";
 const ticketTemplateId = process.env.DOCSPACE_TEMPLATE_TICKET_ID || "";
 const templateContractId = process.env.DOCSPACE_TEMPLATE_CONTRACT_ID || "";
 const templateWelcomeId = process.env.DOCSPACE_TEMPLATE_WELCOME_ID || "";
@@ -38,6 +40,8 @@ export const config = {
   labRoomTitleFallbacks,
   medicalRecordTemplateId,
   autoFillSignTemplateId,
+  clientTemplatesFolderTitle,
+  clientTemplatesFolderId,
   ticketTemplateId,
   templateContractId,
   templateWelcomeId

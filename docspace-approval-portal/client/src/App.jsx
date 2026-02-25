@@ -143,6 +143,13 @@ export default function App() {
     [session?.token]
   );
 
+  useEffect(() => {
+    if (!session?.token) return;
+    const handler = () => refreshActiveProject().catch(() => null);
+    window.addEventListener("portal:projectChanged", handler);
+    return () => window.removeEventListener("portal:projectChanged", handler);
+  }, [refreshActiveProject, session?.token]);
+
   const refreshFlows = useMemo(
     () => async (active) => {
       if (!active?.token) return;
@@ -179,7 +186,10 @@ export default function App() {
     refreshActiveProject().catch(() => null);
     const handler = () => refreshActiveProject().catch(() => null);
     const draftsHandler = () => refreshDraftsSummary(session).catch(() => null);
-    const flowsHandler = () => refreshFlows(session).catch(() => null);
+    const flowsHandler = () => {
+      refreshFlows(session).catch(() => null);
+      refreshActiveProject().catch(() => null);
+    };
     const templatesHandler = () => loadTemplatesForSession(session).catch(() => null);
     window.addEventListener("portal:projectChanged", handler);
     window.addEventListener("portal:draftsChanged", draftsHandler);

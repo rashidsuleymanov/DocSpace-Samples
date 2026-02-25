@@ -1,6 +1,7 @@
 const navItems = [
   { id: "doctor-schedule", label: "Schedule" },
   { id: "doctor-patients", label: "Patients" },
+  { id: "doctor-inbox", label: "Incoming" },
   { id: "doctor-fill-sign", label: "Fill & Sign" }
 ];
 

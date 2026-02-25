@@ -162,6 +162,7 @@ export function recordFillSignAssignment({
   templateFileId,
   templateTitle,
   requestedBy,
+  initiatedBy,
   medicalRoomId,
   shareLink,
   shareToken
@@ -181,13 +182,26 @@ export function recordFillSignAssignment({
     templateTitle: templateTitle ? String(templateTitle) : null,
     medicalRoomId: medicalRoomId ? String(medicalRoomId) : null,
     requestedBy: requestedBy ? String(requestedBy) : null,
+    initiatedBy: initiatedBy ? String(initiatedBy) : null,
     shareLink: shareLink ? String(shareLink) : null,
     shareToken: shareToken ? String(shareToken) : null,
-    createdAt: new Date().toISOString()
+    state: "active",
+    stateBy: null,
+    stateAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: null
   };
   fillSignAssignments.push(entry);
   scheduleSave();
   return entry;
+}
+
+export function listFillSignAssignments({ initiatedBy } = {}) {
+  const filterInitiator = initiatedBy ? String(initiatedBy).trim() : "";
+  const items = filterInitiator
+    ? fillSignAssignments.filter((item) => String(item?.initiatedBy || "") === filterInitiator)
+    : fillSignAssignments;
+  return [...items].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 export function listFillSignAssignmentsForRoom(patientRoomId) {
@@ -224,5 +238,25 @@ export function removeFillSignAssignment({ patientRoomId, fileId } = {}) {
   fillSignAssignments.splice(idx, 1);
   scheduleSave();
   return true;
+}
+
+export function setFillSignAssignmentState({ patientRoomId, assignmentId, state, actor } = {}) {
+  const rid = String(patientRoomId || "").trim();
+  const aid = String(assignmentId || "").trim();
+  const next = String(state || "").trim().toLowerCase();
+  if (!rid || !aid) return null;
+  if (!["active", "canceled", "declined"].includes(next)) return null;
+  const idx = fillSignAssignments.findIndex((item) => item.id === aid && item.patientRoomId === rid);
+  if (idx < 0) return null;
+  const now = new Date().toISOString();
+  fillSignAssignments[idx] = {
+    ...fillSignAssignments[idx],
+    state: next,
+    stateBy: actor ? String(actor) : null,
+    stateAt: now,
+    updatedAt: now
+  };
+  scheduleSave();
+  return fillSignAssignments[idx];
 }
 

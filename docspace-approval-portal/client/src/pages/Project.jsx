@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import AuditModal from "../components/AuditModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import EmailChipsInput from "../components/EmailChipsInput.jsx";
 import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
@@ -11,13 +12,14 @@ import {
   activateProject,
   cancelFlow,
   completeFlow,
+  deleteProjectTemplateFromProject,
   listDrafts,
   getProjectMembers,
   getProjectsSidebar,
   inviteProject,
   listProjectFlows,
   listSharedTemplates,
-  listTemplates,
+  listProjectTemplates,
   publishDraft,
   removeProjectMember
 } from "../services/portalApi.js";
@@ -143,6 +145,12 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   const [addFormShared, setAddFormShared] = useState([]);
   const [addFormSelected, setAddFormSelected] = useState(null);
   const [creatingTemplateId, setCreatingTemplateId] = useState("");
+  const [removeTemplateOpen, setRemoveTemplateOpen] = useState(false);
+  const [removeTemplateEntry, setRemoveTemplateEntry] = useState(null);
+  const [removeTemplateBusy, setRemoveTemplateBusy] = useState(false);
+
+  const isArchivedProject = Boolean(project?.archivedAt);
+  const isProjectReadOnly = isArchivedProject;
 
   const refresh = async () => {
     const pid = normalize(projectId);
@@ -160,13 +168,15 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
       setProject(found || membersRes?.project || null);
       setMembers(Array.isArray(membersRes?.members) ? membersRes.members : []);
 
-      if (found?.id) {
+      const isArchivedProject = Boolean(found?.archivedAt);
+
+      if (found?.id && !isArchivedProject) {
         await activateProject(found.id).catch(() => null);
         window.dispatchEvent(new CustomEvent("portal:projectChanged"));
       }
 
       if (token) {
-        const templatesRes = await listTemplates({ token }).catch(() => null);
+        const templatesRes = await listProjectTemplates({ token, projectId: pid }).catch(() => null);
         setTemplates(Array.isArray(templatesRes?.templates) ? templatesRes.templates : []);
       } else {
         setTemplates([]);
@@ -222,9 +232,13 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
 
   useEffect(() => {
     if (tab !== "requests") return;
+    // If the user switches projects while staying on the Requests tab,
+    // ensure we don't keep showing the previous project's list.
+    setProjectFlows([]);
+    setFlowsError("");
     refreshFlows().catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, projectId, token]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -450,7 +464,6 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   const tabItems = useMemo(
     () => [
       { id: "requests", label: "Requests" },
-      { id: "forms", label: "Forms" },
       { id: "people", label: "People" }
     ],
     []
@@ -520,7 +533,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     setNotice("");
     try {
       await publishDraft({ token, fileId, projectId: pid, destination: "project", activate: true });
-      const templatesRes = await listTemplates({ token }).catch(() => null);
+      const templatesRes = await listProjectTemplates({ token, projectId: pid }).catch(() => null);
       setTemplates(Array.isArray(templatesRes?.templates) ? templatesRes.templates : []);
       setNotice("Form added to this project.");
       toast("Form added", "success");
@@ -548,9 +561,16 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
     setError("");
     setNotice("");
     try {
+      const failures = [];
       for (const id of ids) {
         // eslint-disable-next-line no-await-in-loop
-        await cancelFlow({ token, flowId: id }).catch(() => null);
+        await cancelFlow({ token, flowId: id }).catch((e) => failures.push(e));
+      }
+      if (failures.length) {
+        const msg = failures[0]?.message || "Some requests could not be canceled";
+        setError(msg);
+        toast(msg, "error");
+        return;
       }
       setCancelOpen(false);
       setCancelEntry(null);
@@ -715,22 +735,28 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
   return (
     <div className="page-shell">
       <header className="topbar">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0 }}>{project?.title || "Project"}</h2>
+        <div className="topbar-main">
+          <div className="topbar-title-row">
+            <h2 className="topbar-title" title={project?.title || ""}>
+              {project?.title || "Project"}
+            </h2>
             <StatusPill tone={canManageProject ? "blue" : "gray"}>{myRoleLabel}</StatusPill>
           </div>
-          <p className="muted">Manage people and forms for this project.</p>
+          <p className="muted">Manage requests, templates, and people for this project.</p>
+          {isProjectReadOnly ? <p className="muted" style={{ marginTop: -8 }}>Archived project — read-only view.</p> : null}
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={onBack} disabled={busy || loading}>
             Back
           </button>
-          {typeof onOpenDrafts === "function" ? (
-            <button type="button" onClick={onOpenDrafts} disabled={busy || loading}>
-              Templates
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => setTab("templates")}
+            disabled={busy || loading || !project?.id || !token}
+            title="Templates published to this project"
+          >
+            Templates
+          </button>
           <button type="button" onClick={refresh} disabled={busy || loading}>
             Refresh
           </button>
@@ -738,7 +764,8 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             type="button"
             className="primary"
             onClick={() => setInviteOpen(true)}
-            disabled={busy || loading || !project?.id || !canManageProject}
+            disabled={busy || loading || !project?.id || !canManageProject || isProjectReadOnly}
+            title={isProjectReadOnly ? "Archived projects are read-only" : ""}
           >
             Invite people
           </button>
@@ -765,7 +792,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                     ? setRequestsQuery(e.target.value)
                     : setFormsQuery(e.target.value)
               }
-              placeholder={tab === "people" ? "Search people..." : tab === "requests" ? "Search requests..." : "Search forms..."}
+              placeholder={tab === "people" ? "Search people..." : tab === "requests" ? "Search requests..." : "Search templates..."}
               disabled={busy || loading}
               className="templates-search"
             />
@@ -803,7 +830,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                   </span>
                 </div>
                 <div className="list-actions">
-                  {m.type === "user" && !m.isOwner ? (
+                  {m.type === "user" && !m.isOwner && !isProjectReadOnly ? (
                     <button
                       type="button"
                       className="danger"
@@ -881,7 +908,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                   String(f?.dueDate || "").trim() ||
                   String((Array.isArray(g?.flows) ? g.flows.find((x) => String(x?.dueDate || "").trim())?.dueDate : "") || "").trim();
                 const isOverdue = Boolean(status === "InProgress" && dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && dueDate < todayIso);
-                const canCancel = flowsCanManage && status !== "Completed" && status !== "Canceled";
+                const canCancel = flowsCanManage && status === "InProgress" && !isProjectReadOnly;
                 const recipients = Array.isArray(f?.recipientEmails) ? f.recipientEmails : [];
                 const isAssigned = meEmail && recipients.map((e) => String(e || "").trim().toLowerCase()).includes(meEmail);
                 const recipientsLabel = formatRecipients(recipients);
@@ -889,7 +916,8 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                   normalizeKind(f?.kind) === "sharedSign" &&
                   status !== "Completed" &&
                   status !== "Canceled" &&
-                  (flowsCanManage || isAssigned);
+                  (flowsCanManage || isAssigned) &&
+                  !isProjectReadOnly;
 
                 return (
                   <div key={g.id} className="list-row">
@@ -953,23 +981,28 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
             )}
           </div>
         </section>
-      ) : (
+      ) : tab === "templates" ? (
         <section className="card page-card">
           <div className="card-header compact">
             <div>
-              <h3>Forms</h3>
+              <h3>Project templates</h3>
               <p className="muted">Templates published to this project.</p>
             </div>
             <div className="card-header-actions">
+              {typeof onOpenDrafts === "function" ? (
+                <button type="button" onClick={onOpenDrafts} disabled={busy || loading}>
+                  Open library
+                </button>
+              ) : null}
               <span className="muted">{filteredTemplates.length} shown</span>
               <button
                 type="button"
                 className="primary"
                 onClick={openAddForm}
-                disabled={busy || loading || !token || !project?.id || !canManageProject}
-                title={!canManageProject ? "Only the project admin can add forms" : ""}
+                disabled={busy || loading || !token || !project?.id || !canManageProject || isProjectReadOnly}
+                title={isProjectReadOnly ? "Archived projects are read-only" : !canManageProject ? "Only the project admin can add templates" : ""}
               >
-                Add form
+                Add template
               </button>
             </div>
           </div>
@@ -977,12 +1010,12 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
           <div className="list scroll-area">
             {!filteredTemplates.length ? (
               <EmptyState
-                title="No forms found"
+                title="No templates found"
                 description="Publish a template to this project to make it available here."
                 actions={
                   typeof onOpenDrafts === "function" ? (
                     <button type="button" className="primary" onClick={onOpenDrafts} disabled={busy || loading}>
-                      Open Templates
+                      Open library
                     </button>
                   ) : null
                 }
@@ -1032,13 +1065,27 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
                       Open in new tab
                     </a>
                   ) : null}
+                  {canManageProject ? (
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        setRemoveTemplateEntry(t);
+                        setRemoveTemplateOpen(true);
+                      }}
+                      disabled={busy || loading || isProjectReadOnly}
+                      title="Remove this template from the current project"
+                    >
+                      Unpublish
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))
           )}
         </div>
         </section>
-      )}
+      ) : null}
 
       <Modal
         open={inviteOpen}
@@ -1070,8 +1117,13 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         ) : null}
         <form className="auth-form" onSubmit={(e) => e.preventDefault()} style={{ marginTop: 0 }}>
           <label>
-            <span>Emails (comma / new line)</span>
-            <textarea value={invite.emails} onChange={(e) => setInvite((s) => ({ ...s, emails: e.target.value }))} />
+            <span>Emails</span>
+            <EmailChipsInput
+              value={invite.emails}
+              onChange={(next) => setInvite((s) => ({ ...s, emails: next }))}
+              placeholder="Type an email and press Enter"
+              disabled={busy || loading || !canManageProject}
+            />
           </label>
           <label>
             <span>Role</span>
@@ -1254,6 +1306,68 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         <EmptyState title="This revokes access to the project room." description="The user can be re-invited later." />
       </Modal>
 
+      <Modal
+        open={removeTemplateOpen}
+        title={removeTemplateEntry?.title ? `Unpublish "${removeTemplateEntry.title}"?` : "Unpublish template?"}
+        onClose={() => {
+          if (removeTemplateBusy) return;
+          setRemoveTemplateOpen(false);
+          setRemoveTemplateEntry(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setRemoveTemplateOpen(false);
+                setRemoveTemplateEntry(null);
+              }}
+              disabled={busy || loading || removeTemplateBusy}
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={async () => {
+                const fid = normalize(removeTemplateEntry?.id);
+                if (!fid) return;
+                setRemoveTemplateBusy(true);
+                setError("");
+                setNotice("");
+                try {
+                  if (!token) throw new Error("Authorization token is required");
+                  const pid = normalize(project?.id || projectId);
+                  if (!pid) throw new Error("projectId is required");
+                  await deleteProjectTemplateFromProject({ token, projectId: pid, fileId: fid });
+                  const templatesRes = await listProjectTemplates({ token, projectId: pid }).catch(() => null);
+                  setTemplates(Array.isArray(templatesRes?.templates) ? templatesRes.templates : []);
+                  setRemoveTemplateOpen(false);
+                  setRemoveTemplateEntry(null);
+                  setNotice("Template unpublished from this project.");
+                  toast("Template unpublished", "success");
+                } catch (e) {
+                  const msg = e?.message || "Unpublish failed";
+                  setError(msg);
+                  toast(msg, "error");
+                } finally {
+                  setRemoveTemplateBusy(false);
+                }
+              }}
+              disabled={busy || loading || removeTemplateBusy || !removeTemplateEntry?.id || !canManageProject}
+              title={!canManageProject ? "Only the project admin can unpublish templates" : ""}
+            >
+              {removeTemplateBusy ? "Loading..." : "Unpublish"}
+            </button>
+          </>
+        }
+      >
+        <EmptyState
+          title="This removes the file from this project's Templates folder."
+          description="It does not delete your original draft in My documents."
+        />
+      </Modal>
+
       <RequestDetailsModal
         open={detailsOpen}
         onClose={() => {
@@ -1288,7 +1402,7 @@ export default function Project({ session, busy, projectId, onBack, onStartFlow,
         canCancel={(() => {
           const f = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
           const status = String(detailsGroup?.status || f?.status || "");
-          return Boolean(flowsCanManage && status !== "Completed" && status !== "Canceled");
+          return Boolean(flowsCanManage && status === "InProgress");
         })()}
         canComplete={(() => {
           const f = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;

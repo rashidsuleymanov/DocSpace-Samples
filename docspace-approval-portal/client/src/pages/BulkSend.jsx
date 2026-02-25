@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
+import EmailChipsInput from "../components/EmailChipsInput.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import Tabs from "../components/Tabs.jsx";
 import { createFlowFromTemplate } from "../services/portalApi.js";
@@ -240,6 +241,7 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
       }
     });
     setDraftId(saved?.id || "");
+    toast("Draft saved. Open Drafts to continue later.", "success");
   };
 
   return (
@@ -439,9 +441,14 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                               role="option"
                               aria-selected={selected}
                             >
-                              <div className="select-row-main">
-                                <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                                <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
+                              <div className="template-option-left">
+                                <span className="template-icon" aria-hidden="true">
+                                  PDF
+                                </span>
+                                <div className="select-row-main">
+                                  <strong className="truncate">{t.title || `File ${t.id}`}</strong>
+                                  <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
+                                </div>
                               </div>
                               <span className="select-row-right" aria-hidden="true">
                                 {selected ? "\u2713" : ""}
@@ -454,9 +461,14 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                   </>
                 ) : selectedTemplate ? (
                   <div className="select-row is-selected" style={{ cursor: "default" }}>
-                    <div className="select-row-main">
-                      <strong className="truncate">{selectedTemplate.title || `File ${selectedTemplate.id}`}</strong>
-                      <span className="muted truncate">PDF template {"\u2022"} ID {selectedTemplate.id}</span>
+                    <div className="template-option-left">
+                      <span className="template-icon" aria-hidden="true">
+                        PDF
+                      </span>
+                      <div className="select-row-main">
+                        <strong className="truncate">{selectedTemplate.title || `File ${selectedTemplate.id}`}</strong>
+                        <span className="muted truncate">PDF template {"\u2022"} ID {selectedTemplate.id}</span>
+                      </div>
                     </div>
                     <span className="select-row-right" aria-hidden="true">
                       {"\u2713"}
@@ -482,12 +494,11 @@ export default function BulkSend({ session, busy, activeRoomId, activeProject, t
                 <div className="auth-form" style={{ marginTop: 0 }}>
                   <label>
                     <span>Emails</span>
-                    <textarea
+                    <EmailChipsInput
                       value={recipientsRaw}
-                      onChange={(e) => setRecipientsRaw(e.target.value)}
-                      placeholder="name@company.com\nanother@company.com"
+                      onChange={setRecipientsRaw}
+                      placeholder="Type an email and press Enter"
                       disabled={busy || actionBusy}
-                      rows={6}
                     />
                   </label>
                   <div className="row-actions" style={{ justifyContent: "space-between" }}>

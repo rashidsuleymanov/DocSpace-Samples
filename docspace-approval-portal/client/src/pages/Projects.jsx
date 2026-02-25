@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ContextMenu from "../components/ContextMenu.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import EmailChipsInput from "../components/EmailChipsInput.jsx";
 import Modal from "../components/Modal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import { toast } from "../utils/toast.js";
@@ -29,8 +30,8 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [permissions, setPermissions] = useState({});
   const [query, setQuery] = useState("");
-  const [counts, setCounts] = useState({ total: 0, inProgress: 0 });
   const [tab, setTab] = useState("active"); // active | archived
+  const [focusId, setFocusId] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
@@ -67,13 +68,31 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     const scoped = tab === "archived" ? list.filter((p) => Boolean(p?.archivedAt)) : list.filter((p) => !p?.archivedAt);
     const items = q ? scoped.filter((p) => String(p.title || "").toLowerCase().includes(q)) : scoped.slice();
     items.sort((a, b) => {
-      const aCur = activeRoomId && String(a?.roomId || "") === String(activeRoomId);
-      const bCur = activeRoomId && String(b?.roomId || "") === String(activeRoomId);
-      if (aCur !== bCur) return aCur ? -1 : 1;
       return String(a?.title || "").localeCompare(String(b?.title || ""));
     });
     return items;
-  }, [activeRoomId, projects, query, tab]);
+  }, [projects, query, tab]);
+
+  const countsForTab = useMemo(() => {
+    const list = Array.isArray(projects) ? projects : [];
+    const items = tab === "archived" ? list.filter((p) => Boolean(p?.archivedAt)) : list.filter((p) => !p?.archivedAt);
+    return items.reduce(
+      (acc, p) => {
+        acc.total += Number(p?.counts?.total || 0);
+        acc.inProgress += Number(p?.counts?.inProgress || 0);
+        return acc;
+      },
+      { total: 0, inProgress: 0 }
+    );
+  }, [projects, tab]);
+
+  const currentProjectTitle = useMemo(() => {
+    const rid = String(activeRoomId || "").trim();
+    if (!rid) return "";
+    const list = Array.isArray(projects) ? projects : [];
+    const found = list.find((p) => String(p?.roomId || "").trim() === rid) || null;
+    return String(found?.title || "").trim();
+  }, [activeRoomId, projects]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -84,17 +103,6 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       const list = Array.isArray(res?.projects) ? res.projects : [];
       setProjects(list);
       setActiveRoomId(res?.activeRoomId || null);
-      const totals = list
-        .filter((p) => !p?.archivedAt)
-        .reduce(
-        (acc, p) => {
-          acc.total += Number(p?.counts?.total || 0);
-          acc.inProgress += Number(p?.counts?.inProgress || 0);
-          return acc;
-        },
-        { total: 0, inProgress: 0 }
-      );
-      setCounts(totals);
 
       if (token) {
         const perms = await getProjectsPermissions({ token }).catch(() => null);
@@ -124,6 +132,8 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
     window.addEventListener("portal:projectsCreate", onCreate);
     return () => window.removeEventListener("portal:projectsCreate", onCreate);
   }, []);
+
+  // Reserved for future deep-linking into Active/Archived tabs.
 
   const onSetCurrent = async (project) => {
     if (!project?.id) return;
@@ -412,15 +422,15 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
             </div>
             <div className="projects-kpi">
               <span className="muted">In progress</span>
-              <strong>{counts.inProgress}</strong>
+              <strong>{countsForTab.inProgress}</strong>
             </div>
             <div className="projects-kpi">
               <span className="muted">Total requests</span>
-              <strong>{counts.total}</strong>
+              <strong>{countsForTab.total}</strong>
             </div>
             <div className="projects-kpi">
               <span className="muted">Current</span>
-              <strong>{activeRoomId ? "Selected" : "None"}</strong>
+              <strong title={currentProjectTitle || ""}>{currentProjectTitle || "None"}</strong>
             </div>
           </div>
 
@@ -433,13 +443,16 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
               const total = Number(p?.counts?.total || 0);
               const isArchived = Boolean(p?.archivedAt);
               return (
-                <div key={p.id} className={`project-card${isCurrent ? " is-current" : ""}${isArchived ? " is-archived" : ""}`}>
+                <div
+                  key={p.id}
+                  className={`project-card${isCurrent ? " is-current" : ""}${isArchived ? " is-archived" : ""}${focusId && String(p.id) === focusId ? " is-focused" : ""}`}
+                >
                   <button
                     type="button"
                     className="project-card-main"
                     onClick={() => (typeof onOpenProject === "function" ? onOpenProject(p.id) : null)}
-                    disabled={disabled || isArchived}
-                    title={isArchived ? "Restore this project to open it." : "Open project"}
+                    disabled={disabled}
+                    title={isArchived ? "Open archived project (read-only)" : "Open project"}
                   >
                     <div className="project-card-title-row">
                       <strong className="truncate">{p.title || "Untitled"}</strong>
@@ -517,131 +530,112 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           const disabled = busy || loading;
           const isArchived = Boolean(p?.archivedAt);
           return (
-            <div className="modal-actions">
-              <div className="action-list" role="menu" aria-label="Project actions">
-                {isArchived ? (
-                  <button
-                    type="button"
-                    className="action-item primary"
-                    onClick={() => {
-                      closeActions();
-                      setActionsProjectEntry(null);
-                      openRestore(p);
-                    }}
-                    disabled={disabled || !canManage}
-                    role="menuitem"
-                  >
-                    <div className="action-item-text">
-                      <strong>Restore project</strong>
-                      <span className="muted">{canManage ? "Bring this project back to active." : "Only the project admin can restore."}</span>
-                    </div>
-                    <span className="action-item-right" aria-hidden="true">&gt;</span>
-                  </button>
-                ) : null}
+            <>
+              {isArchived ? (
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    closeActions();
+                    setActionsProjectEntry(null);
+                    openRestore(p);
+                  }}
+                  disabled={disabled || !canManage}
+                  role="menuitem"
+                >
+                  <span>Restore</span>
+                  <span className="menu-item-meta">{canManage ? "Back to active" : "Admin only"}</span>
+                </button>
+              ) : null}
 
                 <button
                   type="button"
-                  className="action-item primary"
+                  className="menu-item"
                   onClick={() => {
                     closeActions();
                     setActionsProjectEntry(null);
                     if (typeof onOpenProject === "function") onOpenProject(p.id);
                   }}
-                  disabled={disabled || isArchived}
+                  disabled={disabled}
                   role="menuitem"
                 >
-                  <div className="action-item-text">
-                    <strong>Open project</strong>
-                    <span className="muted">Manage people and forms.</span>
-                  </div>
-                  <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  <span>{isArchived ? "View" : "Open"}</span>
+                  <span className="menu-item-meta">{isArchived ? "Read-only" : "View project"}</span>
                 </button>
 
-                <button
-                  type="button"
-                  className={`action-item${isCurrent ? " is-disabled" : ""}`}
-                  onClick={async () => {
-                    closeActions();
-                    setActionsProjectEntry(null);
-                    await onSetCurrent(p);
-                  }}
-                  disabled={disabled || isCurrent || isArchived}
-                  role="menuitem"
-                >
-                  <div className="action-item-text">
-                    <strong>{isCurrent ? "Current project" : "Set as current"}</strong>
-                    <span className="muted">{isCurrent ? "This project is already selected." : "Use this project for new requests."}</span>
-                  </div>
-                  <span className="action-item-right" aria-hidden="true">{isCurrent ? "Current" : ">"}</span>
-                </button>
+              <button
+                type="button"
+                className="menu-item"
+                onClick={async () => {
+                  closeActions();
+                  setActionsProjectEntry(null);
+                  await onSetCurrent(p);
+                }}
+                disabled={disabled || isCurrent || isArchived}
+                role="menuitem"
+              >
+                <span>{isCurrent ? "Current project" : "Set as current"}</span>
+                <span className="menu-item-meta">{isCurrent ? "Selected" : isArchived ? "Archived" : "Use for requests"}</span>
+              </button>
 
+              <button
+                type="button"
+                className="menu-item"
+                onClick={() => {
+                  closeActions();
+                  setActionsProjectEntry(null);
+                  openInvite(p);
+                }}
+                disabled={disabled || !canManage || isArchived}
+                role="menuitem"
+              >
+                <span>Invite people</span>
+                <span className="menu-item-meta">{canManage ? "Add members" : "Admin only"}</span>
+              </button>
+
+              {!isArchived ? (
                 <button
                   type="button"
-                  className="action-item"
+                  className="menu-item"
                   onClick={() => {
                     closeActions();
                     setActionsProjectEntry(null);
-                    openInvite(p);
-                  }}
-                  disabled={disabled || !canManage || isArchived}
-                  role="menuitem"
-                >
-                  <div className="action-item-text">
-                    <strong>Invite people</strong>
-                    <span className="muted">{canManage ? "Add people to this project." : "Only the project admin can invite."}</span>
-                  </div>
-                  <span className="action-item-right" aria-hidden="true">&gt;</span>
-                </button>
-
-                {!isArchived ? (
-                  <button
-                    type="button"
-                    className="action-item"
-                    onClick={() => {
-                      closeActions();
-                      setActionsProjectEntry(null);
-                      openArchive(p);
-                    }}
-                    disabled={disabled || !canManage}
-                    role="menuitem"
-                  >
-                    <div className="action-item-text">
-                      <strong>Archive project</strong>
-                      <span className="muted">{canManage ? "Moves project rooms to archive." : "Only the project admin can archive."}</span>
-                    </div>
-                    <span className="action-item-right" aria-hidden="true">&gt;</span>
-                  </button>
-                ) : null}
-
-                {p.roomUrl ? (
-                  <a className="action-item" href={p.roomUrl} target="_blank" rel="noreferrer" role="menuitem">
-                    <div className="action-item-text">
-                      <strong>Open room</strong>
-                      <span className="muted">Manage the room and permissions.</span>
-                    </div>
-                    <span className="action-item-right" aria-hidden="true">New tab</span>
-                  </a>
-                ) : null}
-
-                <button
-                  type="button"
-                  className="action-item danger"
-                  onClick={() => {
-                    closeActions();
-                    setActionsProjectEntry(null);
-                    openDelete(p);
+                    openArchive(p);
                   }}
                   disabled={disabled || !canManage}
                   role="menuitem"
                 >
-                  <div className="action-item-text">
-                    <strong>Remove from portal</strong>
-                    <span className="muted">{canManage ? "This does not delete the project room." : "Only the project admin can remove."}</span>
-                  </div>
-                  <span className="action-item-right" aria-hidden="true">&gt;</span>
+                  <span>Archive</span>
+                  <span className="menu-item-meta">{canManage ? "Hide from active" : "Admin only"}</span>
                 </button>
-              </div>
-            </div>
+              ) : null}
+
+              {p.roomUrl ? <div className="menu-sep" /> : null}
+
+              {p.roomUrl ? (
+                <a className="menu-item" href={p.roomUrl} target="_blank" rel="noreferrer" role="menuitem">
+                  <span>Open room</span>
+                  <span className="menu-item-meta">New tab</span>
+                </a>
+              ) : null}
+
+              <div className="menu-sep" />
+
+              <button
+                type="button"
+                className="menu-item danger"
+                onClick={() => {
+                  closeActions();
+                  setActionsProjectEntry(null);
+                  openDelete(p);
+                }}
+                disabled={disabled || !canManage}
+                role="menuitem"
+              >
+                <span>Remove from portal</span>
+                <span className="menu-item-meta">{canManage ? "Does not delete room" : "Admin only"}</span>
+              </button>
+            </>
           );
         })()}
       </ContextMenu>
@@ -840,8 +834,13 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
         ) : null}
         <form className="auth-form" onSubmit={(e) => e.preventDefault()} style={{ marginTop: 0 }}>
           <label>
-            <span>Emails (comma / new line)</span>
-            <textarea value={invite.emails} onChange={(e) => setInvite((s) => ({ ...s, emails: e.target.value }))} />
+            <span>Emails</span>
+            <EmailChipsInput
+              value={invite.emails}
+              onChange={(next) => setInvite((s) => ({ ...s, emails: next }))}
+              placeholder="Type an email and press Enter"
+              disabled={busy || loading}
+            />
           </label>
           <label>
             <span>Role</span>

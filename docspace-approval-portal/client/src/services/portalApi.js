@@ -1,15 +1,62 @@
+﻿function truncate(value, limit = 240) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1)}…`;
+}
+
+function firstLine(value) {
+  return String(value || "").split(/\r?\n/g)[0] || "";
+}
+
+function sanitizeDetails(details) {
+  if (!details) return "";
+
+  if (typeof details === "string") {
+    const raw = details.trim();
+    if (!raw) return "";
+
+    const short = firstLine(raw);
+    const mayBeJson = (short.startsWith("{") && short.endsWith("}")) || (short.startsWith("[") && short.endsWith("]"));
+    if (mayBeJson) {
+      try {
+        const parsed = JSON.parse(short);
+        return sanitizeDetails(parsed);
+      } catch {
+        // ignore
+      }
+    }
+
+    return truncate(short);
+  }
+
+  if (typeof details === "object") {
+    const hint = typeof details?.hint === "string" ? details.hint : "";
+    const message = typeof details?.message === "string" ? details.message : "";
+    const nestedMessage = typeof details?.error?.message === "string" ? details.error.message : "";
+    const nestedHint = typeof details?.error?.hint === "string" ? details.error.hint : "";
+    const best = hint || message || nestedMessage || nestedHint;
+    if (best) return truncate(firstLine(best));
+
+    try {
+      const json = JSON.parse(
+        JSON.stringify(details, (key, value) => {
+          if (key === "stack" || key === "trace" || key === "innerStack" || key === "exception") return undefined;
+          return value;
+        })
+      );
+      return truncate(firstLine(JSON.stringify(json)));
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
 function toErrorMessage(data, fallback) {
-  const details =
-    typeof data?.details === "string"
-      ? data.details
-      : typeof data?.details?.hint === "string"
-        ? data.details.hint
-        : typeof data?.details?.message === "string"
-          ? data.details.message
-          : data?.details
-            ? JSON.stringify(data.details)
-            : "";
-  const message = data?.error || fallback;
+  const message = typeof data?.error === "string" ? data.error : String(fallback || "Request failed");
+  const details = sanitizeDetails(data?.details);
   return details ? `${message}: ${details}` : message;
 }
 
@@ -53,6 +100,21 @@ export async function listTemplates({ token }) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Forms load failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function listProjectTemplates({ token, projectId }) {
+  const t = String(token || "").trim();
+  if (!t) throw new Error("Authorization token is required");
+  const pid = String(projectId || "").trim();
+  if (!pid) throw new Error("projectId is required");
+  const response = await fetch(`/api/templates/project/${encodeURIComponent(pid)}`, {
+    headers: { Authorization: t }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Templates load failed (${response.status})`));
   }
   return data;
 }
@@ -131,6 +193,56 @@ export async function deleteSharedTemplate({ token, fileId }) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(toErrorMessage(data, `Delete failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function deleteDraftTemplate({ token, fileId } = {}) {
+  const t = String(token || "").trim();
+  if (!t) throw new Error("Authorization token is required");
+  const fid = String(fileId || "").trim();
+  if (!fid) throw new Error("fileId is required");
+  const response = await fetch(`/api/drafts/${encodeURIComponent(fid)}`, {
+    method: "DELETE",
+    headers: { Authorization: t }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Delete failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function deleteProjectTemplate({ token, fileId } = {}) {
+  const t = String(token || "").trim();
+  if (!t) throw new Error("Authorization token is required");
+  const fid = String(fileId || "").trim();
+  if (!fid) throw new Error("fileId is required");
+  const response = await fetch(`/api/templates/${encodeURIComponent(fid)}`, {
+    method: "DELETE",
+    headers: { Authorization: t }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Remove failed (${response.status})`));
+  }
+  return data;
+}
+
+export async function deleteProjectTemplateFromProject({ token, projectId, fileId } = {}) {
+  const t = String(token || "").trim();
+  if (!t) throw new Error("Authorization token is required");
+  const pid = String(projectId || "").trim();
+  if (!pid) throw new Error("projectId is required");
+  const fid = String(fileId || "").trim();
+  if (!fid) throw new Error("fileId is required");
+  const response = await fetch(`/api/templates/project/${encodeURIComponent(pid)}/${encodeURIComponent(fid)}`, {
+    method: "DELETE",
+    headers: { Authorization: t }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(toErrorMessage(data, `Remove failed (${response.status})`));
   }
   return data;
 }
@@ -825,3 +937,4 @@ export async function publishLibraryFile({ token, fileId, targetRoomId }) {
   if (!response.ok) throw new Error(toErrorMessage(data, `Publish failed (${response.status})`));
   return data;
 }
+

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import EmptyState from "../components/EmptyState.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import Modal from "../components/Modal.jsx";
 import Tabs from "../components/Tabs.jsx";
+import EmailChipsInput from "../components/EmailChipsInput.jsx";
 import {
   createDirectoryGroup,
   createDirectoryPerson,
@@ -39,6 +40,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [writeForbidden, setWriteForbidden] = useState(false);
 
   const [mode, setMode] = useState("people"); // people | groups
 
@@ -53,8 +55,10 @@ export default function Contacts({ session, busy, onOpenBulk }) {
   const [groupMembers, setGroupMembers] = useState([]);
 
   const [managePeopleOpen, setManagePeopleOpen] = useState(false);
+  const [managePeopleTab, setManagePeopleTab] = useState("create"); // create | invite
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [manageGroupOpen, setManageGroupOpen] = useState(false);
+  const [addMembersOpen, setAddMembersOpen] = useState(false);
 
   const [personEmail, setPersonEmail] = useState("");
   const [personFirstName, setPersonFirstName] = useState("");
@@ -107,7 +111,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
       setGroups(Array.isArray(data?.groups) ? data.groups : []);
     } catch (e) {
       setGroups([]);
-      setError(e?.message || "Failed to load groups");
+      reportError(e, "Failed to load groups");
     } finally {
       setLoading(false);
     }
@@ -127,7 +131,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
     } catch (e) {
       if (!append) setPeople([]);
       setPeopleTotal(0);
-      setError(e?.message || "Failed to load people");
+      reportError(e, "Failed to load people");
     } finally {
       setLoading(false);
     }
@@ -136,6 +140,10 @@ export default function Contacts({ session, busy, onOpenBulk }) {
   const refreshSelectedGroupMembers = async (gid) => {
     const id = normalize(gid || groupId);
     if (!token || !id) return;
+    if (writeForbidden) {
+      setGroupMembers([]);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -143,7 +151,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
       setGroupMembers(Array.isArray(data?.members) ? data.members : []);
     } catch (e) {
       setGroupMembers([]);
-      setError(e?.message || "Failed to load group members");
+      reportError(e, "Failed to load group members");
     } finally {
       setLoading(false);
     }
@@ -204,7 +212,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         .then((data) => setPeople(Array.isArray(data?.people) ? data.people : []))
         .catch((e) => {
           setPeople([]);
-          setError(e?.message || "Failed to search people");
+          reportError(e, "Failed to search people");
         })
         .finally(() => setLoading(false));
     }, 250);
@@ -219,8 +227,12 @@ export default function Contacts({ session, busy, onOpenBulk }) {
       setGroupMembers([]);
       return;
     }
+    if (writeForbidden) {
+      setGroupMembers([]);
+      return;
+    }
     refreshSelectedGroupMembers(gid).catch(() => null);
-  }, [groupId, mode, token]);
+  }, [groupId, mode, token, writeForbidden]);
 
   const toggleEmail = (email, on) => {
     const em = normalizeEmail(email);
@@ -277,7 +289,33 @@ export default function Contacts({ session, busy, onOpenBulk }) {
     return (Array.isArray(groups) ? groups : []).find((g) => normalize(g?.id) === gid) || null;
   }, [groupId, groups]);
 
-  const canManageDirectory = Boolean(token); // Server will enforce permissions; UI keeps it simple.
+  useEffect(() => {
+    // If auth changes, allow trying management actions again.
+    setWriteForbidden(false);
+  }, [token]);
+
+  const canManageDirectory = Boolean(token) && !writeForbidden; // Server still enforces permissions; UI is optimistic.
+
+  const toUiError = (value) => {
+    const msg = String(value?.message || value || "").trim();
+    if (!msg) return "";
+    const first = msg.split(/\r?\n/g)[0] || "";
+    return first.length > 240 ? `${first.slice(0, 239)}…` : first;
+  };
+
+  const isAccessDenied = (value) => {
+    const msg = String(value?.message || value || "").toLowerCase();
+    return msg.includes("forbidden") || msg.includes("access denied");
+  };
+
+  const reportError = (value, fallback) => {
+    const msg = toUiError(value) || String(fallback || "Request failed");
+    setError(msg);
+    if (isAccessDenied(value) || isAccessDenied(msg)) {
+      setWriteForbidden(true);
+      setNotice("You can view contacts, but you don't have permission to manage directory data.");
+    }
+  };
 
   useEffect(() => {
     if (mode !== "groups") return;
@@ -296,18 +334,34 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         </div>
         <div className="topbar-actions">
           {mode === "people" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setManagePeopleOpen(true);
-                setNotice("");
-                setError("");
-              }}
-              disabled={busy || loading || !canManageDirectory}
-              title="Manage people (requires permissions)"
-            >
-              Manage people
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setManagePeopleTab("create");
+                  setManagePeopleOpen(true);
+                  setNotice("");
+                  setError("");
+                }}
+                disabled={busy || loading || !canManageDirectory}
+                title="Create a user profile (requires permissions)"
+              >
+                Add person
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setManagePeopleTab("invite");
+                  setManagePeopleOpen(true);
+                  setNotice("");
+                  setError("");
+                }}
+                disabled={busy || loading || !canManageDirectory}
+                title="Send invite emails (requires permissions)"
+              >
+                Invite
+              </button>
+            </>
           ) : (
             <button
               type="button"
@@ -351,7 +405,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
 
       <Modal
         open={managePeopleOpen}
-        title="Manage people"
+        title="People"
         onClose={() => {
           setManagePeopleOpen(false);
           setError("");
@@ -364,9 +418,22 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         }
       >
         <div className="auth-form" style={{ marginTop: 0 }}>
-          <>
+          <div className="settings-tabs" style={{ marginTop: 0, marginBottom: 12 }}>
+            <Tabs
+              value={managePeopleTab}
+              onChange={(v) => setManagePeopleTab(String(v || "create"))}
+              ariaLabel="People actions"
+              items={[
+                { id: "create", label: "Create" },
+                { id: "invite", label: "Invite" }
+              ]}
+            />
+          </div>
+
+          {managePeopleTab === "create" ? (
+            <>
               <div>
-                <strong>Add person</strong>
+                <strong>Create person</strong>
                 <p className="muted" style={{ marginTop: 4 }}>
                   Creates a user profile (if your token has permissions).
                 </p>
@@ -411,18 +478,18 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                     setPersonLastName("");
                     await refreshPeople({ offset: 0, append: false });
                   } catch (e) {
-                    setError(e?.message || "Failed to create user");
+                    reportError(e, "Failed to create user");
                   } finally {
                     setLoading(false);
                   }
                 }}
                 disabled={busy || loading}
               >
-                Add person
+                Create
               </button>
-
-              <hr />
-
+            </>
+          ) : (
+            <>
               <div>
                 <strong>Invite people</strong>
                 <p className="muted" style={{ marginTop: 4 }}>
@@ -430,11 +497,17 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                 </p>
               </div>
               <label>
-                <span>Emails (comma / new line)</span>
-                <textarea value={inviteEmails} onChange={(e) => setInviteEmails(e.target.value)} placeholder="a@company.com, b@company.com" disabled={busy || loading || inviteBusy} />
+                <span>Emails</span>
+                <EmailChipsInput
+                  value={inviteEmails}
+                  onChange={setInviteEmails}
+                  placeholder="Type an email and press Enter"
+                  disabled={busy || loading || inviteBusy}
+                />
               </label>
               <button
                 type="button"
+                className="primary"
                 onClick={async () => {
                   if (!token) return;
                   const emails = normalizeEmailList(inviteEmails || personEmail);
@@ -450,16 +523,17 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                     setNotice("Invites sent.");
                     setInviteEmails("");
                   } catch (e) {
-                    setError(e?.message || "Failed to invite people");
+                    reportError(e, "Failed to invite people");
                   } finally {
                     setInviteBusy(false);
                   }
                 }}
                 disabled={busy || loading || inviteBusy}
               >
-                Invite
+                Send invites
               </button>
-          </>
+            </>
+          )}
         </div>
       </Modal>
 
@@ -491,7 +565,12 @@ export default function Contacts({ session, busy, onOpenBulk }) {
 
           <label>
             <span>Member emails (optional)</span>
-            <textarea value={newGroupMemberEmails} onChange={(e) => setNewGroupMemberEmails(e.target.value)} placeholder="a@company.com, b@company.com" disabled={busy || loading} />
+            <EmailChipsInput
+              value={newGroupMemberEmails}
+              onChange={setNewGroupMemberEmails}
+              placeholder="Type an email and press Enter"
+              disabled={busy || loading}
+            />
           </label>
 
           <div className="card" style={{ margin: 0, padding: 12 }}>
@@ -604,7 +683,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                   setCreateGroupOpen(false);
                   await refreshGroups();
                 } catch (e) {
-                  setError(e?.message || "Failed to create group");
+                  reportError(e, "Failed to create group");
                 } finally {
                   setLoading(false);
                 }
@@ -663,7 +742,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                       setNotice("Group updated.");
                       await refreshGroups();
                     } catch (e) {
-                      setError(e?.message || "Failed to update group");
+                      reportError(e, "Failed to update group");
                     } finally {
                       setLoading(false);
                     }
@@ -694,7 +773,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                           setGroupMembers([]);
                           await refreshGroups();
                         } catch (e) {
-                          setError(e?.message || "Failed to delete group");
+                          reportError(e, "Failed to delete group");
                         } finally {
                           setLoading(false);
                           setConfirmBusy(false);
@@ -709,11 +788,56 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                 </button>
               </div>
 
-              <hr />
+            </>
+          )}
+        </div>
+      </Modal>
 
+      <Modal
+        open={addMembersOpen}
+        title={`Add members${selectedGroup?.name ? ` — ${selectedGroup.name}` : ""}`}
+        onClose={() => {
+          setAddMembersOpen(false);
+          setManagePickedMemberIds(new Set());
+          setGroupAddEmails("");
+          setPickerQuery("");
+          setPickerError("");
+          setError("");
+          setNotice("");
+        }}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              setAddMembersOpen(false);
+              setManagePickedMemberIds(new Set());
+              setGroupAddEmails("");
+              setPickerQuery("");
+              setPickerError("");
+              setError("");
+              setNotice("");
+            }}
+            disabled={busy || loading}
+          >
+            Close
+          </button>
+        }
+      >
+        <div className="auth-form" style={{ marginTop: 0 }}>
+          {!normalize(groupId) ? (
+            <EmptyState title="No group selected" description="Select a group, then click Add members." />
+          ) : writeForbidden ? (
+            <EmptyState title="Access denied" description="You can view groups, but you don't have permission to add members." />
+          ) : (
+            <>
               <label>
-                <span>Add members by email</span>
-                <textarea value={groupAddEmails} onChange={(e) => setGroupAddEmails(e.target.value)} placeholder="a@company.com, b@company.com" disabled={busy || loading} />
+                <span>Add by email</span>
+                <EmailChipsInput
+                  value={groupAddEmails}
+                  onChange={setGroupAddEmails}
+                  placeholder="Type an email and press Enter"
+                  disabled={busy || loading}
+                />
               </label>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button
@@ -734,123 +858,128 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                       setGroupAddEmails("");
                       await refreshSelectedGroupMembers(groupId);
                       await refreshGroups();
+                      setAddMembersOpen(false);
                     } catch (e) {
-                      setError(e?.message || "Failed to add members");
+                      reportError(e, "Failed to add members");
                     } finally {
                       setLoading(false);
                     }
                   }}
-                  disabled={busy || loading}
+                  disabled={busy || loading || !normalize(groupAddEmails) || !canManageDirectory}
                 >
                   Add by email
                 </button>
               </div>
 
-              <div className="card" style={{ margin: "12px 0 0", padding: 12 }}>
-                <div className="recipient-head" style={{ padding: 0, marginBottom: 8 }}>
-                  <strong>Add members from list</strong>
-                  <span className="muted">{managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0} selected</span>
+              <div className="empty-state" style={{ marginTop: 10 }}>
+                <strong>Or pick from list</strong>
+                <p className="muted">Search people, select them, then add to the group.</p>
+              </div>
+
+              <div className="recipient-head" style={{ padding: 0, marginBottom: 8 }}>
+                <strong>People</strong>
+                <span className="muted">{managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0} selected</span>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  value={pickerQuery}
+                  onChange={(e) => {
+                    const q = e.target.value;
+                    setPickerQuery(q);
+                    refreshPicker({ query: q, offset: 0, append: false }).catch(() => null);
+                  }}
+                  placeholder="Search people..."
+                  disabled={busy || loading || pickerLoading}
+                  style={{ maxWidth: 420 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickerQuery("");
+                    refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
+                  }}
+                  disabled={busy || loading || pickerLoading}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManagePickedMemberIds(new Set())}
+                  disabled={busy || loading || pickerLoading || !(managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0)}
+                >
+                  Clear
+                </button>
+              </div>
+              {pickerError ? <p className="error" style={{ marginTop: 10 }}>{pickerError}</p> : null}
+              {pickerLoading ? <EmptyState title="Loading people..." /> : null}
+              {!pickerLoading && Array.isArray(pickerPeople) && pickerPeople.length ? (
+                <div className="member-list is-compact" style={{ marginTop: 10 }}>
+                  {pickerPeople.map((u) => {
+                    const id = String(u?.id || "").trim();
+                    if (!id) return null;
+                    const email = String(u?.email || "").trim();
+                    const name = String(u?.displayName || u?.name || email || "User").trim();
+                    const checked = managePickedMemberIds instanceof Set ? managePickedMemberIds.has(id) : false;
+                    return (
+                      <label key={id} className="check-row" title={email || id}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(checked)}
+                          onChange={(e) => {
+                            const next = new Set(managePickedMemberIds instanceof Set ? managePickedMemberIds : []);
+                            if (e.target.checked) next.add(id);
+                            else next.delete(id);
+                            setManagePickedMemberIds(next);
+                          }}
+                          disabled={busy || loading || pickerLoading}
+                        />
+                        <span className="truncate">
+                          <strong>{name}</strong>
+                          {email ? <span className="muted">{" "}- {email}</span> : null}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <input
-                    value={pickerQuery}
-                    onChange={(e) => {
-                      const q = e.target.value;
-                      setPickerQuery(q);
-                      refreshPicker({ query: q, offset: 0, append: false }).catch(() => null);
-                    }}
-                    placeholder="Search people..."
-                    disabled={busy || loading || pickerLoading}
-                    style={{ maxWidth: 420 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPickerQuery("");
-                      refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
-                    }}
-                    disabled={busy || loading || pickerLoading}
-                  >
-                    Reset
+              ) : null}
+              {!pickerLoading && !pickerQuery && pickerTotal > 0 && Array.isArray(pickerPeople) && pickerPeople.length < pickerTotal ? (
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
+                  <button type="button" onClick={() => refreshPicker({ query: "", offset: pickerPeople.length, append: true })} disabled={busy || loading || pickerLoading}>
+                    Load more
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setManagePickedMemberIds(new Set())}
-                    disabled={busy || loading || pickerLoading || !(managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0)}
-                  >
-                    Clear
-                  </button>
+                  <span className="muted">
+                    Showing {pickerPeople.length} of {pickerTotal}
+                  </span>
                 </div>
-                {pickerError ? <p className="error" style={{ marginTop: 10 }}>{pickerError}</p> : null}
-                {pickerLoading ? <EmptyState title="Loading people..." /> : null}
-                {!pickerLoading && Array.isArray(pickerPeople) && pickerPeople.length ? (
-                  <div className="member-list is-compact" style={{ marginTop: 10 }}>
-                    {pickerPeople.map((u) => {
-                      const id = String(u?.id || "").trim();
-                      if (!id) return null;
-                      const email = String(u?.email || "").trim();
-                      const name = String(u?.displayName || u?.name || email || "User").trim();
-                      const checked = managePickedMemberIds instanceof Set ? managePickedMemberIds.has(id) : false;
-                      return (
-                        <label key={id} className="check-row" title={email || id}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(checked)}
-                            onChange={(e) => {
-                              const next = new Set(managePickedMemberIds instanceof Set ? managePickedMemberIds : []);
-                              if (e.target.checked) next.add(id);
-                              else next.delete(id);
-                              setManagePickedMemberIds(next);
-                            }}
-                            disabled={busy || loading || pickerLoading}
-                          />
-                          <span className="truncate">
-                            <strong>{name}</strong>
-                            {email ? <span className="muted">{" "}- {email}</span> : null}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {!pickerLoading && !pickerQuery && pickerTotal > 0 && Array.isArray(pickerPeople) && pickerPeople.length < pickerTotal ? (
-                  <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
-                    <button type="button" onClick={() => refreshPicker({ query: "", offset: pickerPeople.length, append: true })} disabled={busy || loading || pickerLoading}>
-                      Load more
-                    </button>
-                    <span className="muted">
-                      Showing {pickerPeople.length} of {pickerTotal}
-                    </span>
-                  </div>
-                ) : null}
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={async () => {
-                      if (!token) return;
-                      const ids = Array.from(managePickedMemberIds instanceof Set ? managePickedMemberIds : []);
-                      if (!ids.length) return;
-                      setLoading(true);
-                      setError("");
-                      setNotice("");
-                      try {
-                        await updateDirectoryGroup({ token, groupId, addIds: ids });
-                        setNotice("Members added.");
-                        setManagePickedMemberIds(new Set());
-                        await refreshSelectedGroupMembers(groupId);
-                        await refreshGroups();
-                      } catch (e) {
-                        setError(e?.message || "Failed to add members");
-                      } finally {
-                        setLoading(false);
-                      }
-                    }}
-                    disabled={busy || loading || !(managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0)}
-                  >
-                    Add selected ({managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0})
-                  </button>
-                </div>
+              ) : null}
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={async () => {
+                    if (!token) return;
+                    const ids = Array.from(managePickedMemberIds instanceof Set ? managePickedMemberIds : []);
+                    if (!ids.length) return;
+                    setLoading(true);
+                    setError("");
+                    setNotice("");
+                    try {
+                      await updateDirectoryGroup({ token, groupId, addIds: ids });
+                      setNotice("Members added.");
+                      setManagePickedMemberIds(new Set());
+                      await refreshSelectedGroupMembers(groupId);
+                      await refreshGroups();
+                      setAddMembersOpen(false);
+                    } catch (e) {
+                      reportError(e, "Failed to add members");
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  disabled={busy || loading || !(managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0) || !canManageDirectory}
+                >
+                  Add selected ({managePickedMemberIds instanceof Set ? managePickedMemberIds.size : 0})
+                </button>
               </div>
             </>
           )}
@@ -919,75 +1048,218 @@ export default function Contacts({ session, busy, onOpenBulk }) {
           <EmptyState title="No people found" description="The directory is empty, or this user has no access." />
         ) : null}
 
-        {mode === "groups" && !filteredGroups.length && !loading ? (
-          <EmptyState title="No groups found" description="Groups may be hidden for this user, or there are no groups yet." />
-        ) : null}
-
         {mode === "people" && normalize(peopleQuery) && !rows.length && !loading ? <EmptyState title="No results" description="Try a different search." /> : null}
 
-          {mode === "groups" && filteredGroups.length ? (
-            <div className="list scroll-area">
-              {filteredGroups.map((g) => {
-                const id = normalize(g?.id);
-                if (!id) return null;
-                const selected = id === normalize(groupId);
-              return (
-                <div key={id} className="list-row">
-                  <div className="list-main">
-                    <span className="truncate">
-                      <strong>{normalize(g?.name) || "Group"}</strong>
-                      {typeof g?.membersCount === "number" ? <span className="muted">{" "}- {g.membersCount} members</span> : null}
-                    </span>
-                    {selected ? <span className="muted" style={{ fontSize: 12 }}>Selected</span> : null}
-                  </div>
-                  <div className="list-actions">
-                    <button type="button" className={selected ? "primary" : ""} onClick={() => setGroupId(id)} disabled={busy || loading}>
-                      {selected ? "Viewing" : "View members"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setGroupId(id);
-                        setManageGroupOpen(true);
-                        setManagePickedMemberIds(new Set());
-                        setPickerQuery("");
-                        refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
-                        refreshSelectedGroupMembers(id).catch(() => null);
-                      }}
-                      disabled={busy || loading || !canManageDirectory}
-                      title="Manage this group"
-                    >
-                      Manage
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-
         {mode === "groups" ? (
-          <div style={{ padding: "12px 16px 0" }}>
-            <div className="recipient-head" style={{ padding: 0, marginBottom: 8 }}>
-              <strong>Members{selectedGroup?.name ? ` — ${selectedGroup.name}` : ""}</strong>
-              <span className="muted">{normalize(groupId) ? `${rows.length} shown` : "Select a group above"}</span>
+          <div className="contacts-groups-split" aria-label="Groups and members">
+            <div className="contacts-pane" aria-label="Groups">
+              <div className="contacts-pane-head">
+                <strong>Groups</strong>
+                <span className="muted">{filteredGroups.length} shown</span>
+              </div>
+
+              {!filteredGroups.length && !loading ? (
+                <EmptyState title="No groups found" description="Groups may be hidden for this user, or there are no groups yet." />
+              ) : (
+                <div className="list scroll-area" aria-label="Groups list">
+                  {filteredGroups.map((g) => {
+                    const id = normalize(g?.id);
+                    if (!id) return null;
+                    const selected = id === normalize(groupId);
+                    const name = normalize(g?.name) || "Group";
+                    const membersCount = typeof g?.membersCount === "number" ? Number(g.membersCount) : null;
+                    const membersLabel = membersCount === null ? "Group" : `${membersCount} members`;
+
+                    return (
+                      <div
+                        key={id}
+                        className={`select-row group-row${selected ? " is-selected" : ""}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setGroupId(id)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.preventDefault();
+                          setGroupId(id);
+                        }}
+                        aria-pressed={selected}
+                        title={name}
+                      >
+                        <div className="select-row-main">
+                          <strong className="truncate">{name}</strong>
+                          <span className="muted truncate">{membersLabel}</span>
+                        </div>
+
+                        <div className="group-row-right">
+                          <button
+                            type="button"
+                            className="btn subtle"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGroupId(id);
+                              setManageGroupOpen(true);
+                              setManagePickedMemberIds(new Set());
+                              setPickerQuery("");
+                              refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
+                              refreshSelectedGroupMembers(id).catch(() => null);
+                            }}
+                            disabled={busy || loading || !canManageDirectory}
+                            title="Manage this group"
+                          >
+                            Manage
+                          </button>
+                          <span className="select-row-right" aria-hidden="true">
+                            {selected ? "\u2713" : ""}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
+            <div className="contacts-pane" aria-label="Group members">
+              <div className="contacts-pane-head">
+                <strong>Members{selectedGroup?.name ? ` — ${selectedGroup.name}` : ""}</strong>
+                <div className="contacts-pane-actions">
+                  <span className="muted">{normalize(groupId) ? `${rows.length} shown` : "Select a group"}</span>
+                  {normalize(groupId) ? (
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => {
+                        setManagePickedMemberIds(new Set());
+                        setGroupAddEmails("");
+                        setPickerQuery("");
+                        refreshPicker({ query: "", offset: 0, append: false }).catch(() => null);
+                        refreshSelectedGroupMembers(groupId).catch(() => null);
+                        setAddMembersOpen(true);
+                      }}
+                      disabled={busy || loading || !canManageDirectory}
+                      title={!canManageDirectory ? "Requires permissions" : "Add members to this group"}
+                    >
+                      Add members
+                    </button>
+                  ) : null}
+                </div>
+              </div>
 
+              <div className="contacts-pane-body">
+                {!normalize(groupId) && !loading ? <EmptyState title="Choose a group" description="Select a group to load its members." /> : null}
+                {normalize(groupId) && loading ? <EmptyState title="Loading members..." /> : null}
+                {normalize(groupId) && writeForbidden && !loading ? (
+                  <EmptyState title="Access denied" description="You can view groups, but you don't have permission to load or manage group members." />
+                ) : null}
+                {normalize(groupId) && !rows.length && !loading && !writeForbidden ? (
+                  <EmptyState title="No members found" description="This group has no members available for selection." />
+                ) : null}
 
-            {!normalize(groupId) && !loading ? (
-              <EmptyState title="Choose a group" description="Select a group to load its members." />
-            ) : null}
+                {normalize(groupId) && rows.length ? (
+                  <>
+                    {shownEmails.length ? (
+                      <div className="card-header-actions" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 6 }}>
+                        <label className="inline-check">
+                          <input
+                            type="checkbox"
+                            checked={allShownSelected}
+                            onChange={(e) => toggleAllShown(Boolean(e.target.checked))}
+                            disabled={busy || loading || shownEmails.length === 0}
+                          />
+                          <span>Select all shown</span>
+                        </label>
+                        {selectedCount ? (
+                          <button type="button" className="link" onClick={clearSelection} disabled={busy || loading}>
+                            Clear selection
+                          </button>
+                        ) : (
+                          <span className="muted">{allShownSelected ? "All shown selected" : ""}</span>
+                        )}
+                      </div>
+                    ) : null}
 
-            {normalize(groupId) && loading ? <EmptyState title="Loading members..." /> : null}
+                    <div className="list scroll-area" aria-label="Group members list">
+                      {rows.map((p) => {
+                        const email = normalizeEmail(p?.email);
+                        const name = normalize(p?.displayName) || normalize(p?.name) || email || "User";
+                        const checked = email && pickedEmails instanceof Set ? pickedEmails.has(email) : false;
+                        return (
+                          <div
+                            key={email || p?.id || Math.random()}
+                            className={`select-row${checked ? " is-selected" : ""}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleEmail(email, !checked)}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              toggleEmail(email, !checked);
+                            }}
+                            aria-pressed={checked}
+                            title={email ? `${name} \u2014 ${email}` : name}
+                          >
+                            <div className="select-row-main">
+                              <strong className="truncate">{name}</strong>
+                              <span className="muted truncate">{email || "No email"}</span>
+                            </div>
 
-            {normalize(groupId) && !rows.length && !loading ? (
-              <EmptyState title="No members found" description="This group has no members available for selection." />
-            ) : null}
+                            <div className="list-actions">
+                              <span className="select-row-right" aria-hidden="true">
+                                {checked ? "\u2713" : ""}
+                              </span>
+
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!token) return;
+                                  const memberId = String(p?.id || "").trim();
+                                  if (!memberId) {
+                                    setError("Member id is missing (cannot remove).");
+                                    return;
+                                  }
+                                  openConfirm({
+                                    title: "Remove member?",
+                                    message: `Remove ${email || name} from this group?`,
+                                    onConfirm: async () => {
+                                      setConfirmBusy(true);
+                                      setLoading(true);
+                                      setError("");
+                                      setNotice("");
+                                      try {
+                                        await removeDirectoryGroupMembers({ token, groupId, members: [memberId] });
+                                        setNotice("Member removed.");
+                                        await refreshSelectedGroupMembers(groupId);
+                                        await refreshGroups();
+                                      } catch (e2) {
+                                        reportError(e2, "Failed to remove member");
+                                      } finally {
+                                        setLoading(false);
+                                        setConfirmBusy(false);
+                                        setConfirmOpen(false);
+                                      }
+                                    }
+                                  });
+                                }}
+                                disabled={busy || loading || !canManageDirectory}
+                                title="Remove user from group (admin only)"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
           </div>
         ) : null}
 
-        {rows.length ? (
+        {mode === "people" && rows.length ? (
           <>
             {shownEmails.length ? (
               <div className="card-header-actions" style={{ justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 6 }}>
@@ -1065,7 +1337,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                                   setNotice("User deleted.");
                                   await refreshPeople({ offset: 0, append: false });
                                 } catch (e2) {
-                                  setError(e2?.message || "Failed to delete user");
+                                  reportError(e2, "Failed to delete user");
                                 } finally {
                                   setLoading(false);
                                   setConfirmBusy(false);
@@ -1107,7 +1379,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
                                   await refreshSelectedGroupMembers(groupId);
                                   await refreshGroups();
                                 } catch (e2) {
-                                  setError(e2?.message || "Failed to remove member");
+                                  reportError(e2, "Failed to remove member");
                                 } finally {
                                   setLoading(false);
                                   setConfirmBusy(false);
@@ -1171,3 +1443,4 @@ export default function Contacts({ session, busy, onOpenBulk }) {
     </div>
   );
 }
+

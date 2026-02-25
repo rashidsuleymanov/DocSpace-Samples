@@ -6,19 +6,25 @@ import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import FolderTile from "../components/FolderTile.jsx";
 import folderStructure from "../data/folderStructure.js";
 import {
+  cancelDoctorFillSignRequest,
   copyLabResultFromDocSpace,
   createLabResult,
+  createDoctorFileShareLink,
+  createImagingPackage,
   createMedicalRecord,
   createPrescription,
   createRoomDocument,
   getDoctorAppointments,
+  getDoctorIncomingFillSign,
   getDoctorFillSignContents,
   getDoctorFolderContents,
+  getDoctorFolderContentsById,
   getDoctorRoomSummary,
   getDoctorRooms,
   listLabFiles,
   listTemplateFiles,
-  requestFillSign
+  requestFillSign,
+  uploadImagingFile
 } from "../services/doctorApi.js";
 
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
@@ -65,6 +71,7 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [labResults, setLabResults] = useState([]);
   const [labLoading, setLabLoading] = useState(false);
   const [activeFolderTitle, setActiveFolderTitle] = useState("");
+  const [folderStack, setFolderStack] = useState([]);
   const [activeFolderItems, setActiveFolderItems] = useState([]);
   const [activeFolderLoading, setActiveFolderLoading] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -76,6 +83,11 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [fillLoading, setFillLoading] = useState(false);
   const [fillError, setFillError] = useState("");
   const [fillCounts, setFillCounts] = useState({ action: 0, completed: 0 });
+  const [inboxTab, setInboxTab] = useState("action");
+  const [inboxItems, setInboxItems] = useState([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState("");
+  const [inboxCounts, setInboxCounts] = useState({ action: 0, completed: 0 });
   const [fillPatientQuery, setFillPatientQuery] = useState("");
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
   const [appointments, setAppointments] = useState([]);
@@ -86,10 +98,27 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [labModalOpen, setLabModalOpen] = useState(false);
   const [labMode, setLabMode] = useState("local");
   const [labFile, setLabFile] = useState(null);
+  const [imagingUploadOpen, setImagingUploadOpen] = useState(false);
+  const [imagingUploadFile, setImagingUploadFile] = useState(null);
+  const [imagingReportForm, setImagingReportForm] = useState({
+    modality: "",
+    studyDate: "",
+    findings: "",
+    impression: ""
+  });
+  const [imagingPackageOpen, setImagingPackageOpen] = useState(false);
+  const [imagingPackageFiles, setImagingPackageFiles] = useState([]);
   const [fillModalOpen, setFillModalOpen] = useState(false);
   const [rxModalOpen, setRxModalOpen] = useState(false);
   const [recordModalOpen, setRecordModalOpen] = useState(false);
   const [docCreateModalOpen, setDocCreateModalOpen] = useState(false);
+  const [sickLeaveOpen, setSickLeaveOpen] = useState(false);
+  const [sickLeaveForm, setSickLeaveForm] = useState({
+    startDate: "",
+    endDate: "",
+    diagnosis: "",
+    note: ""
+  });
 
   const [labForm, setLabForm] = useState({ title: "" });
   const [rxForm, setRxForm] = useState({ medication: "", dosage: "", instructions: "" });
@@ -157,10 +186,11 @@ export default function DoctorPortal({ doctor, onExit }) {
     const name = folder?.title;
     if (!name || !selectedRoomId) return;
     setActiveFolderTitle(name);
+    setFolderStack(folder?.id ? [{ id: folder.id, title: folder.title }] : []);
     setActiveFolderItems([]);
     setActiveFolderLoading(true);
     try {
-      const contents = await getDoctorFolderContents(selectedRoomId, name);
+      const contents = folder?.id ? await getDoctorFolderContentsById(folder.id) : await getDoctorFolderContents(selectedRoomId, name);
       setActiveFolderItems(contents.items || []);
     } catch (error) {
       setMessage(error.message || "Failed to load folder contents");
@@ -169,15 +199,70 @@ export default function DoctorPortal({ doctor, onExit }) {
     }
   };
 
-  const openActiveFolderItem = (item) => {
-    if (item?.type === "file" && item.openUrl) {
-      openDoc(item.title, item.openUrl);
+  const openFolderById = async ({ id, title }) => {
+    if (!id) return;
+    setActiveFolderLoading(true);
+    setMessage("");
+    try {
+      const contents = await getDoctorFolderContentsById(id);
+      setActiveFolderItems(contents.items || []);
+      setFolderStack((prev) => [...(Array.isArray(prev) ? prev : []), { id, title: title || "Folder" }]);
+    } catch (error) {
+      setMessage(error.message || "Failed to load folder contents");
+    } finally {
+      setActiveFolderLoading(false);
     }
+  };
+
+  const goFolderBack = async () => {
+    const stack = Array.isArray(folderStack) ? folderStack : [];
+    if (stack.length <= 1) {
+      setActiveFolderTitle("");
+      setActiveFolderItems([]);
+      setFolderStack([]);
+      return;
+    }
+    const nextStack = stack.slice(0, -1);
+    const target = nextStack.at(-1);
+    setFolderStack(nextStack);
+    if (!target?.id) return;
+    setActiveFolderLoading(true);
+    try {
+      const contents = await getDoctorFolderContentsById(target.id);
+      setActiveFolderItems(contents.items || []);
+    } finally {
+      setActiveFolderLoading(false);
+    }
+  };
+
+  const openActiveFolderItem = (item) => {
+    if (item?.type !== "file") return;
+    const title = String(item?.title || "");
+    const isImage = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(title);
+    if (isImage && item?.id) {
+      createDoctorFileShareLink(item.id)
+        .then((link) => openDoc(title || "Imaging", link?.shareLink || link?.shareUrl || link?.url || item.openUrl))
+        .catch(() => {
+          if (item.openUrl) openDoc(title || "Imaging", item.openUrl);
+        });
+      return;
+    }
+    if (item.openUrl) openDoc(title || "Document", item.openUrl);
+  };
+
+  const canCancelFillSignItem = (item) => {
+    if (!item || item.status === "completed") return false;
+    if (String(item?.initiatedByType || "").trim() !== "clinic") return false;
+    const requestedBy = String(item?.requestedBy || "").trim().toLowerCase();
+    const doctorEmail = String(doctor?.email || "").trim().toLowerCase();
+    return doctorEmail && requestedBy === doctorEmail;
   };
 
   const isLabFolderActive = activeFolderTitle === "Lab Results";
   const isPrescriptionFolderActive = activeFolderTitle === "Prescriptions";
-  const isGenericDocFolderActive = ["Contracts", "Insurance", "Sick Leave", "Imaging", "Personal Data"].includes(
+  const isImagingFolderActive = activeFolderTitle === "Imaging";
+  const isSickLeaveFolderActive = activeFolderTitle === "Sick Leave";
+  const isGenericDocFolderActive = ["Contracts", "Insurance", "Personal Data"].includes(
     activeFolderTitle
   );
 
@@ -213,6 +298,7 @@ export default function DoctorPortal({ doctor, onExit }) {
   useEffect(() => {
     setActiveFolderTitle("");
     setActiveFolderItems([]);
+    setFolderStack([]);
   }, [selectedRoomId]);
 
   useEffect(() => {
@@ -282,6 +368,12 @@ export default function DoctorPortal({ doctor, onExit }) {
   }, [view, selectedRoomId, fillTab]);
 
   useEffect(() => {
+    if (view !== "doctor-inbox") return;
+    loadInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, inboxTab]);
+
+  useEffect(() => {
     let host = document.getElementById(editorFrameId);
     if (!host) {
       host = document.createElement("div");
@@ -304,31 +396,46 @@ export default function DoctorPortal({ doctor, onExit }) {
   };
 
   const runHiddenEditor = async (file, payload) => {
-    if (!file?.id || !file?.shareToken) return;
+    const requestToken = file?.requestToken || file?.shareToken || "";
+    if (!file?.id || !requestToken) return;
     if (!docspaceUrl) {
       setMessage("VITE_DOCSPACE_URL is not set.");
       return;
     }
-    destroyEditor();
-    try {
-      await loadDocSpaceSdk(docspaceUrl);
-      const instance = window.DocSpace?.SDK?.initEditor({
-        src: docspaceUrl,
-        id: String(file.id),
-        frameId: editorFrameId,
-        requestToken: file.shareToken,
-        width: "1px",
-        height: "1px",
-        events: {
-          onAppReady: () => {
-            const frameInstance = window.DocSpace?.SDK?.frames?.[editorFrameId];
-            if (!frameInstance) {
-              destroyEditor();
-              return;
-            }
-            const callback = new Function(
-              "editorInstance",
-              `
+
+    return new Promise(async (resolve, reject) => {
+      let done = false;
+      const finish = (fn) => {
+        if (done) return;
+        done = true;
+        try {
+          destroyEditor();
+        } finally {
+          fn();
+        }
+      };
+
+      destroyEditor();
+
+      try {
+        await loadDocSpaceSdk(docspaceUrl);
+        const instance = window.DocSpace?.SDK?.initEditor({
+          src: docspaceUrl,
+          id: String(file.id),
+          frameId: editorFrameId,
+          requestToken,
+          width: "1px",
+          height: "1px",
+          events: {
+            onAppReady: () => {
+              const frameInstance = window.DocSpace?.SDK?.frames?.[editorFrameId];
+              if (!frameInstance) {
+                finish(() => reject(new Error("Hidden editor frame not available")));
+                return;
+              }
+              const callback = new Function(
+                "editorInstance",
+                `
                 try {
                   if (!editorInstance || typeof editorInstance.createConnector !== "function") {
                     console.error("Editor instance is invalid", editorInstance);
@@ -459,9 +566,9 @@ export default function DoctorPortal({ doctor, onExit }) {
                         pushPara(p);
                       }
 
-                      if (data.type === "prescription") {
-                        addTitle(
-                          "Prescription",
+	                      if (data.type === "prescription") {
+	                        addTitle(
+	                          "Prescription",
                           data.patient ? "Issued for " + data.patient : "",
                           data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
                         );
@@ -472,11 +579,11 @@ export default function DoctorPortal({ doctor, onExit }) {
                         addSection("Medication");
                         addField("Name", data.medication);
                         addField("Dosage", data.dosage);
-                        addSection("Instructions");
-                        addBody(data.instructions);
-                      } else if (data.type === "medical-record") {
-                        addTitle(
-                          "Medical Record",
+	                        addSection("Instructions");
+	                        addBody(data.instructions);
+	                      } else if (data.type === "medical-record") {
+	                        addTitle(
+	                          "Medical Record",
                           data.patient ? "Visit summary for " + data.patient : "",
                           data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
                         );
@@ -484,10 +591,49 @@ export default function DoctorPortal({ doctor, onExit }) {
                         addField("Patient", data.patient);
                         addField("Doctor", data.doctor);
                         addField("Appointment", data.appointment);
-                        addField("Record type", data.recordType);
-                        addSection("Summary");
-                        addBody(data.summary);
-                      }
+	                        addField("Record type", data.recordType);
+	                        addSection("Summary");
+	                        addBody(data.summary);
+	                      } else if (data.type === "sick-leave") {
+	                        addTitle(
+	                          "Sick Leave Certificate",
+	                          data.patient ? "Issued for " + data.patient : "",
+	                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
+	                        );
+	                        addSection("Certificate Details");
+	                        addField("Patient", data.patient);
+	                        addField("Doctor", data.doctor);
+	                        addField("Issue date", data.date);
+	                        addField("Start date", data.startDate);
+	                        addField("End date", data.endDate);
+	                        addField("Diagnosis", data.diagnosis);
+	                        if (data.note) {
+	                          addSection("Notes");
+	                          addBody(data.note);
+	                        }
+	                      } else if (data.type === "imaging-report") {
+	                        addTitle(
+	                          "Imaging Report",
+	                          data.patient ? "Report for " + data.patient : "",
+	                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
+	                        );
+	                        addSection("Study");
+	                        addField("Patient", data.patient);
+	                        addField("Doctor", data.doctor);
+	                        addField("Report date", data.date);
+	                        addField("Modality", data.modality);
+	                        addField("Study date", data.studyDate);
+	                        addSection("Findings");
+	                        addBody(data.findings);
+	                        addSection("Impression");
+	                        addBody(data.impression);
+	                        if (data.attachments && data.attachments.length) {
+	                          addSection("Attachments");
+	                          for (var i = 0; i < data.attachments.length; i++) {
+	                            addField("File " + (i + 1), data.attachments[i]);
+	                          }
+	                        }
+	                      }
 
                       Api.Save();
                     } catch (e) {
@@ -498,19 +644,24 @@ export default function DoctorPortal({ doctor, onExit }) {
                   console.error("Doctor editor callback failed", e);
                 }
               `
-            );
-            frameInstance.executeInEditor(callback);
-            setTimeout(() => destroyEditor(), 5000);
-          },
-          onAppError: () => {
-            setTimeout(() => destroyEditor(), 500);
+              );
+              frameInstance.executeInEditor(callback);
+              // Give the editor time to execute `Api.Save()`.
+              setTimeout(() => finish(resolve), 6500);
+            },
+            onAppError: () => {
+              setTimeout(() => finish(() => reject(new Error("Editor app error"))), 500);
+            }
           }
-        }
-      });
-      editorRef.current = instance;
-    } catch (error) {
-      setMessage(error.message || "Failed to run editor");
-    }
+        });
+        editorRef.current = instance;
+        // Safety timeout.
+        setTimeout(() => finish(resolve), 15000);
+      } catch (error) {
+        setMessage(error.message || "Failed to run editor");
+        finish(() => reject(error));
+      }
+    });
   };
 
   const openPatient = (roomId) => {
@@ -591,6 +742,10 @@ export default function DoctorPortal({ doctor, onExit }) {
     if (view === "doctor-fill-sign" && selectedRoomId) {
       loadFillItems(selectedRoomId, fillTab);
       setTimeout(() => loadFillItems(selectedRoomId, fillTab), 1500);
+    }
+    if (view === "doctor-inbox") {
+      loadInbox();
+      setTimeout(() => loadInbox(), 1500);
     }
   };
 
@@ -689,6 +844,177 @@ export default function DoctorPortal({ doctor, onExit }) {
     }
   };
 
+  const handleImagingUpload = async (event) => {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    if (!imagingUploadFile) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const maxBytes = 15 * 1024 * 1024;
+      if (imagingUploadFile.size > maxBytes) {
+        throw new Error(`File too large (${imagingUploadFile.size} bytes). Max is ${maxBytes} bytes.`);
+      }
+
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const comma = result.indexOf(",");
+          if (comma < 0) {
+            reject(new Error("Unexpected file encoding"));
+            return;
+          }
+          resolve(result.slice(comma + 1));
+        };
+        reader.readAsDataURL(imagingUploadFile);
+      });
+
+      await uploadImagingFile(selectedRoom.id, {
+        file: {
+          fileName: imagingUploadFile.name,
+          base64,
+          contentType: imagingUploadFile.type || "application/octet-stream"
+        }
+      });
+
+      setImagingUploadFile(null);
+      setImagingUploadOpen(false);
+      setMessage("Imaging file uploaded.");
+      const data = await getDoctorRoomSummary(selectedRoom.id);
+      setSummary(data);
+      const contents = await getDoctorFolderContents(selectedRoom.id, "Imaging");
+      if (activeFolderTitle === "Imaging") {
+        setActiveFolderItems(contents.items || []);
+      }
+    } catch (error) {
+      setMessage(error.message || "Failed to upload imaging file");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSickLeaveGenerate = async (event) => {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const patient = selectedRoom?.patientName || "Patient";
+      const today = new Date().toISOString().slice(0, 10);
+      const titleBase = `Sick Leave Certificate - ${today} - ${patient}`.replace(/\s+/g, " ").trim();
+      const file = await createRoomDocument(selectedRoom.id, { folderTitle: "Sick Leave", title: titleBase });
+      if (!file?.requestToken && !file?.shareToken) {
+        throw new Error("Share token missing for generated document");
+      }
+      await runHiddenEditor(file, {
+        type: "sick-leave",
+        patient,
+        doctor: doctor?.name || doctor?.email || "Doctor",
+        date: today,
+        startDate: sickLeaveForm.startDate || "",
+        endDate: sickLeaveForm.endDate || "",
+        diagnosis: sickLeaveForm.diagnosis || "",
+        note: sickLeaveForm.note || ""
+      });
+      setSickLeaveOpen(false);
+      setSickLeaveForm({ startDate: "", endDate: "", diagnosis: "", note: "" });
+      if (file?.openUrl) {
+        openDoc(file.title || "Sick leave certificate", file.openUrl);
+      }
+      const contents = await getDoctorFolderContents(selectedRoom.id, "Sick Leave");
+      if (activeFolderTitle === "Sick Leave") {
+        setActiveFolderItems(contents.items || []);
+      }
+    } catch (error) {
+      setMessage(error.message || "Failed to generate sick leave certificate");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImagingPackageGenerate = async (event) => {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const files = Array.isArray(imagingPackageFiles) ? imagingPackageFiles : [];
+      const maxBytes = 15 * 1024 * 1024;
+      for (const file of files) {
+        if (file.size > maxBytes) {
+          throw new Error(`File too large (${file.size} bytes). Max is ${maxBytes} bytes.`);
+        }
+      }
+
+      const readAsBase64 = (file) =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const comma = result.indexOf(",");
+            if (comma < 0) {
+              reject(new Error("Unexpected file encoding"));
+              return;
+            }
+            resolve(result.slice(comma + 1));
+          };
+          reader.readAsDataURL(file);
+        });
+
+      const payloadFiles = [];
+      for (const file of files) {
+        payloadFiles.push({
+          fileName: file.name,
+          base64: await readAsBase64(file),
+          contentType: file.type || "application/octet-stream"
+        });
+      }
+
+      const result = await createImagingPackage(selectedRoom.id, {
+        report: { ...imagingReportForm },
+        files: payloadFiles
+      });
+
+      const reportFile = result?.reportFile || null;
+      const uploadedTitles = (result?.uploadedFiles || []).map((f) => f.title).filter(Boolean);
+      if (reportFile?.requestToken || reportFile?.shareToken) {
+        await runHiddenEditor(reportFile, {
+          type: "imaging-report",
+          patient: selectedRoom?.patientName || "Patient",
+          doctor: doctor?.name || doctor?.email || "Doctor",
+          date: new Date().toISOString().slice(0, 10),
+          ...imagingReportForm,
+          attachments: uploadedTitles
+        });
+      }
+
+      setImagingPackageOpen(false);
+      setImagingPackageFiles([]);
+      setImagingReportForm({ modality: "", studyDate: "", findings: "", impression: "" });
+
+      if (reportFile?.openUrl) {
+        openDoc(reportFile.title || "Imaging report", reportFile.openUrl);
+      }
+
+      const stack = Array.isArray(folderStack) ? folderStack : [];
+      const current = stack.at(-1);
+      if (current?.id) {
+        const contents = await getDoctorFolderContentsById(current.id);
+        setActiveFolderItems(contents.items || []);
+      } else {
+        const contents = await getDoctorFolderContents(selectedRoom.id, "Imaging");
+        setActiveFolderItems(contents.items || []);
+      }
+    } catch (error) {
+      setMessage(error.message || "Failed to create imaging study");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handlePrescription = async (event) => {
     event.preventDefault();
     if (!selectedRoom) return;
@@ -702,7 +1028,7 @@ export default function DoctorPortal({ doctor, onExit }) {
         patient: selectedRoom,
         doctor
       });
-      if (file?.shareToken) {
+      if (file?.requestToken || file?.shareToken) {
         await runHiddenEditor(file, payload);
       }
       setRxForm({ medication: "", dosage: "", instructions: "" });
@@ -742,6 +1068,35 @@ export default function DoctorPortal({ doctor, onExit }) {
       setMessage(error.message || "Failed to create medical record");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const loadInbox = async (tabOverride) => {
+    try {
+      setInboxLoading(true);
+      setInboxError("");
+      const tabValue = String(tabOverride || inboxTab || "action").toLowerCase();
+      const { contents, counts } = await getDoctorIncomingFillSign(tabValue);
+      const files = (contents?.items || [])
+        .filter((item) => item?.type === "file")
+        .map((item) => ({
+          assignmentId: item.assignmentId || item.id || null,
+          templateFileId: item.templateFileId || null,
+          title: item.title || "Form",
+          openUrl: item.openUrl || "",
+          status: item.status || "action",
+          created: item.created || null,
+          patientName: item.patientName || "Patient",
+          patientRoomId: item.patientRoomId || ""
+        }));
+      setInboxItems(files);
+      setInboxCounts(counts || { action: 0, completed: 0 });
+    } catch (error) {
+      setInboxError(error?.message || "Failed to load incoming statements");
+      setInboxItems([]);
+      setInboxCounts({ action: 0, completed: 0 });
+    } finally {
+      setInboxLoading(false);
     }
   };
 
@@ -863,8 +1218,8 @@ export default function DoctorPortal({ doctor, onExit }) {
           </section>
         )}
 
-        {view === "doctor-patient" && selectedRoom && (
-          <section className="panel">
+	        {view === "doctor-patient" && selectedRoom && (
+	          <section className="panel">
             <div className="panel-head">
               <div className="record-actions doctor-quick-actions">
                 <button className="secondary" type="button" onClick={() => setView("doctor-patients")}>
@@ -886,17 +1241,17 @@ export default function DoctorPortal({ doctor, onExit }) {
               ))}
             </div>
 
-            {activeFolderTitle && (
-              <div className="doctor-section doctor-active-folder">
-                <div className="panel-head">
-                  <div>
-                    <h3>{activeFolderTitle}</h3>
-                    <p className="muted">Browse files in this folder.</p>
-                  </div>
-                  <div className="record-actions">
-                    <button className="secondary" type="button" onClick={() => setActiveFolderTitle("")}>
-                      Back to folders
-                    </button>
+	            {activeFolderTitle && (
+	              <div className="doctor-section doctor-active-folder">
+	                <div className="panel-head">
+	                  <div>
+	                    <h3>{folderStack.length ? folderStack.map((f) => f.title).join(" / ") : activeFolderTitle}</h3>
+	                    <p className="muted">Browse files in this folder.</p>
+	                  </div>
+	                  <div className="record-actions">
+	                    <button className="secondary" type="button" onClick={goFolderBack}>
+	                      {folderStack.length > 1 ? "Back" : "Back to folders"}
+	                    </button>
                     {isLabFolderActive && (
                       <button className="primary" type="button" onClick={() => setLabModalOpen(true)}>
                         Upload lab result
@@ -905,6 +1260,11 @@ export default function DoctorPortal({ doctor, onExit }) {
                     {isPrescriptionFolderActive && (
                       <button className="primary" type="button" onClick={() => setRxModalOpen(true)}>
                         Create prescription
+                      </button>
+                    )}
+                    {isSickLeaveFolderActive && (
+                      <button className="primary" type="button" onClick={() => setSickLeaveOpen(true)}>
+                        Generate sick leave
                       </button>
                     )}
                     {isGenericDocFolderActive && (
@@ -922,28 +1282,42 @@ export default function DoctorPortal({ doctor, onExit }) {
                         Create document
                       </button>
                     )}
-                  </div>
-                </div>
+	                    {isImagingFolderActive && (
+	                      <>
+	                        <button className="primary" type="button" onClick={() => setImagingPackageOpen(true)}>
+	                          New study
+	                        </button>
+	                        <button className="secondary" type="button" onClick={() => setImagingUploadOpen(true)}>
+	                          Upload imaging file
+	                        </button>
+	                      </>
+	                    )}
+	                  </div>
+	                </div>
                 {activeFolderLoading && <p className="muted">Loading folder contents...</p>}
                 {!activeFolderLoading && activeFolderItems.length === 0 && (
                   <p className="muted">No files yet.</p>
                 )}
-                <ul className="content-list doctor-files">
-                  {activeFolderItems
-                    .filter((item) => item.type === "file")
-                    .map((item) => (
-                      <li
-                        key={`active-${item.id}`}
-                        className={`content-item ${item.type}`}
-                        onClick={() => openActiveFolderItem(item)}
-                      >
-                        <span className="content-icon" />
-                        <span>{item.title}</span>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-            )}
+	                <ul className="content-list doctor-files">
+	                  {activeFolderItems.map((item) => (
+	                    <li
+	                      key={`active-${item.id}`}
+	                      className={`content-item ${item.type}`}
+	                      onClick={() => {
+	                        if (item.type === "folder") {
+	                          openFolderById({ id: item.id, title: item.title });
+	                          return;
+	                        }
+	                        openActiveFolderItem(item);
+	                      }}
+	                    >
+	                      <span className="content-icon" />
+	                      <span>{item.title}</span>
+	                    </li>
+	                  ))}
+	                </ul>
+	              </div>
+	            )}
 
             {!activeFolderTitle && (
               <div id="doctor-lab-results" className="doctor-section">
@@ -981,12 +1355,75 @@ export default function DoctorPortal({ doctor, onExit }) {
             </div>
             )}
           </section>
-        )}
+	        )}
 
-        {view === "doctor-fill-sign" && (
-          <section className="panel">
-            <div className="fill-sign-actions">
-              <button className="primary" type="button" onClick={() => setFillModalOpen(true)}>
+	        {view === "doctor-inbox" && (
+	          <section className="panel">
+	            <div className="panel-head">
+	              <div>
+	                <h3>Incoming statements</h3>
+	                <p className="muted">Forms started by patients from Client Templates.</p>
+	              </div>
+	              <div className="panel-tabs fill-tabs">
+	                <button
+	                  type="button"
+	                  className={`tab-pill ${inboxTab === "action" ? "active" : ""}`}
+	                  onClick={() => setInboxTab("action")}
+	                >
+	                  Requires action <span className="tab-count">{inboxCounts.action}</span>
+	                </button>
+	                <button
+	                  type="button"
+	                  className={`tab-pill ${inboxTab === "completed" ? "active" : ""}`}
+	                  onClick={() => setInboxTab("completed")}
+	                >
+	                  Completed <span className="tab-count">{inboxCounts.completed}</span>
+	                </button>
+	                <button className="secondary" type="button" onClick={() => loadInbox()} disabled={inboxLoading}>
+	                  Refresh
+	                </button>
+	              </div>
+	            </div>
+
+	            {inboxError && <p className="error-banner">Error: {inboxError}</p>}
+	            {inboxLoading && <p className="muted">Loading...</p>}
+	            {!inboxLoading && inboxItems.length === 0 && <p className="muted">No incoming statements yet.</p>}
+
+	            {!inboxLoading && inboxItems.length > 0 && (
+	              <div className="fill-grid">
+	                {inboxItems.map((item, idx) => (
+	                  <article key={item.assignmentId || `${item.title}-${idx}`} className="fill-card">
+	                    <div
+	                      className={`fill-thumb fill-thumb-${
+	                        item.status === "completed" ? "completed" : "action"
+	                      }`}
+	                    />
+	                    <div className="fill-body">
+	                      <h4>{item.title}</h4>
+	                      <p className="muted">Patient: {item.patientName}</p>
+	                      <p className="muted">{item.status === "completed" ? "Completed" : "In progress"}</p>
+	                      <div className="fill-actions">
+	                        <button
+	                          className={item.status === "completed" ? "secondary" : "primary"}
+	                          type="button"
+	                          onClick={() => openDoc(item.title, item.openUrl)}
+	                          disabled={!item.openUrl}
+	                        >
+	                          {item.status === "completed" ? "View" : "Open"}
+	                        </button>
+	                      </div>
+	                    </div>
+	                  </article>
+	                ))}
+	              </div>
+	            )}
+	          </section>
+	        )}
+
+	        {view === "doctor-fill-sign" && (
+	          <section className="panel">
+	            <div className="fill-sign-actions">
+	              <button className="primary" type="button" onClick={() => setFillModalOpen(true)}>
                 Request signature
               </button>
             </div>
@@ -1062,7 +1499,7 @@ export default function DoctorPortal({ doctor, onExit }) {
                               <p className="muted">
                                 {fillTab === "action" ? "Waiting for patient signature" : "Completed"}
                               </p>
-                              <p className="muted">Initiated by: City Clinic</p>
+                              <p className="muted">Initiated by: {file.initiatedByName || "Clinic"}</p>
                               <div className="fill-actions">
                                 <button
                                   className={fillTab === "action" ? "primary" : "secondary"}
@@ -1071,6 +1508,31 @@ export default function DoctorPortal({ doctor, onExit }) {
                                 >
                                   View
                                 </button>
+                                {fillTab === "action" && canCancelFillSignItem(file) && (
+                                  <button
+                                    className="secondary"
+                                    type="button"
+                                    onClick={async () => {
+                                      if (busy) return;
+                                      const aid = String(file.assignmentId || "").trim();
+                                      if (!aid || !selectedRoomId) return;
+                                      const ok = window.confirm("Cancel this request? It will disappear for the patient too.");
+                                      if (!ok) return;
+                                      setBusy(true);
+                                      setFillError("");
+                                      try {
+                                        await cancelDoctorFillSignRequest(selectedRoomId, aid);
+                                        await loadFillItems(selectedRoomId, fillTab);
+                                      } catch (error) {
+                                        setFillError(error.message || "Failed to cancel request");
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    }}
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </article>
@@ -1174,6 +1636,166 @@ export default function DoctorPortal({ doctor, onExit }) {
                 </div>
               </div>
             )}
+          </Modal>
+        )}
+
+        {imagingUploadOpen && selectedRoom && (
+          <Modal
+            title="Upload imaging file"
+            onClose={() => {
+              setImagingUploadOpen(false);
+              setImagingUploadFile(null);
+            }}
+          >
+            <form className="auth-form" onSubmit={handleImagingUpload}>
+              <div className="file-input-block">
+                <span className="file-input-label">Choose file</span>
+                <div className="file-input-row">
+                  <input
+                    id="imaging-file-input"
+                    className="file-input-hidden"
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.dcm,application/pdf,image/*"
+                    onChange={(e) => setImagingUploadFile(e.target.files?.[0] || null)}
+                  />
+                  <label className="file-input-button" htmlFor="imaging-file-input">
+                    Browse files
+                  </label>
+                  <span className="file-input-name">{imagingUploadFile?.name || "No file selected"}</span>
+                </div>
+              </div>
+              <button className="primary" type="submit" disabled={busy || !imagingUploadFile}>
+                Upload
+              </button>
+            </form>
+          </Modal>
+        )}
+
+        
+	        {imagingPackageOpen && selectedRoom && (
+	          <Modal
+	            title="New imaging study"
+	            onClose={() => {
+	              setImagingPackageOpen(false);
+	              setImagingPackageFiles([]);
+	            }}
+	          >
+	            <form className="auth-form" onSubmit={handleImagingPackageGenerate}>
+	              <div className="file-input-block">
+	                <span className="file-input-label">Imaging files</span>
+	                <div className="file-input-row">
+	                  <input
+	                    id="imaging-package-files"
+	                    className="file-input-hidden"
+	                    type="file"
+	                    multiple
+	                    accept=".pdf,.png,.jpg,.jpeg,.dcm,application/pdf,image/*"
+	                    onChange={(e) => setImagingPackageFiles(Array.from(e.target.files || []))}
+	                  />
+	                  <label className="file-input-button" htmlFor="imaging-package-files">
+	                    Browse files
+	                  </label>
+	                  <span className="file-input-name">
+	                    {imagingPackageFiles.length ? `${imagingPackageFiles.length} file(s) selected` : "No files selected"}
+	                  </span>
+	                </div>
+	              </div>
+	              <label>
+	                Modality
+	                <input
+	                  type="text"
+	                  placeholder="MRI / CT / X-ray / Ultrasound"
+	                  value={imagingReportForm.modality}
+	                  onChange={(e) => setImagingReportForm({ ...imagingReportForm, modality: e.target.value })}
+	                  required
+	                />
+	              </label>
+	              <label>
+	                Study date (optional)
+	                <input
+	                  type="date"
+	                  lang="en-US"
+	                  value={imagingReportForm.studyDate}
+	                  onChange={(e) => setImagingReportForm({ ...imagingReportForm, studyDate: e.target.value })}
+	                />
+	              </label>
+	              <label>
+	                Findings
+	                <textarea
+	                  rows="4"
+	                  placeholder="Describe findings"
+	                  value={imagingReportForm.findings}
+	                  onChange={(e) => setImagingReportForm({ ...imagingReportForm, findings: e.target.value })}
+	                  required
+	                />
+	              </label>
+	              <label>
+	                Impression
+	                <textarea
+	                  rows="3"
+	                  placeholder="Summary / impression"
+	                  value={imagingReportForm.impression}
+	                  onChange={(e) => setImagingReportForm({ ...imagingReportForm, impression: e.target.value })}
+	                  required
+	                />
+	              </label>
+	              <button className="primary" type="submit" disabled={busy}>
+	                Create study
+	              </button>
+	            </form>
+	          </Modal>
+	        )}
+
+        {sickLeaveOpen && selectedRoom && (
+          <Modal
+            title="Generate sick leave certificate"
+            onClose={() => {
+              setSickLeaveOpen(false);
+              setSickLeaveForm({ startDate: "", endDate: "", diagnosis: "", note: "" });
+            }}
+          >
+            <form className="auth-form" onSubmit={handleSickLeaveGenerate}>
+              <label>
+                Start date
+                <input
+                  type="date"
+                  lang="en-US"
+                  value={sickLeaveForm.startDate}
+                  onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, startDate: e.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                End date (optional)
+                <input
+                  type="date"
+                  lang="en-US"
+                  value={sickLeaveForm.endDate}
+                  onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, endDate: e.target.value })}
+                />
+              </label>
+              <label>
+                Diagnosis (optional)
+                <input
+                  type="text"
+                  placeholder="Diagnosis"
+                  value={sickLeaveForm.diagnosis}
+                  onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, diagnosis: e.target.value })}
+                />
+              </label>
+              <label>
+                Note (optional)
+                <textarea
+                  rows="3"
+                  placeholder="Any additional notes"
+                  value={sickLeaveForm.note}
+                  onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, note: e.target.value })}
+                />
+              </label>
+              <button className="primary" type="submit" disabled={busy}>
+                Generate
+              </button>
+            </form>
           </Modal>
         )}
 
@@ -1362,6 +1984,12 @@ function getTopbarProps({ view, selectedRoom, dateFilter, onDateFilter }) {
     return {
       title: "Fill & Sign",
       subtitle: "Manage patient signature requests."
+    };
+  }
+  if (view === "doctor-inbox") {
+    return {
+      title: "Incoming statements",
+      subtitle: "Statements started by patients."
     };
   }
   return {

@@ -1665,21 +1665,43 @@ main {
   align-items: center;
 }
 
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
 .tab-pill {
-  padding: 0.8rem 1.2rem;
+  padding: 0.7rem 1rem;
   border-radius: 999px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   font-weight: 600;
   color: #475569;
-  font-size: 1rem;
+  font-size: 0.95rem;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   white-space: nowrap;
   line-height: 1.1;
   min-height: 44px;
-  min-width: 200px;
+  min-width: 140px;
   justify-content: center;
 }
 
@@ -1699,7 +1721,7 @@ main {
 
 .fill-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1.5rem;
 }
 
@@ -1708,7 +1730,7 @@ main {
   align-items: stretch;
   gap: 1rem;
   border-radius: 18px;
-  padding: 1.25rem;
+  padding: 1.1rem;
   border: 1px solid #eef2f7;
   background: #fff;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
@@ -1718,9 +1740,9 @@ main {
 .fill-thumb {
   border-radius: 14px;
   background: linear-gradient(135deg, #e2e8f0, #f8fafc);
-  min-height: 110px;
-  width: 120px;
-  flex: 0 0 120px;
+  min-height: 96px;
+  width: 96px;
+  flex: 0 0 96px;
 }
 
 .fill-thumb-consent {
@@ -1744,20 +1766,38 @@ main {
 }
 
 .fill-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-top: 0.75rem;
+  margin-top: auto;
+  padding-top: 0.75rem;
 }
 
 .fill-body {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.fill-body h4 {
+  margin: 0;
+}
+
+.fill-body p {
+  margin: 0;
+}
+
+.fill-initiated {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .fill-actions button {
   white-space: nowrap;
+  width: 100%;
 }
 
 .error-banner {

@@ -89,6 +89,21 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
     editorRef.current = null;
   };
 
+  useEffect(() => {
+    let host = document.getElementById(editorFrameId);
+    if (!host) {
+      host = document.createElement("div");
+      host.id = editorFrameId;
+      host.className = "hidden-editor";
+      document.body.appendChild(host);
+    }
+    return () => {
+      destroyEditor();
+      if (host?.parentNode) host.parentNode.removeChild(host);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fillRequestHidden = async (file, payload) => {
     if (!file?.id) return;
     if (!docspaceUrl) {
@@ -430,7 +445,6 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
         url={docModal.url}
         onClose={() => setDocModal({ open: false, title: "", url: "" })}
       />
-      <div id={editorFrameId} className="hidden-editor" />
     </PatientShell>
   );
 }

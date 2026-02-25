@@ -3,6 +3,7 @@ import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import AuditModal from "../components/AuditModal.jsx";
 import ContextMenu from "../components/ContextMenu.jsx";
 import EmptyState from "../components/EmptyState.jsx";
+import EmailChipsInput from "../components/EmailChipsInput.jsx";
 import Modal from "../components/Modal.jsx";
 import RequestDetailsModal from "../components/RequestDetailsModal.jsx";
 import StatusPill from "../components/StatusPill.jsx";
@@ -140,8 +141,8 @@ export default function Requests({
   const [orderMaxStep, setOrderMaxStep] = useState(2);
   const [sendDraftAvailable, setSendDraftAvailable] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState("");
-  const [draftMenuOpen, setDraftMenuOpen] = useState(false);
-  const [draftAnchorEl, setDraftAnchorEl] = useState(null);
+  // Drafts are stored locally in this browser (see draftsStore).
+  const [sendExitConfirmOpen, setSendExitConfirmOpen] = useState(false);
 
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState("");
@@ -187,14 +188,27 @@ export default function Requests({
   const projectTitle = activeProject?.title || "";
   const projectId = activeProject?.id ? String(activeProject.id) : "";
 
+  const sendHasUnsavedChanges = useMemo(() => {
+    if (!sendOpen) return false;
+    if (Array.isArray(sendFlows) && sendFlows.length) return false;
+    const hasTemplate = Boolean(String(sendSelectedId || "").trim());
+    const hasRecipients = Boolean(String(inviteEmails || "").trim()) || (pickedMemberIds instanceof Set ? pickedMemberIds.size > 0 : false) || (pickedDirectoryEmails instanceof Set ? pickedDirectoryEmails.size > 0 : false);
+    const hasOther = Boolean(String(sendDueDate || "").trim()) || Boolean(String(notifyMessage || "").trim()) || Boolean(orderEnabled) || Boolean(String(activeDraftId || "").trim());
+    return hasTemplate || hasRecipients || hasOther;
+  }, [activeDraftId, inviteEmails, notifyMessage, orderEnabled, pickedDirectoryEmails, pickedMemberIds, sendDueDate, sendFlows, sendOpen, sendSelectedId]);
+
+  const requestCloseSend = useCallback(() => {
+    if (busy || notifyBusy) return;
+    if (sendHasUnsavedChanges) {
+      setSendExitConfirmOpen(true);
+      return;
+    }
+    setSendOpen(false);
+  }, [busy, notifyBusy, sendHasUnsavedChanges]);
+
   const closeActionsMenu = useCallback(() => {
     setActionsMenuOpen(false);
     setActionsAnchorEl(null);
-  }, []);
-
-  const closeDraftMenu = useCallback(() => {
-    setDraftMenuOpen(false);
-    setDraftAnchorEl(null);
   }, []);
 
   useEffect(() => {
@@ -574,6 +588,7 @@ export default function Requests({
       setActiveDraftId(saved?.id || "");
       setLocalError("");
       setSendDraftAvailable(true);
+      toast("Draft saved. Open Drafts to continue later.", "success");
     } catch {
       setLocalError("Failed to save draft");
     }
@@ -617,6 +632,7 @@ export default function Requests({
       const latest = list[0];
       setActiveDraftId(String(latest.id || ""));
       applyDraftPayload(latest.payload);
+      toast("Draft loaded.", "success");
       return true;
     } catch {
       setLocalError("Failed to load draft");
@@ -625,9 +641,11 @@ export default function Requests({
   }, [applyDraftPayload, session]);
 
   const clearDraftSelection = useCallback(() => {
+    const had = Boolean(String(activeDraftId || "").trim());
     setActiveDraftId("");
     refreshSendDraftAvailable();
-  }, [refreshSendDraftAvailable]);
+    if (had) toast("Draft cleared.", "info");
+  }, [activeDraftId, refreshSendDraftAvailable]);
 
   useEffect(() => {
     const handler = (evt) => {
@@ -639,6 +657,18 @@ export default function Requests({
     window.addEventListener("portal:requestsLoadDraft", handler);
     return () => window.removeEventListener("portal:requestsLoadDraft", handler);
   }, [applyDraftPayload]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (!hasProject) {
+        onOpenProjects();
+        return;
+      }
+      setSendOpen(true);
+    };
+    window.addEventListener("portal:requestsNewRequest", handler);
+    return () => window.removeEventListener("portal:requestsNewRequest", handler);
+  }, [hasProject, onOpenProjects]);
 
   useEffect(() => {
     if (!sendOpen) return;
@@ -912,7 +942,9 @@ export default function Requests({
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
       toast("Request canceled", "success");
     } catch (e) {
-      setLocalError(e?.message || "Failed to cancel request");
+      const msg = e?.message || "Failed to cancel request";
+      setLocalError(msg);
+      toast(msg, "error");
     } finally {
       setActionBusy(false);
     }
@@ -925,14 +957,23 @@ export default function Requests({
     setLocalError("");
     setActionBusy(true);
     try {
+      const failures = [];
       for (const id of ids) {
         // eslint-disable-next-line no-await-in-loop
-        await cancelFlow({ token, flowId: id }).catch(() => null);
+        await cancelFlow({ token, flowId: id }).catch((e) => failures.push(e));
       }
       window.dispatchEvent(new CustomEvent("portal:flowsChanged"));
-      toast("Requests canceled", "success");
+      if (failures.length) {
+        const msg = failures[0]?.message || "Some requests could not be canceled";
+        setLocalError(msg);
+        toast(msg, "error");
+      } else {
+        toast("Requests canceled", "success");
+      }
     } catch (e) {
-      setLocalError(e?.message || "Failed to cancel request");
+      const msg = e?.message || "Failed to cancel request";
+      setLocalError(msg);
+      toast(msg, "error");
     } finally {
       setActionBusy(false);
     }
@@ -1609,7 +1650,7 @@ export default function Requests({
                   })()}
                   {(() => {
                     const canManage = canManageFlow(flow);
-                    const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+                    const canCancel = canManage && status === "InProgress";
                     if (!canCancel) return null;
                     return (
                       <button
@@ -1657,7 +1698,7 @@ export default function Requests({
           const isArchived = Boolean(flow?.archivedAt);
           const isTrashed = Boolean(flow?.trashedAt);
           const canReopen = status === "Canceled" && canManage;
-          const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+          const canCancel = canManage && status === "InProgress";
           const canArchive = canManage && !isArchived && (status === "Completed" || status === "Canceled");
           const canUnarchive = canManage && isArchived;
           const canTrash = canManage && !isTrashed && (status === "Completed" || status === "Canceled" || isArchived);
@@ -1871,28 +1912,35 @@ export default function Requests({
               : "New request"
         }
         size="lg"
-        onClose={() => setSendOpen(false)}
+        onClose={requestCloseSend}
         footer={
           <>
              {!sendFlows.length ? (
                <>
+                {sendDraftAvailable ? (
+                  <button type="button" onClick={loadLastDraft} disabled={busy} title="Resume your last saved draft">
+                    Continue draft
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    setDraftAnchorEl(e.currentTarget);
-                    setDraftMenuOpen(true);
-                  }}
-                  disabled={busy || (!sendDraftAvailable && !sendSelectedId && !activeDraftId)}
-                  title={!sendDraftAvailable && !sendSelectedId && !activeDraftId ? "No draft actions available" : ""}
+                  onClick={saveSendDraft}
+                  disabled={busy || !sendSelectedId}
+                  title={!sendSelectedId ? "Pick a template first" : "Save in this browser"}
                 >
-                  Drafts
+                  Save draft
                 </button>
+                {activeDraftId ? (
+                  <button type="button" className="danger" onClick={clearDraftSelection} disabled={busy} title="Forget the currently loaded draft">
+                    Clear draft
+                  </button>
+                ) : null}
                 {sendStep === "recipients" ? (
                   <button type="button" onClick={() => setSendStep("setup")} disabled={busy}>
                     Back
                   </button>
                 ) : (
-                  <button type="button" onClick={() => setSendOpen(false)} disabled={busy}>
+                  <button type="button" onClick={requestCloseSend} disabled={busy}>
                     Cancel
                   </button>
                 )}
@@ -2575,10 +2623,11 @@ export default function Requests({
                     </div>
                     <div className="auth-form" style={{ marginTop: 0 }}>
                       <label>
-                        <span>Emails (comma / new line)</span>
-                        <textarea
+                        <span>Emails</span>
+                        <EmailChipsInput
                           value={inviteEmails}
-                          onChange={(e) => setInviteEmails(e.target.value)}
+                          onChange={setInviteEmails}
+                          placeholder="Type an email and press Enter"
                           disabled={busy || !canManageProject}
                         />
                       </label>
@@ -2777,56 +2826,46 @@ export default function Requests({
         </div>
       </Modal>
 
-      <ContextMenu open={draftMenuOpen} anchorEl={draftAnchorEl} onClose={closeDraftMenu} ariaLabel="Draft actions">
-        {sendDraftAvailable ? (
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => {
-              closeDraftMenu();
-              loadLastDraft();
-            }}
-            disabled={busy}
-          >
-            <span>Load last draft</span>
-            <span className="menu-item-meta">Resume</span>
-          </button>
-        ) : null}
-        {sendSelectedId ? (
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => {
-              closeDraftMenu();
-              saveSendDraft();
-            }}
-            disabled={busy}
-          >
-            <span>Save draft</span>
-            <span className="menu-item-meta">Keep for later</span>
-          </button>
-        ) : null}
-        {activeDraftId ? (
-          <button
-            type="button"
-            className="menu-item danger"
-            onClick={() => {
-              closeDraftMenu();
-              clearDraftSelection();
-            }}
-            disabled={busy}
-          >
-            <span>Clear draft</span>
-            <span className="menu-item-meta">Forget selection</span>
-          </button>
-        ) : null}
-        {!sendDraftAvailable && !sendSelectedId && !activeDraftId ? (
-          <div className="menu-item" aria-disabled="true">
-            <span>No draft actions</span>
-            <span className="menu-item-meta">Pick a template first</span>
-          </div>
-        ) : null}
-      </ContextMenu>
+      <Modal
+        open={sendExitConfirmOpen}
+        title="Save draft?"
+        onClose={() => setSendExitConfirmOpen(false)}
+        size="sm"
+        footer={
+          <>
+            <button type="button" onClick={() => setSendExitConfirmOpen(false)} disabled={busy || notifyBusy}>
+              Continue editing
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSendExitConfirmOpen(false);
+                setSendOpen(false);
+              }}
+              disabled={busy || notifyBusy}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                saveSendDraft();
+                setSendExitConfirmOpen(false);
+                setSendOpen(false);
+              }}
+              disabled={busy || notifyBusy || !sendSelectedId}
+              title={!sendSelectedId ? "Pick a template first" : ""}
+            >
+              Save draft
+            </button>
+          </>
+        }
+      >
+        <p className="muted" style={{ margin: 0 }}>
+          You have an unfinished request. Save it as a draft to continue later, or discard your changes.
+        </p>
+      </Modal>
 
       <Modal
         open={actionsOpen}
@@ -2852,7 +2891,7 @@ export default function Requests({
           const isArchived = Boolean(flow?.archivedAt);
           const isTrashed = Boolean(flow?.trashedAt);
           const canReopen = status === "Canceled" && canManage;
-          const canCancel = canManage && status !== "Completed" && status !== "Canceled";
+          const canCancel = canManage && status === "InProgress";
           const canComplete =
             kind === "sharedSign" &&
             status !== "Completed" &&
@@ -3222,7 +3261,7 @@ export default function Requests({
         canCancel={(() => {
           const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;
           const status = String(detailsGroup?.status || flow?.status || "");
-          return Boolean(canManageFlow(flow) && status !== "Completed" && status !== "Canceled");
+          return Boolean(canManageFlow(flow) && status === "InProgress");
         })()}
         canComplete={(() => {
           const flow = detailsGroup?.primaryFlow || detailsGroup?.flows?.[0] || null;

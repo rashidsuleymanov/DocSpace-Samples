@@ -75,10 +75,36 @@ export async function getDoctorFolderContents(roomId, title) {
   return data.contents || { items: [] };
 }
 
+export async function getDoctorFolderContentsById(folderId) {
+  const data = await request(`/api/doctor/folders/${encodeURIComponent(folderId)}/contents`);
+  return data.contents || { items: [] };
+}
+
 export async function getDoctorFillSignContents(roomId, tab) {
   const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
   const data = await request(`/api/doctor/rooms/${roomId}/fill-sign/contents${query}`);
   return data.contents || { items: [] };
+}
+
+export async function cancelDoctorFillSignRequest(roomId, assignmentId) {
+  const rid = String(roomId || "").trim();
+  const aid = String(assignmentId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  if (!aid) throw new Error("assignmentId is required");
+  const data = await request(`/api/doctor/rooms/${rid}/fill-sign/cancel`, {
+    method: "POST",
+    body: { assignmentId: aid }
+  });
+  return Boolean(data?.ok);
+}
+
+export async function getDoctorIncomingFillSign(tab) {
+  const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
+  const data = await request(`/api/doctor/fill-sign/incoming${query}`);
+  return {
+    contents: data.contents || { items: [] },
+    counts: data.counts || { action: 0, completed: 0 }
+  };
 }
 
 export async function copyLabResultFromDocSpace(roomId, payload) {
@@ -111,4 +137,30 @@ export async function requestFillSign(roomId, payload) {
     body: payload
   });
   return data.files || [];
+}
+
+export async function uploadImagingFile(roomId, payload) {
+  const data = await request(`/api/doctor/rooms/${roomId}/imaging/upload`, {
+    method: "POST",
+    body: payload
+  });
+  return data;
+}
+
+export async function createImagingPackage(roomId, payload) {
+  const data = await request(`/api/doctor/rooms/${roomId}/imaging/package`, {
+    method: "POST",
+    body: payload
+  });
+  return data;
+}
+
+export async function createDoctorFileShareLink(fileId) {
+  const fid = String(fileId || "").trim();
+  if (!fid) throw new Error("fileId is required");
+  const data = await request("/api/doctor/file-share-link", {
+    method: "POST",
+    body: { fileId: fid }
+  });
+  return data.link || null;
 }

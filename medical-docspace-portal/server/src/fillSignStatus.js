@@ -37,6 +37,9 @@ function matchesInstanceTitle({ title, patientName, templateBase }) {
   if (numberedPrefix.test(t)) {
     return t.includes(base);
   }
+  if (t.includes(p) && t.includes(base)) {
+    return true;
+  }
   return false;
 }
 
@@ -55,8 +58,9 @@ async function resolveFormFolderId({ parentFolderId, templateTitle, cache }) {
     })
     .map((f) => String(f.id))
     .filter(Boolean);
-  cache.set(key, matches);
-  return matches;
+  const resolved = matches.length ? matches : folders.map((f) => String(f.id)).filter(Boolean);
+  cache.set(key, resolved);
+  return resolved;
 }
 
 async function listInstances({ folderIds, patientName, templateTitle, fileInfoCache }) {
@@ -111,7 +115,9 @@ export async function resolveFillSignAssignments(assignments, { patientName } = 
       openUrl: a?.shareLink || null,
       status: "action",
       created: a?.createdAt || null,
-      initiatedBy: a?.requestedBy || config.doctorEmail || "Doctor"
+      initiatedByType: a?.initiatedBy || null,
+      initiatedByName: a?.requestedBy || config.doctorEmail || "Doctor",
+      requestedBy: a?.requestedBy || null
     }));
   }
 
@@ -240,6 +246,8 @@ export async function resolveFillSignAssignments(assignments, { patientName } = 
     status: item?.status || "action",
     instanceFileId: item?.instanceFileId || null,
     created: item?.createdAt || null,
-    initiatedBy: item?.requestedBy || config.doctorEmail || "Doctor"
+    initiatedByType: item?.initiatedBy || null,
+    initiatedByName: item?.requestedBy || config.doctorEmail || "Doctor",
+    requestedBy: item?.requestedBy || null
   }));
 }

@@ -84,14 +84,22 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
       <header className="topbar">
         <div>
           <h2>Drafts</h2>
-          <p className="muted">Save unfinished sends and continue later.</p>
+          <p className="muted">Saved locally in this browser. Create drafts with “Save draft” in Requests / Bulk tools.</p>
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={() => setTick((n) => n + 1)} disabled={busy}>
             Refresh
           </button>
-          <button type="button" className="primary" onClick={() => onOpenRequests?.()} disabled={busy}>
-            New request
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              onOpenRequests?.();
+              setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNewRequest")), 0);
+            }}
+            disabled={busy}
+          >
+            Start new request
           </button>
         </div>
       </header>
@@ -115,16 +123,36 @@ export default function SendDrafts({ session, busy, onOpenRequests, onOpenBulkSe
         {!drafts.length ? (
           <EmptyState
             title={normalize(query) ? "Nothing found" : "No drafts yet"}
-            description={normalize(query) ? `No drafts match "${normalize(query)}".` : "Start a request or a bulk action, then click Save draft."}
+            description={
+              normalize(query)
+                ? `No drafts match "${normalize(query)}".`
+                : "Drafts are created when you start an action (Request / Bulk send / Bulk links) and click Save draft."
+            }
             actions={
               normalize(query) ? (
                 <button type="button" onClick={() => setQuery("")} disabled={busy}>
                   Clear search
                 </button>
               ) : totalInTab ? null : (
-                <button type="button" className="primary" onClick={() => onOpenRequests?.()} disabled={busy}>
-                  New request
-                </button>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      onOpenRequests?.();
+                      setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNewRequest")), 0);
+                    }}
+                    disabled={busy}
+                  >
+                    Start request
+                  </button>
+                  <button type="button" onClick={() => onOpenBulkSend?.()} disabled={busy}>
+                    Open Bulk send
+                  </button>
+                  <button type="button" onClick={() => onOpenBulkLinks?.()} disabled={busy}>
+                    Open Bulk links
+                  </button>
+                </div>
               )
             }
           />

@@ -38,7 +38,8 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
   const portalLogoUrl = String(branding?.portalLogoUrl || "").trim();
   const brandMark = initialsFrom(portalName.replace(/portal$/i, "").trim() || portalName);
 
-  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(() => {
     try {
       return window.localStorage.getItem("portal:toolsOpen") === "1";
@@ -72,17 +73,17 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
   const filteredProjects = useMemo(() => {
     const q = String(projectsQuery || "").trim().toLowerCase();
     const list = Array.isArray(projects) ? projects : [];
-    const items = q ? list.filter((p) => String(p?.title || "").toLowerCase().includes(q)) : list.slice();
+    return q ? list.filter((p) => String(p?.title || "").toLowerCase().includes(q)) : list.slice();
+  }, [projects, projectsQuery]);
 
-    items.sort((a, b) => {
-      const aCur = Boolean(activeRoomId) && String(a?.roomId || "") === String(activeRoomId);
-      const bCur = Boolean(activeRoomId) && String(b?.roomId || "") === String(activeRoomId);
-      if (aCur !== bCur) return aCur ? -1 : 1;
-      return String(a?.title || "").localeCompare(String(b?.title || ""));
-    });
-
-    return items;
-  }, [activeRoomId, projects, projectsQuery]);
+  const [activeProjects, archivedProjects] = useMemo(() => {
+    const items = Array.isArray(filteredProjects) ? filteredProjects : [];
+    const activeList = items.filter((p) => !p?.archivedAt);
+    const archivedList = items.filter((p) => Boolean(p?.archivedAt));
+    activeList.sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+    archivedList.sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+    return [activeList, archivedList];
+  }, [filteredProjects]);
 
   const refreshSidebar = async () => {
     if (!token) return;
@@ -105,7 +106,11 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
     refreshSidebar().catch(() => null);
     const handler = () => refreshSidebar().catch(() => null);
     window.addEventListener("portal:projectChanged", handler);
-    return () => window.removeEventListener("portal:projectChanged", handler);
+    window.addEventListener("portal:flowsChanged", handler);
+    return () => {
+      window.removeEventListener("portal:projectChanged", handler);
+      window.removeEventListener("portal:flowsChanged", handler);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -118,8 +123,10 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
       const nextActive = String(result?.activeRoomId || project.roomId || "").trim();
       setActiveRoomId(nextActive);
       window.dispatchEvent(new CustomEvent("portal:projectChanged"));
+      setProjectsOpen(false);
     } catch (e) {
-      setProjectsError(e?.message || "Failed to set current project");
+      const msg = e?.message || "Failed to set current project";
+      setProjectsError(msg);
     } finally {
       setProjectsLoading(false);
     }
@@ -140,22 +147,18 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
 
         <div className="sidebar-body">
           <section className="projects-nav" aria-label="Project switcher">
-            <div className="projects-nav-head">
-              <button
-                type="button"
-                className={`nav-item projects-nav-link${projectsActive ? " is-active" : ""}`}
-                onClick={() => onNavigate("projects")}
-              >
-                <span>Current project</span>
-                <span className="muted truncate projects-nav-current">{currentProjectLabel}</span>
-              </button>
-              <button
-                type="button"
-                className="projects-nav-expand"
-                onClick={() => setProjectsOpen((s) => !s)}
-                aria-label={projectsOpen ? "Collapse project list" : "Expand project list"}
-                title={projectsOpen ? "Collapse" : "Expand"}
-              >
+            <button
+              type="button"
+              className={`projects-nav-toggle${projectsActive ? " is-active" : ""}`}
+              onClick={() => setProjectsOpen((s) => !s)}
+              disabled={projectsLoading}
+              title={projectsOpen ? "Hide project list" : "Show project list"}
+            >
+              <span className="projects-nav-text">
+                <span className="projects-nav-label">Current project</span>
+                <span className="truncate projects-nav-current">{currentProjectLabel}</span>
+              </span>
+              <span className="projects-nav-toggle-right" aria-hidden="true">
                 <svg
                   className={`chevron${projectsOpen ? " is-open" : ""}`}
                   width="18"
@@ -163,12 +166,11 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                   viewBox="0 0 20 20"
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
                 >
                   <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-              </button>
-            </div>
+              </span>
+            </button>
 
             {projectsOpen ? (
               <div className="projects-nav-list">
@@ -182,6 +184,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     disabled={projectsLoading}
                   />
                 ) : null}
+
                 {!projectsLoading && projects.length === 0 ? (
                   <button type="button" className="projects-nav-item" onClick={() => onNavigate("projects")}>
                     <span className="projects-nav-title truncate">Create your first project</span>
@@ -191,7 +194,8 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     </span>
                   </button>
                 ) : null}
-                {filteredProjects.map((p) => {
+
+                {activeProjects.map((p) => {
                   const isCurrent = Boolean(activeRoomId) && String(p.roomId) === String(activeRoomId);
                   const inProgress = Number(p?.counts?.inProgress || 0);
                   const total = Number(p?.counts?.total || 0);
@@ -221,6 +225,65 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     </button>
                   );
                 })}
+
+                {archivedProjects.length ? (
+                  <button
+                    type="button"
+                    className="projects-nav-subhead"
+                    onClick={() => setArchivedOpen((s) => !s)}
+                    aria-expanded={archivedOpen}
+                    disabled={projectsLoading}
+                    title={archivedOpen ? "Hide archived projects" : "Show archived projects"}
+                  >
+                    <span className="truncate">Archived projects</span>
+                    <span className="projects-nav-subhead-right" aria-hidden="true">
+                      <span className="badge badge-muted">{archivedProjects.length}</span>
+                      <svg
+                        className={`chevron${archivedOpen ? " is-open" : ""}`}
+                        width="18"
+                        height="18"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path d="M6 8L10 12L14 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                ) : null}
+
+                {archivedOpen
+                  ? archivedProjects.map((p) => {
+                      const archivedAt = String(p?.archivedAt || "").trim();
+                      const meta = archivedAt ? `Archived ${archivedAt.slice(0, 10)}` : "Archived";
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="projects-nav-item is-archived"
+                          onClick={() => {
+                            if (typeof onOpenProject === "function" && p?.id) {
+                              onOpenProject(p.id);
+                              return;
+                            }
+                            onNavigate("projects");
+                          }}
+                          disabled={projectsLoading}
+                          title="Open archived project (read-only)"
+                        >
+                          <span className="projects-nav-title truncate">{p.title || "Untitled"}</span>
+                          <span className="projects-nav-meta muted">{meta}</span>
+                          <span className="projects-nav-right" aria-hidden="true">
+                            Archived
+                          </span>
+                        </button>
+                      );
+                    })
+                  : null}
+
+                <button type="button" className="btn link projects-nav-manage" onClick={() => onNavigate("projects")} disabled={projectsLoading}>
+                  Manage projects
+                </button>
               </div>
             ) : null}
           </section>
@@ -265,7 +328,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
               {toolsOpen ? (
                 <>
                   {[
-                    { id: "sendDrafts", label: "Request drafts" },
+                    { id: "sendDrafts", label: "Drafts" },
                     { id: "bulk", label: "Bulk send" },
                     { id: "bulkLinks", label: "Bulk links" }
                   ].map((item) => (
@@ -301,6 +364,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
       </aside>
 
       <main className="content">{children}</main>
+
       <ToastHost />
     </div>
   );

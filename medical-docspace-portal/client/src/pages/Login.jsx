@@ -52,9 +52,6 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           <button className="primary" type="submit" disabled={busy}>
             {busy ? "Signing in..." : "Sign in"}
           </button>
-          <button className="secondary" type="button" disabled title="Coming soon">
-            Sign in with Google (coming soon)
-          </button>
         </form>
         {success && <div className="success-banner">{success}</div>}
         {error && <div className="error-banner">Sign-in error: {error}</div>}
@@ -71,4 +68,3 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
     </div>
   );
 }
-

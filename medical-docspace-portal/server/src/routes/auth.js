@@ -7,6 +7,8 @@ import {
   createRoomFileFromTemplate,
   ensureRoomMembers,
   ensureExternalLinkAccess,
+  getFolderByTitleWithin,
+  getFolderContents,
   getFileInfo,
   getFillOutLink,
   getSelfProfileWithToken,
@@ -71,17 +73,36 @@ async function ensureAutoFillSignAssignment({ userId, fullName, roomId } = {}) {
   if (!fillLink?.shareLink) return false;
 
   const formsRoom = await requireFormsRoom().catch(() => null);
-  recordFillSignAssignment({
-    assignmentId: randomUUID(),
-    patientRoomId: String(roomId),
-    patientId: userId ? String(userId) : null,
-    patientName: fullName || null,
+	  recordFillSignAssignment({
+	    assignmentId: randomUUID(),
+	    patientRoomId: String(roomId),
+	    patientId: userId ? String(userId) : null,
+	    patientName: fullName || null,
+	    templateFileId: templateId,
+	    templateTitle: templateInfo?.title || null,
+	    requestedBy: config.doctorEmail || "system",
+	    initiatedBy: "clinic",
+	    medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
+	    shareLink: fillLink.shareLink,
+	    shareToken: fillLink.requestToken || fillLink.shareToken || null
+	  });
+	  return true;
+	}
+
+async function ensureContractTemplateInRoom({ roomId, fullName } = {}) {
+  const templateId = String(config.templateContractId || "").trim();
+  const rid = String(roomId || "").trim();
+  if (!templateId || !rid) return false;
+  const folder = await getFolderByTitleWithin(rid, "Contracts").catch(() => null);
+  if (!folder?.id) return false;
+  const contents = await getFolderContents(folder.id).catch(() => null);
+  const hasAnyFile = Boolean((contents?.items || []).some((item) => item?.type === "file"));
+  if (hasAnyFile) return true;
+  await copyTemplateIntoRoom({
+    roomId: rid,
+    folderTitle: "Contracts",
     templateFileId: templateId,
-    templateTitle: templateInfo?.title || null,
-    requestedBy: config.doctorEmail || "system",
-    medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
-    shareLink: fillLink.shareLink,
-    shareToken: fillLink.requestToken || fillLink.shareToken || null
+    titleBase: fullName ? `Contract - ${fullName}` : "Contract"
   });
   return true;
 }
@@ -135,6 +156,9 @@ router.post("/login", async (req, res) => {
       recordPatientMapping({ userId: user.id, roomId: room.id, patientName: displayName });
       await ensureAutoFillSignAssignment({ userId: user.id, fullName: displayName, roomId: room.id }).catch(
         (e) => console.warn("[login] auto fill-sign assignment failed", e?.message || e)
+      );
+      await ensureContractTemplateInRoom({ roomId: room.id, fullName: displayName }).catch((e) =>
+        console.warn("[login] contract template ensure failed", e?.message || e)
       );
     }
     res.json({ user, room, token });

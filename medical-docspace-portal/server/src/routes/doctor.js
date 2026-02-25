@@ -2,7 +2,9 @@
 import { randomUUID } from "node:crypto";
 import {
   copyFileToFolder,
+  createFolderDocument,
   createRoomDocument,
+  ensureFolderByTitleWithin,
   ensureRoomFolderByTitle,
   findRoomByCandidates,
   getDoctorProfile,
@@ -20,13 +22,17 @@ import {
   getFillOutLink,
   ensureExternalLinkAccess,
   setFileExternalLink,
-  startFilling
-} from "../docspaceClient.js";
+	  startFilling,
+	  uploadFileToFolder,
+	  moveFileToFolder,
+	} from "../docspaceClient.js";
 import {
   closeAppointment,
   listAppointments,
   listFillSignAssignmentsForRoom,
+  listFillSignAssignments,
   recordFillSignAssignment,
+  setFillSignAssignmentState,
   recordMedicalRecord
 } from "../store.js";
 import { config } from "../config.js";
@@ -176,7 +182,9 @@ router.get("/rooms/:roomId/fill-sign/contents", async (req, res) => {
   try {
     const { roomId } = req.params;
     const tab = String(req.query.tab || "action").toLowerCase();
-    const assignments = listFillSignAssignmentsForRoom(roomId);
+    const assignments = listFillSignAssignmentsForRoom(roomId).filter(
+      (item) => String(item?.state || "active") === "active"
+    );
     const room = await getRoomInfo(roomId).catch(() => null);
     const patientName = patientNameFromRoom(room?.title || "") || "";
     const files = await resolveFillSignAssignments(assignments, { patientName });
@@ -245,6 +253,56 @@ router.get("/lab/files", async (_req, res) => {
       room: { id: room.id, title: room.title },
       files
     });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/fill-sign/incoming", async (req, res) => {
+  try {
+    const tab = String(req.query.tab || "action").toLowerCase();
+    const assignments = listFillSignAssignments({ initiatedBy: "patient" }).filter(
+      (item) => String(item?.state || "active") === "active"
+    );
+    const byRoomId = new Map();
+    for (const entry of assignments) {
+      const roomId = String(entry?.patientRoomId || "").trim();
+      if (!roomId) continue;
+      if (!byRoomId.has(roomId)) byRoomId.set(roomId, []);
+      byRoomId.get(roomId).push(entry);
+    }
+
+    const results = [];
+    for (const [roomId, items] of byRoomId.entries()) {
+      const room = await getRoomInfo(roomId).catch(() => null);
+      const patientName =
+        items.find((i) => String(i?.patientName || "").trim())?.patientName ||
+        patientNameFromRoom(room?.title || "") ||
+        room?.title ||
+        "Patient";
+      const files = await resolveFillSignAssignments(items, { patientName });
+      for (const file of files) {
+        results.push({
+          ...file,
+          patientRoomId: roomId,
+          patientName
+        });
+      }
+    }
+
+    const filtered = results.filter((file) =>
+      tab === "completed" ? file.status === "completed" : file.status !== "completed"
+    );
+
+    const counts = {
+      action: results.filter((f) => f.status !== "completed").length,
+      completed: results.filter((f) => f.status === "completed").length
+    };
+
+    return res.json({ contents: { items: filtered }, counts });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,
@@ -342,6 +400,188 @@ router.post("/rooms/:roomId/lab-result", async (req, res) => {
             url: file.webUrl || file.viewUrl || file.url || null,
             shareToken: file.shareToken || null,
             description: description || ""
+          }
+        : null
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/folders/:folderId/contents", async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    if (!folderId) {
+      return res.status(400).json({ error: "folderId is required" });
+    }
+    const contents = await getFolderContents(String(folderId)).catch(() => null);
+    const items = (contents?.items || []).map((item) => ({
+      type: item.type,
+      id: item.id,
+      title: item.title,
+      openUrl: item.openUrl || item.webUrl || item.viewUrl || item.url || null
+    }));
+    return res.json({ contents: { items } });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/rooms/:roomId/imaging/package", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+
+    const room = await getRoomInfo(roomId).catch(() => null);
+    const patientName = patientNameFromRoom(room?.title || "") || "Patient";
+    const today = new Date().toISOString().slice(0, 10);
+
+    const report = req.body?.report && typeof req.body.report === "object" ? req.body.report : {};
+    const reportStudyDate = String(report?.studyDate || "").trim();
+    const reportModality = String(report?.modality || "").trim();
+
+    const rawFolderTitle = String(req.body?.folderTitle || "").trim();
+    const folderTitle =
+      rawFolderTitle ||
+      `Study - ${reportStudyDate || today} - ${patientName}${reportModality ? ` - ${reportModality}` : ""}`;
+
+    const imagingFolder = await ensureRoomFolderByTitle(roomId, "Imaging").catch(() => null);
+    if (!imagingFolder?.id) {
+      return res.status(404).json({ error: "Imaging folder not found" });
+    }
+    const packageFolder = await ensureFolderByTitleWithin(imagingFolder.id, folderTitle).catch(() => null);
+    if (!packageFolder?.id) {
+      return res.status(500).json({ error: "Unable to create imaging study folder" });
+    }
+
+    const files = Array.isArray(req.body?.files) ? req.body.files : [];
+    const maxBytes = 15 * 1024 * 1024;
+    for (const entry of files) {
+      const fileName = String(entry?.fileName || "").trim();
+      const base64 = String(entry?.base64 || "").trim();
+      const contentType = String(entry?.contentType || "application/octet-stream").trim();
+      if (!fileName || !base64) {
+        return res.status(400).json({ error: "files[].fileName and files[].base64 are required" });
+      }
+      const buffer = Buffer.from(base64, "base64");
+      if (buffer.length > maxBytes) {
+        return res.status(413).json({ error: `File too large (${buffer.length} bytes). Max is ${maxBytes} bytes.` });
+      }
+      await uploadFileToFolder({ folderId: packageFolder.id, fileName, buffer, contentType });
+    }
+
+    const reportTitleBase = `Imaging Report - ${today} - ${patientName}${reportModality ? ` - ${reportModality}` : ""}`;
+    const reportTitle = reportTitleBase.toLowerCase().endsWith(".docx")
+      ? reportTitleBase
+      : `${reportTitleBase}.docx`;
+
+    const reportFile = await createFolderDocument({ folderId: packageFolder.id, title: reportTitle });
+    if (!reportFile?.id) {
+      return res.status(500).json({ error: "Unable to create report document" });
+    }
+
+    const finalContents = await getFolderContents(packageFolder.id).catch(() => null);
+    const finalFiles = (finalContents?.items || []).filter((item) => item?.type === "file");
+
+    const uploadedFiles = finalFiles
+      .filter((item) => String(item?.id) !== String(reportFile.id))
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        openUrl: item.openUrl || item.webUrl || item.viewUrl || item.url || null
+      }));
+
+    const reportInfo = await getFileInfo(String(reportFile.id)).catch(() => null);
+    const openUrl = reportFile?.webUrl || reportFile?.viewUrl || reportInfo?.webUrl || reportInfo?.viewUrl || null;
+
+    return res.json({
+      folder: { id: packageFolder.id, title: packageFolder.title, parentId: imagingFolder.id },
+      uploadedFiles,
+      reportFile: {
+        id: reportFile.id,
+        title: reportTitle,
+        openUrl,
+        shareToken: reportFile.shareToken || null,
+        requestToken: reportFile.requestToken || null
+      }
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/file-share-link", async (req, res) => {
+  try {
+    const { fileId } = req.body || {};
+    if (!fileId) {
+      return res.status(400).json({ error: "fileId is required" });
+    }
+    const link = await setFileExternalLink(String(fileId), "");
+    return res.json({ link });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/rooms/:roomId/imaging/upload", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const file = req.body?.file && typeof req.body.file === "object" ? req.body.file : null;
+    const fileName = String(file?.fileName || "").trim();
+    const base64 = String(file?.base64 || "").trim();
+    const contentType = String(file?.contentType || "application/octet-stream").trim();
+    if (!fileName || !base64) {
+      return res.status(400).json({ error: "file.fileName and file.base64 are required" });
+    }
+
+    const maxBytes = 15 * 1024 * 1024;
+    const buffer = Buffer.from(base64, "base64");
+    if (buffer.length > maxBytes) {
+      return res.status(413).json({ error: `File too large (${buffer.length} bytes). Max is ${maxBytes} bytes.` });
+    }
+
+    const imagingFolder = await ensureRoomFolderByTitle(roomId, "Imaging").catch(() => null);
+    if (!imagingFolder?.id) {
+      return res.status(404).json({ error: "Imaging folder not found" });
+    }
+
+    const uploaded = await uploadFileToFolder({
+      folderId: imagingFolder.id,
+      fileName,
+      buffer,
+      contentType
+    });
+
+    const contents = await getFolderContents(imagingFolder.id).catch(() => null);
+    const files = (contents?.items || []).filter((item) => item?.type === "file");
+    const matched = files.filter((item) => String(item?.title || "").trim() === fileName);
+    const uploadedFile =
+      (matched.length ? matched : files)
+        .sort((a, b) => Number(a.id) - Number(b.id))
+        .at(-1) || null;
+
+    return res.json({
+      folder: { id: imagingFolder.id, title: imagingFolder.title },
+      uploaded,
+      file: uploadedFile
+        ? {
+            id: uploadedFile.id,
+            title: uploadedFile.title,
+            openUrl: uploadedFile.openUrl || uploadedFile.webUrl || uploadedFile.viewUrl || uploadedFile.url || null
           }
         : null
     });
@@ -470,17 +710,18 @@ router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
     }
 
     const formsRoom = await requireFormsRoom().catch(() => null);
-    const assignment = recordFillSignAssignment({
-      assignmentId: randomUUID(),
-      patientRoomId: String(roomId),
-      patientName,
-      templateFileId: String(fileId),
-      templateTitle: templateInfo.title || null,
-      requestedBy: config.doctorEmail || null,
-      medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
-      shareLink: fillLink.shareLink,
-      shareToken: fillLink.requestToken || fillLink.shareToken || null
-    });
+	    const assignment = recordFillSignAssignment({
+	      assignmentId: randomUUID(),
+	      patientRoomId: String(roomId),
+	      patientName,
+	      templateFileId: String(fileId),
+	      templateTitle: templateInfo.title || null,
+	      requestedBy: config.doctorEmail || null,
+	      initiatedBy: "clinic",
+	      medicalRoomId: formsRoom?.id ? String(formsRoom.id) : null,
+	      shareLink: fillLink.shareLink,
+	      shareToken: fillLink.requestToken || fillLink.shareToken || null
+	    });
 
     return res.json({
       files: [
@@ -496,6 +737,43 @@ router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
       room: formsRoom?.id ? { id: formsRoom.id, title: formsRoom.title } : null,
       source: "assignments"
     });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.post("/rooms/:roomId/fill-sign/cancel", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const assignmentId = String(req.body?.assignmentId || req.body?.fileId || req.body?.id || "").trim();
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId is required" });
+    }
+    if (!assignmentId) {
+      return res.status(400).json({ error: "assignmentId is required" });
+    }
+
+    const assignments = listFillSignAssignmentsForRoom(roomId);
+    const target = assignments.find((item) => String(item?.id || "") === assignmentId) || null;
+    if (!target) {
+      return res.status(404).json({ error: "Assignment not found" });
+    }
+
+    // Only doctor-initiated requests can be canceled here.
+    if (String(target?.initiatedBy || "") !== "clinic") {
+      return res.status(403).json({ error: "Only clinic-initiated requests can be canceled by the doctor." });
+    }
+
+    const updated = setFillSignAssignmentState({
+      patientRoomId: String(roomId),
+      assignmentId,
+      state: "canceled",
+      actor: config.doctorEmail || "doctor"
+    });
+    return res.json({ ok: Boolean(updated) });
   } catch (error) {
     return res.status(error.status || 500).json({
       error: error.message,

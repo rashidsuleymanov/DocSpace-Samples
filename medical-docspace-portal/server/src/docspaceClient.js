@@ -683,10 +683,12 @@ export async function createRoomFileFromTemplate({ roomId, folderTitle, template
   const info = await apiRequest(`/api/2.0/files/file/${createdId}`).catch(() => null);
   let webUrl = info?.webUrl || info?.viewUrl || null;
   let shareToken = null;
+  let requestToken = null;
   try {
     const linkInfo = await createFileShareLink(createdId, "ReadWrite");
     webUrl = linkInfo?.shareLink || webUrl;
-    shareToken = linkInfo?.shareToken || extractShareToken(webUrl);
+    requestToken = linkInfo?.requestToken || null;
+    shareToken = linkInfo?.requestToken || linkInfo?.shareToken || extractShareToken(webUrl);
   } catch {
     shareToken = extractShareToken(webUrl);
   }
@@ -695,7 +697,8 @@ export async function createRoomFileFromTemplate({ roomId, folderTitle, template
     id: createdId,
     title: info?.title || created?.title || title || "Document",
     webUrl,
-    shareToken
+    shareToken,
+    requestToken
   };
 }
 
@@ -705,12 +708,24 @@ async function createFileShareLink(fileId, access = "ReadWrite") {
       method: "PUT",
       body: { access }
     });
-    const shareLink = link?.sharedLink?.shareLink || link?.shareLink || null;
-    return { shareLink, shareToken: extractShareToken(shareLink) };
+    const shared = link?.sharedLink || link?.sharedTo || null;
+    const shareLink = shared?.shareLink || link?.shareLink || null;
+    const requestToken = shared?.requestToken || link?.requestToken || null;
+    return {
+      shareLink,
+      shareToken: extractShareToken(shareLink),
+      requestToken: requestToken ? String(requestToken) : null
+    };
   } catch {
     const existing = await apiRequest(`/api/2.0/files/file/${fileId}/link`).catch(() => null);
-    const shareLink = existing?.sharedLink?.shareLink || existing?.shareLink || null;
-    return { shareLink, shareToken: extractShareToken(shareLink) };
+    const shared = existing?.sharedLink || existing?.sharedTo || null;
+    const shareLink = shared?.shareLink || existing?.shareLink || null;
+    const requestToken = shared?.requestToken || existing?.requestToken || null;
+    return {
+      shareLink,
+      shareToken: extractShareToken(shareLink),
+      requestToken: requestToken ? String(requestToken) : null
+    };
   }
 }
 
@@ -856,11 +871,36 @@ export async function createRoomDocument({ roomId, folderTitle, title }) {
   const info = await apiRequest(`/api/2.0/files/file/${file.id}`).catch(() => null);
   let webUrl = info?.webUrl || info?.viewUrl || file?.webUrl || file?.viewUrl || null;
   const linkInfo = await createFileShareLink(file.id, "ReadWrite");
-  webUrl = linkInfo.shareLink || webUrl;
+  webUrl = linkInfo?.shareLink || webUrl;
+  const token = linkInfo?.requestToken || linkInfo?.shareToken || extractShareToken(webUrl);
   return {
     ...file,
     webUrl,
-    shareToken: linkInfo.shareToken || extractShareToken(webUrl)
+    shareToken: token,
+    requestToken: linkInfo?.requestToken || null
+  };
+}
+
+export async function createFolderDocument({ folderId, title }) {
+  const fid = String(folderId || "").trim();
+  const t = String(title || "").trim();
+  if (!fid) throw new Error("folderId is required");
+  if (!t) throw new Error("title is required");
+
+  const file = await createEmptyDoc({ folderId: fid, title: t });
+  if (!file?.id) return file;
+
+  const info = await apiRequest(`/api/2.0/files/file/${file.id}`).catch(() => null);
+  let webUrl = info?.webUrl || info?.viewUrl || file?.webUrl || file?.viewUrl || null;
+  const linkInfo = await createFileShareLink(file.id, "ReadWrite");
+  webUrl = linkInfo?.shareLink || webUrl;
+  const token = linkInfo?.requestToken || linkInfo?.shareToken || extractShareToken(webUrl);
+
+  return {
+    ...file,
+    webUrl,
+    shareToken: token,
+    requestToken: linkInfo?.requestToken || null
   };
 }
 
@@ -965,7 +1005,11 @@ export async function getFolderContents(folderId, auth) {
     id: file.id,
     title: file.title,
     type: "file",
-    openUrl: file.webUrl || file.viewUrl || null
+    openUrl:
+      file.webUrl ||
+      file.viewUrl ||
+      file.url ||
+      (file?.id ? `${String(baseUrl || "").replace(/\/$/, "")}/doceditor?fileid=${encodeURIComponent(String(file.id))}` : null)
   }));
   const folders = (content?.folders || []).map((folder) => ({
     id: folder.id,

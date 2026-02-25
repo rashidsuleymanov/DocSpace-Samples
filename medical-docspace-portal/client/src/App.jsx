@@ -24,6 +24,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [doctorSession, setDoctorSession] = useState(null);
   const [recordsFolderTitle, setRecordsFolderTitle] = useState("");
+  const [fillSignInitialTab, setFillSignInitialTab] = useState("");
   const [booting, setBooting] = useState(true);
   const [busy, setBusy] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -103,7 +104,18 @@ export default function App() {
         }
       },
       onNavigate(next) {
-        setView(next);
+        if (typeof next === "string") {
+          if (next === "fill-sign") setFillSignInitialTab("");
+          setView(next);
+          return;
+        }
+        if (!next || typeof next !== "object") return;
+        const nextView = String(next.view || "").trim();
+        if (!nextView) return;
+        if (nextView === "fill-sign") {
+          setFillSignInitialTab(String(next.tab || "").trim());
+        }
+        setView(nextView);
       },
       onOpenRecordsFolder(folderTitle) {
         setRecordsFolderTitle(String(folderTitle || "").trim());
@@ -167,6 +179,7 @@ export default function App() {
           session={session}
           onLogout={actions.onLogout}
           onNavigate={actions.onNavigate}
+          initialTab={fillSignInitialTab}
         />
       )}
       {view === "doctor" && doctorSession && (

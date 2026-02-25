@@ -16,10 +16,32 @@ function isErrorText(value) {
 const appointmentsStorageKey = "medical.portal.appointments";
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
 const insuranceEditorFrameId = "insurance-request-editor-hidden";
-const sickLeaveEditorFrameId = "sick-leave-request-editor-hidden";
-const imagingEditorFrameId = "imaging-request-editor-hidden";
 
 let sdkLoaderPromise = null;
+
+function withFillAction(url) {
+  const raw = String(url || "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set("action", "fill");
+    return parsed.toString();
+  } catch {
+    return raw.includes("?") ? `${raw}&action=fill` : `${raw}?action=fill`;
+  }
+}
+
+function withEditAction(url) {
+  const raw = String(url || "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set("action", "edit");
+    return parsed.toString();
+  } catch {
+    return raw.includes("?") ? `${raw}&action=edit` : `${raw}?action=edit`;
+  }
+}
 
 function loadDocSpaceSdk(src) {
   if (sdkLoaderPromise) return sdkLoaderPromise;
@@ -75,39 +97,26 @@ export default function MedicalRecords({
     note: ""
   });
 
-  const [sickLeaveModalOpen, setSickLeaveModalOpen] = useState(false);
-  const [sickLeaveBusy, setSickLeaveBusy] = useState(false);
-  const [sickLeaveMessage, setSickLeaveMessage] = useState("");
-  const [sickLeaveForm, setSickLeaveForm] = useState({
-    startDate: "",
-    endDate: "",
-    reason: "",
-    note: ""
-  });
-
-  const [imagingModalOpen, setImagingModalOpen] = useState(false);
-  const [imagingBusy, setImagingBusy] = useState(false);
-  const [imagingMessage, setImagingMessage] = useState("");
-  const [imagingForm, setImagingForm] = useState({
-    modality: "",
-    studyDate: "",
-    facility: "",
-    link: "",
-    note: ""
-  });
-
-  const [imagingUploadOpen, setImagingUploadOpen] = useState(false);
-  const [imagingUploadBusy, setImagingUploadBusy] = useState(false);
-  const [imagingUploadMessage, setImagingUploadMessage] = useState("");
-  const [imagingUploadFile, setImagingUploadFile] = useState(null);
-
   const openRecord = (item) => {
+    if (!item) return;
+    const title = String(item?.title || "");
+    const isImage = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(title);
+    if (isImage && item?.id) {
+      createFileShareLink({ fileId: item.id, token: session?.user?.token || "" })
+        .then((link) => {
+          const url = link?.shareLink || link?.shareUrl || link?.url || item.openUrl || "";
+          if (!url) return;
+          setDocModal({ open: true, title: title || "Imaging", url });
+        })
+        .catch(() => {
+          if (!item?.openUrl) return;
+          setDocModal({ open: true, title: title || "Imaging", url: item.openUrl });
+        });
+      return;
+    }
+
     if (!item?.openUrl) return;
-    setDocModal({
-      open: true,
-      title: item.title || "Medical record",
-      url: item.openUrl
-    });
+    setDocModal({ open: true, title: title || "Medical record", url: item.openUrl });
   };
 
   const destroyEditor = () => {
@@ -116,6 +125,27 @@ export default function MedicalRecords({
     }
     editorRef.current = null;
   };
+
+  useEffect(() => {
+    const ids = [insuranceEditorFrameId];
+    const hosts = ids.map((id) => {
+      let host = document.getElementById(id);
+      if (!host) {
+        host = document.createElement("div");
+        host.id = id;
+        host.className = "hidden-editor";
+        document.body.appendChild(host);
+      }
+      return host;
+    });
+    return () => {
+      destroyEditor();
+      for (const host of hosts) {
+        if (host?.parentNode) host.parentNode.removeChild(host);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fillInsuranceRequestHidden = async (file, payload) => {
     if (!file?.id) return;
@@ -126,26 +156,28 @@ export default function MedicalRecords({
     destroyEditor();
     await loadDocSpaceSdk(docspaceUrl);
 
-    const instance = window.DocSpace?.SDK?.initEditor({
-      src: docspaceUrl,
-      id: String(file.id),
-      frameId: insuranceEditorFrameId,
-      requestToken: token,
-      width: "1px",
-      height: "1px",
-      events: {
-        onAppReady: () => {
-          const frameInstance = window.DocSpace?.SDK?.frames?.[insuranceEditorFrameId];
-          if (!frameInstance) {
-            destroyEditor();
-            return;
-          }
+    await new Promise((resolve, reject) => {
+      const instance = window.DocSpace?.SDK?.initEditor({
+        src: docspaceUrl,
+        id: String(file.id),
+        frameId: insuranceEditorFrameId,
+        requestToken: token,
+        width: "1px",
+        height: "1px",
+        events: {
+          onAppReady: () => {
+            const frameInstance = window.DocSpace?.SDK?.frames?.[insuranceEditorFrameId];
+            if (!frameInstance) {
+              destroyEditor();
+              reject(new Error("Editor frame is not available."));
+              return;
+            }
 
-          const templateData = payload || {};
+            const templateData = payload || {};
 
-          const editorCallback = new Function(
-            "editorInstance",
-            `
+            const editorCallback = new Function(
+              "editorInstance",
+              `
               try {
                 if (!editorInstance || typeof editorInstance.createConnector !== "function") return;
                 const connector = editorInstance.createConnector();
@@ -243,18 +275,24 @@ export default function MedicalRecords({
                 console.error("Editor callback failed", e);
               }
             `
-          );
+            );
 
-          frameInstance.executeInEditor(editorCallback);
-          setTimeout(() => destroyEditor(), 7000);
-        },
-        onAppError: () => {
-          setTimeout(() => destroyEditor(), 1500);
+            frameInstance.executeInEditor(editorCallback);
+            // Give DocSpace a bit of time to persist the changes before we open the document to the user.
+            setTimeout(() => {
+              destroyEditor();
+              resolve();
+            }, 2000);
+          },
+          onAppError: () => {
+            setTimeout(() => destroyEditor(), 1500);
+            reject(new Error("DocSpace editor failed to load."));
+          }
         }
-      }
-    });
+      });
 
-    editorRef.current = instance;
+      editorRef.current = instance;
+    });
   };
 
   async function openFolder(folder) {
@@ -340,6 +378,7 @@ export default function MedicalRecords({
   };
 
   const isInsuranceFolder = normalize(activeFolder?.title) === "insurance";
+  const isContractsFolder = normalize(activeFolder?.title) === "contracts";
   const isSickLeaveFolder = normalize(activeFolder?.title) === "sick leave";
   const isImagingFolder = normalize(activeFolder?.title) === "imaging";
 
@@ -378,7 +417,11 @@ export default function MedicalRecords({
 
       await fillInsuranceRequestHidden(file, payload).catch(() => null);
       if (file?.openUrl) {
-        setDocModal({ open: true, title: file.title || "Insurance update request", url: file.openUrl });
+        setDocModal({
+          open: true,
+          title: file.title || "Insurance update request",
+          url: withFillAction(file.openUrl)
+        });
       }
       setInsuranceMessage("Request created in Insurance. Export to PDF in the editor if needed.");
       setInsuranceModalOpen(false);
@@ -387,443 +430,6 @@ export default function MedicalRecords({
       setInsuranceMessage(error?.message || "Failed to create insurance request");
     } finally {
       setInsuranceBusy(false);
-    }
-  };
-
-  const fillSickLeaveRequestHidden = async (file, payload) => {
-    if (!file?.id) return;
-    if (!docspaceUrl) throw new Error("VITE_DOCSPACE_URL is not set.");
-    const token = file?.shareToken || session?.user?.token || "";
-    if (!token) throw new Error("Access token is missing.");
-
-    destroyEditor();
-    await loadDocSpaceSdk(docspaceUrl);
-
-    const instance = window.DocSpace?.SDK?.initEditor({
-      src: docspaceUrl,
-      id: String(file.id),
-      frameId: sickLeaveEditorFrameId,
-      requestToken: token,
-      width: "1px",
-      height: "1px",
-      events: {
-        onAppReady: () => {
-          const frameInstance = window.DocSpace?.SDK?.frames?.[sickLeaveEditorFrameId];
-          if (!frameInstance) {
-            destroyEditor();
-            return;
-          }
-
-          const templateData = payload || {};
-
-          const editorCallback = new Function(
-            "editorInstance",
-            `
-              try {
-                if (!editorInstance || typeof editorInstance.createConnector !== "function") return;
-                const connector = editorInstance.createConnector();
-                if (!connector || typeof connector.callCommand !== "function") return;
-
-                Asc.scope.data = ${JSON.stringify(templateData)};
-
-                connector.callCommand(function () {
-                  try {
-                    var d = Asc.scope.data || {};
-                    var patient = d.patient || {};
-                    var leave = d.leave || {};
-
-                    function safeText(v) {
-                      return (v && String(v).trim()) ? String(v) : "-";
-                    }
-
-                    var doc = Api.GetDocument();
-                    if (doc.RemoveAllElements) doc.RemoveAllElements();
-
-                    var textPr = doc.GetDefaultTextPr();
-                    textPr.SetFontFamily("Calibri");
-                    textPr.SetLanguage("en-US");
-
-                    function pushPara(p) {
-                      if (doc.Push) doc.Push(p);
-                      else doc.InsertContent([p]);
-                    }
-
-                    function addTitle(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("center");
-                      var r = p.AddText(text);
-                      r.SetBold(true);
-                      r.SetFontSize(34);
-                      r.SetColor(0x29, 0x33, 0x4F, false);
-                      pushPara(p);
-                    }
-
-                    function addSubtitle(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("center");
-                      var r = p.AddText(text);
-                      r.SetItalic(true);
-                      r.SetFontSize(18);
-                      r.SetColor(0x55, 0x55, 0x55, false);
-                      pushPara(p);
-                    }
-
-                    function addSection(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("left");
-                      p.SetSpacingBefore(180);
-                      var r = p.AddText(text);
-                      r.SetBold(true);
-                      r.SetFontSize(22);
-                      r.SetColor(0x29, 0x33, 0x4F, false);
-                      pushPara(p);
-                    }
-
-                    function addField(label, value) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("left");
-                      p.SetSpacingAfter(80);
-                      var r1 = p.AddText(label + ": ");
-                      r1.SetBold(true);
-                      var r2 = p.AddText(safeText(value));
-                      r2.SetBold(false);
-                      pushPara(p);
-                    }
-
-                    addTitle("SICK LEAVE REQUEST");
-                    addSubtitle("Please issue a sick leave certificate for the period below.");
-
-                    addSection("Patient");
-                    addField("Name", patient.fullName);
-                    addField("Email", patient.email);
-                    addField("Phone", patient.phone);
-
-                    addSection("Requested period");
-                    addField("Start date", leave.startDate);
-                    addField("End date", leave.endDate);
-                    addField("Reason", leave.reason);
-                    addField("Note", leave.note);
-
-                    addSection("Generated");
-                    addField("Date", new Date().toISOString().slice(0, 10));
-
-                    Api.Save();
-                  } catch (e) {
-                    console.error("Error inside callCommand", e);
-                  }
-                });
-              } catch (e) {
-                console.error("Editor callback failed", e);
-              }
-            `
-          );
-
-          frameInstance.executeInEditor(editorCallback);
-          setTimeout(() => destroyEditor(), 7000);
-        },
-        onAppError: () => {
-          setTimeout(() => destroyEditor(), 1500);
-        }
-      }
-    });
-
-    editorRef.current = instance;
-  };
-
-  const generateSickLeaveRequest = async () => {
-    setSickLeaveBusy(true);
-    setSickLeaveMessage("");
-    try {
-      const token = String(session?.user?.token || "").trim();
-      if (!token) throw new Error("Authorization token is missing");
-      const roomId = String(session?.room?.id || "").trim();
-      if (!roomId) throw new Error("Patient room is missing");
-
-      const payload = {
-        patient: {
-          fullName: session?.user?.fullName || "",
-          email: session?.user?.email || "",
-          phone: session?.user?.phone || ""
-        },
-        leave: { ...sickLeaveForm }
-      };
-
-      const response = await fetch("/api/patients/sick-leave-request", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token
-        },
-        body: JSON.stringify({ roomId, payload })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || `Request create failed (${response.status})`);
-      }
-      const file = data?.file || null;
-      if (!file?.id) throw new Error("Failed to create request document");
-
-      await fillSickLeaveRequestHidden(file, payload).catch(() => null);
-      if (file?.openUrl) {
-        setDocModal({ open: true, title: file.title || "Sick leave request", url: file.openUrl });
-      }
-      setSickLeaveMessage("Request created in Sick Leave. Export to PDF in the editor if needed.");
-      setSickLeaveModalOpen(false);
-      setSickLeaveForm({ startDate: "", endDate: "", reason: "", note: "" });
-    } catch (error) {
-      setSickLeaveMessage(error?.message || "Failed to create sick leave request");
-    } finally {
-      setSickLeaveBusy(false);
-    }
-  };
-
-  const fillImagingRequestHidden = async (file, payload) => {
-    if (!file?.id) return;
-    if (!docspaceUrl) throw new Error("VITE_DOCSPACE_URL is not set.");
-    const token = file?.shareToken || session?.user?.token || "";
-    if (!token) throw new Error("Access token is missing.");
-
-    destroyEditor();
-    await loadDocSpaceSdk(docspaceUrl);
-
-    const instance = window.DocSpace?.SDK?.initEditor({
-      src: docspaceUrl,
-      id: String(file.id),
-      frameId: imagingEditorFrameId,
-      requestToken: token,
-      width: "1px",
-      height: "1px",
-      events: {
-        onAppReady: () => {
-          const frameInstance = window.DocSpace?.SDK?.frames?.[imagingEditorFrameId];
-          if (!frameInstance) {
-            destroyEditor();
-            return;
-          }
-
-          const templateData = payload || {};
-
-          const editorCallback = new Function(
-            "editorInstance",
-            `
-              try {
-                if (!editorInstance || typeof editorInstance.createConnector !== "function") return;
-                const connector = editorInstance.createConnector();
-                if (!connector || typeof connector.callCommand !== "function") return;
-
-                Asc.scope.data = ${JSON.stringify(templateData)};
-
-                connector.callCommand(function () {
-                  try {
-                    var d = Asc.scope.data || {};
-                    var patient = d.patient || {};
-                    var imaging = d.imaging || {};
-
-                    function safeText(v) {
-                      return (v && String(v).trim()) ? String(v) : "-";
-                    }
-
-                    var doc = Api.GetDocument();
-                    if (doc.RemoveAllElements) doc.RemoveAllElements();
-
-                    var textPr = doc.GetDefaultTextPr();
-                    textPr.SetFontFamily("Calibri");
-                    textPr.SetLanguage("en-US");
-
-                    function pushPara(p) {
-                      if (doc.Push) doc.Push(p);
-                      else doc.InsertContent([p]);
-                    }
-
-                    function addTitle(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("center");
-                      var r = p.AddText(text);
-                      r.SetBold(true);
-                      r.SetFontSize(34);
-                      r.SetColor(0x29, 0x33, 0x4F, false);
-                      pushPara(p);
-                    }
-
-                    function addSubtitle(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("center");
-                      var r = p.AddText(text);
-                      r.SetItalic(true);
-                      r.SetFontSize(18);
-                      r.SetColor(0x55, 0x55, 0x55, false);
-                      pushPara(p);
-                    }
-
-                    function addSection(text) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("left");
-                      p.SetSpacingBefore(180);
-                      var r = p.AddText(text);
-                      r.SetBold(true);
-                      r.SetFontSize(22);
-                      r.SetColor(0x29, 0x33, 0x4F, false);
-                      pushPara(p);
-                    }
-
-                    function addField(label, value) {
-                      var p = Api.CreateParagraph();
-                      p.SetJc("left");
-                      p.SetSpacingAfter(80);
-                      var r1 = p.AddText(label + ": ");
-                      r1.SetBold(true);
-                      var r2 = p.AddText(safeText(value));
-                      r2.SetBold(false);
-                      pushPara(p);
-                    }
-
-                    addTitle("IMAGING UPLOAD REQUEST");
-                    addSubtitle("Please attach imaging results (PDF, images, or link) for doctor review.");
-
-                    addSection("Patient");
-                    addField("Name", patient.fullName);
-                    addField("Email", patient.email);
-                    addField("Phone", patient.phone);
-
-                    addSection("Imaging study");
-                    addField("Modality", imaging.modality);
-                    addField("Study date", imaging.studyDate);
-                    addField("Facility", imaging.facility);
-                    addField("Link", imaging.link);
-                    addField("Note", imaging.note);
-
-                    addSection("Generated");
-                    addField("Date", new Date().toISOString().slice(0, 10));
-
-                    Api.Save();
-                  } catch (e) {
-                    console.error("Error inside callCommand", e);
-                  }
-                });
-              } catch (e) {
-                console.error("Editor callback failed", e);
-              }
-            `
-          );
-
-          frameInstance.executeInEditor(editorCallback);
-          setTimeout(() => destroyEditor(), 7000);
-        },
-        onAppError: () => {
-          setTimeout(() => destroyEditor(), 1500);
-        }
-      }
-    });
-
-    editorRef.current = instance;
-  };
-
-  const generateImagingRequest = async () => {
-    setImagingBusy(true);
-    setImagingMessage("");
-    try {
-      const token = String(session?.user?.token || "").trim();
-      if (!token) throw new Error("Authorization token is missing");
-      const roomId = String(session?.room?.id || "").trim();
-      if (!roomId) throw new Error("Patient room is missing");
-
-      const payload = {
-        patient: {
-          fullName: session?.user?.fullName || "",
-          email: session?.user?.email || "",
-          phone: session?.user?.phone || ""
-        },
-        imaging: { ...imagingForm }
-      };
-
-      const response = await fetch("/api/patients/imaging-upload-request", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token
-        },
-        body: JSON.stringify({ roomId, payload })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || `Request create failed (${response.status})`);
-      }
-      const file = data?.file || null;
-      if (!file?.id) throw new Error("Failed to create request document");
-
-      await fillImagingRequestHidden(file, payload).catch(() => null);
-      if (file?.openUrl) {
-        setDocModal({ open: true, title: file.title || "Imaging upload request", url: file.openUrl });
-      }
-      setImagingMessage("Request created in Imaging. Upload files to the Imaging folder in your workspace and export to PDF if needed.");
-      setImagingModalOpen(false);
-      setImagingForm({ modality: "", studyDate: "", facility: "", link: "", note: "" });
-    } catch (error) {
-      setImagingMessage(error?.message || "Failed to create imaging request");
-    } finally {
-      setImagingBusy(false);
-    }
-  };
-
-  const uploadImagingFile = async () => {
-    setImagingUploadBusy(true);
-    setImagingUploadMessage("");
-    try {
-      const token = String(session?.user?.token || "").trim();
-      if (!token) throw new Error("Authorization token is missing");
-      const roomId = String(session?.room?.id || "").trim();
-      if (!roomId) throw new Error("Patient room is missing");
-      if (!imagingUploadFile) throw new Error("Choose a file first");
-
-      const fileName = String(imagingUploadFile.name || "imaging.bin");
-      const contentType = String(imagingUploadFile.type || "application/octet-stream");
-      const maxBytes = 15 * 1024 * 1024;
-      if (imagingUploadFile.size > maxBytes) {
-        throw new Error(`File too large (${imagingUploadFile.size} bytes). Max is ${maxBytes} bytes.`);
-      }
-
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.onload = () => {
-          const result = String(reader.result || "");
-          const comma = result.indexOf(",");
-          if (comma < 0) {
-            reject(new Error("Unexpected file encoding"));
-            return;
-          }
-          resolve(result.slice(comma + 1));
-        };
-        reader.readAsDataURL(imagingUploadFile);
-      });
-
-      const response = await fetch("/api/patients/imaging/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token
-        },
-        body: JSON.stringify({
-          roomId,
-          file: { fileName, base64, contentType }
-        })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || `Upload failed (${response.status})`);
-      }
-
-      setImagingUploadMessage("Uploaded. Refreshing folder...");
-      setImagingUploadOpen(false);
-      setImagingUploadFile(null);
-      if (activeFolder?.id) {
-        await openFolder(activeFolder);
-      }
-      setImagingUploadMessage("Uploaded to Imaging.");
-    } catch (error) {
-      setImagingUploadMessage(error?.message || "Upload failed");
-    } finally {
-      setImagingUploadBusy(false);
     }
   };
 
@@ -860,41 +466,34 @@ export default function MedicalRecords({
                   Insurance request
                 </button>
               )}
+              {isContractsFolder && (
+                <button
+                  className="primary"
+                  type="button"
+                  onClick={() => {
+                    if (typeof onNavigate === "function") {
+                      onNavigate({ view: "fill-sign", tab: "templates" });
+                    }
+                  }}
+                >
+                  Create statement
+                </button>
+              )}
               {isSickLeaveFolder && (
                 <button
                   className="primary"
                   type="button"
                   onClick={() => {
-                    setSickLeaveMessage("");
-                    setSickLeaveModalOpen(true);
+                    if (typeof onNavigate === "function") {
+                      onNavigate({ view: "fill-sign", tab: "templates" });
+                    }
                   }}
                 >
-                  Sick leave request
+                  Create statement
                 </button>
               )}
               {isImagingFolder && (
-                <>
-                  <button
-                    className="primary"
-                    type="button"
-                    onClick={() => {
-                      setImagingMessage("");
-                      setImagingModalOpen(true);
-                    }}
-                  >
-                    Imaging request
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => {
-                      setImagingUploadMessage("");
-                      setImagingUploadOpen(true);
-                    }}
-                  >
-                    Upload file
-                  </button>
-                </>
+                null
               )}
               <button className="secondary" type="button" onClick={() => setActiveFolder(null)}>
                 Back to folders
@@ -934,13 +533,17 @@ export default function MedicalRecords({
               {folderContents.map((item) => (
                 <li
                   key={`${item.type}-${item.id}`}
-                  className={`content-item ${item.type}`}
-                  onClick={() => {
-                    if (item.type === "file" && item.openUrl) {
-                      openRecord(item);
-                    }
-                  }}
-                >
+	                  className={`content-item ${item.type}`}
+	                  onClick={() => {
+	                    if (item.type === "folder" && item.id) {
+	                      openFolder(item);
+	                      return;
+	                    }
+	                    if (item.type === "file" && item.openUrl) {
+	                      openRecord(item);
+	                    }
+	                  }}
+	                >
                   <div className="content-main">
                     <span className="content-icon" />
                     <span className="content-title">{item.title}</span>
@@ -986,21 +589,6 @@ export default function MedicalRecords({
       {insuranceMessage && (
         <div className={isErrorText(insuranceMessage) ? "error-banner" : "success-banner"}>
           {insuranceMessage}
-        </div>
-      )}
-      {sickLeaveMessage && (
-        <div className={isErrorText(sickLeaveMessage) ? "error-banner" : "success-banner"}>
-          {sickLeaveMessage}
-        </div>
-      )}
-      {imagingMessage && (
-        <div className={isErrorText(imagingMessage) ? "error-banner" : "success-banner"}>
-          {imagingMessage}
-        </div>
-      )}
-      {imagingUploadMessage && (
-        <div className={isErrorText(imagingUploadMessage) ? "error-banner" : "success-banner"}>
-          {imagingUploadMessage}
         </div>
       )}
       {insuranceModalOpen ? (
@@ -1087,248 +675,9 @@ export default function MedicalRecords({
         </div>
       ) : null}
 
-      {sickLeaveModalOpen ? (
-        <div className="editor-modal" role="dialog" aria-modal="true">
-          <div className="editor-shell" style={{ maxWidth: 720, margin: "8vh auto", height: "auto" }}>
-            <div className="editor-header">
-              <strong className="editor-title">Sick leave request</strong>
-              <div className="editor-actions">
-                <button
-                  className="editor-close"
-                  type="button"
-                  onClick={() => setSickLeaveModalOpen(false)}
-                  disabled={sickLeaveBusy}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div style={{ padding: 18 }}>
-              <form
-                className="auth-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  generateSickLeaveRequest();
-                }}
-              >
-                <label>
-                  Start date
-                  <input
-                    type="date"
-                    lang="en-US"
-                    value={sickLeaveForm.startDate}
-                    onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, startDate: e.target.value })}
-                    required
-                    disabled={sickLeaveBusy}
-                  />
-                </label>
-                <label>
-                  End date (optional)
-                  <input
-                    type="date"
-                    lang="en-US"
-                    value={sickLeaveForm.endDate}
-                    onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, endDate: e.target.value })}
-                    disabled={sickLeaveBusy}
-                  />
-                </label>
-                <label>
-                  Reason (optional)
-                  <input
-                    type="text"
-                    value={sickLeaveForm.reason}
-                    onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, reason: e.target.value })}
-                    placeholder="Flu symptoms"
-                    disabled={sickLeaveBusy}
-                  />
-                </label>
-                <label>
-                  Note (optional)
-                  <textarea
-                    rows="3"
-                    value={sickLeaveForm.note}
-                    onChange={(e) => setSickLeaveForm({ ...sickLeaveForm, note: e.target.value })}
-                    placeholder="Any additional details"
-                    disabled={sickLeaveBusy}
-                  />
-                </label>
-                <div className="quick-actions is-start">
-                  <button className="primary" type="submit" disabled={sickLeaveBusy}>
-                    {sickLeaveBusy ? "Generating..." : "Generate"}
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => setSickLeaveModalOpen(false)}
-                    disabled={sickLeaveBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {imagingModalOpen ? (
-        <div className="editor-modal" role="dialog" aria-modal="true">
-          <div className="editor-shell" style={{ maxWidth: 720, margin: "8vh auto", height: "auto" }}>
-            <div className="editor-header">
-              <strong className="editor-title">Imaging upload request</strong>
-              <div className="editor-actions">
-                <button
-                  className="editor-close"
-                  type="button"
-                  onClick={() => setImagingModalOpen(false)}
-                  disabled={imagingBusy}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div style={{ padding: 18 }}>
-              <form
-                className="auth-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  generateImagingRequest();
-                }}
-              >
-                <label>
-                  Modality
-                  <input
-                    type="text"
-                    value={imagingForm.modality}
-                    onChange={(e) => setImagingForm({ ...imagingForm, modality: e.target.value })}
-                    placeholder="MRI / CT / X-ray / Ultrasound"
-                    required
-                    disabled={imagingBusy}
-                  />
-                </label>
-                <label>
-                  Study date (optional)
-                  <input
-                    type="date"
-                    lang="en-US"
-                    value={imagingForm.studyDate}
-                    onChange={(e) => setImagingForm({ ...imagingForm, studyDate: e.target.value })}
-                    disabled={imagingBusy}
-                  />
-                </label>
-                <label>
-                  Facility (optional)
-                  <input
-                    type="text"
-                    value={imagingForm.facility}
-                    onChange={(e) => setImagingForm({ ...imagingForm, facility: e.target.value })}
-                    placeholder="City Imaging Center"
-                    disabled={imagingBusy}
-                  />
-                </label>
-                <label>
-                  Link (optional)
-                  <input
-                    type="url"
-                    value={imagingForm.link}
-                    onChange={(e) => setImagingForm({ ...imagingForm, link: e.target.value })}
-                    placeholder="https://..."
-                    disabled={imagingBusy}
-                  />
-                </label>
-                <label>
-                  Note (optional)
-                  <textarea
-                    rows="3"
-                    value={imagingForm.note}
-                    onChange={(e) => setImagingForm({ ...imagingForm, note: e.target.value })}
-                    placeholder="What should the doctor look for?"
-                    disabled={imagingBusy}
-                  />
-                </label>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  After generating the request, upload your files into the <strong>Imaging</strong> folder in your workspace.
-                </p>
-                <div className="quick-actions is-start">
-                  <button className="primary" type="submit" disabled={imagingBusy}>
-                    {imagingBusy ? "Generating..." : "Generate"}
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => setImagingModalOpen(false)}
-                    disabled={imagingBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {imagingUploadOpen ? (
-        <div className="editor-modal" role="dialog" aria-modal="true">
-          <div className="editor-shell" style={{ maxWidth: 720, margin: "8vh auto", height: "auto" }}>
-            <div className="editor-header">
-              <strong className="editor-title">Upload imaging file</strong>
-              <div className="editor-actions">
-                <button
-                  className="editor-close"
-                  type="button"
-                  onClick={() => setImagingUploadOpen(false)}
-                  disabled={imagingUploadBusy}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div style={{ padding: 18 }}>
-              <form
-                className="auth-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  uploadImagingFile();
-                }}
-              >
-                <label>
-                  File
-                  <input
-                    type="file"
-                    onChange={(e) => setImagingUploadFile(e.target.files?.[0] || null)}
-                    disabled={imagingUploadBusy}
-                    accept=".pdf,.png,.jpg,.jpeg,.dcm,application/pdf,image/*"
-                  />
-                </label>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Max 15 MB (sample limitation). For larger studies, upload in the workspace directly.
-                </p>
-                <div className="quick-actions is-start">
-                  <button className="primary" type="submit" disabled={imagingUploadBusy || !imagingUploadFile}>
-                    {imagingUploadBusy ? "Uploading..." : "Upload"}
-                  </button>
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => setImagingUploadOpen(false)}
-                    disabled={imagingUploadBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <div id={insuranceEditorFrameId} className="hidden-editor" />
-      <div id={sickLeaveEditorFrameId} className="hidden-editor" />
-      <div id={imagingEditorFrameId} className="hidden-editor" />
-    </PatientShell>
-  );
-}
+		    </PatientShell>
+		  );
+		}
 
 function mapFoldersFromSummary(base, summary) {
   const descriptionMap = new Map(base.map((item) => [normalize(item.title), item.description]));

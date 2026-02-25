@@ -100,6 +100,12 @@ medical-docspace-portal/
 
 ## Troubleshooting
 
+If you see **Port is already in use**:
+
+- Another `npm run dev` process is already running on `PORT` (default `5173`).
+- Stop the existing Node process, or set `PORT` to a free value in `.env` (for example `PORT=5174`).
+- If `PORT` is not set, the app will try `5173` and then pick the next available port.
+
 If you see **403** for room summary or folder contents:
 
 - Verify the room was shared with the patient.

@@ -172,6 +172,7 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
       }
     });
     setDraftId(saved?.id || "");
+    toast("Draft saved. Open Drafts to continue later.", "success");
   };
 
   useEffect(() => {
@@ -394,9 +395,14 @@ export default function BulkLinks({ session, busy, activeRoomId, activeProject, 
                         role="option"
                         aria-selected={selected}
                       >
-                        <div className="select-row-main">
-                          <strong className="truncate">{t.title || `File ${t.id}`}</strong>
-                          <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
+                        <div className="template-option-left">
+                          <span className="template-icon" aria-hidden="true">
+                            PDF
+                          </span>
+                          <div className="select-row-main">
+                            <strong className="truncate">{t.title || `File ${t.id}`}</strong>
+                            <span className="muted truncate">PDF template {"\u2022"} ID {t.id}</span>
+                          </div>
                         </div>
                         <span className="select-row-right" aria-hidden="true">
                           {selected ? "\u2713" : ""}

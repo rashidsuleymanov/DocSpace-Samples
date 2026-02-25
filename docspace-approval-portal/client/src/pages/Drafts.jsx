@@ -7,6 +7,7 @@ import StepsCard from "../components/StepsCard.jsx";
 import Tabs from "../components/Tabs.jsx";
 import {
   createDraft,
+  deleteDraftTemplate,
   deleteSharedTemplate,
   getProjectTemplatesRoom,
   listSharedTemplates,
@@ -60,6 +61,8 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
   const [sharedLoading, setSharedLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteEntry, setDeleteEntry] = useState(null);
+  const [deleteDraftOpen, setDeleteDraftOpen] = useState(false);
+  const [deleteDraftEntry, setDeleteDraftEntry] = useState(null);
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestTemplate, setRequestTemplate] = useState(null);
   const [requestProjects, setRequestProjects] = useState([]);
@@ -432,19 +435,26 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
                           Open in new tab
                         </a>
                       ) : null}
-                      {templatesRoom?.isOwner ? (
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={() => {
-                            setDeleteEntry(t);
-                            setDeleteOpen(true);
-                          }}
-                          disabled={busy || loading || !token}
-                        >
-                          Delete
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          if (!templatesRoom?.isOwner) {
+                            toast("Only the shared room owner can unpublish templates.", "error");
+                            return;
+                          }
+                          setDeleteEntry(t);
+                          setDeleteOpen(true);
+                        }}
+                        disabled={busy || loading || !token || !templatesRoom?.id}
+                        title={
+                          templatesRoom?.isOwner
+                            ? "Remove this template from the published list (shared room)"
+                            : "Only the shared room owner can unpublish templates"
+                        }
+                      >
+                        Unpublish
+                      </button>
                       <button
                         type="button"
                         className="primary"
@@ -541,6 +551,18 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
                       </button>
                       <button type="button" className="primary" onClick={() => openPublish(d)} disabled={busy || loading}>
                         Publish
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => {
+                          setDeleteDraftEntry(d);
+                          setDeleteDraftOpen(true);
+                        }}
+                        disabled={busy || loading || !token}
+                        title="Delete this template from My documents"
+                      >
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -812,7 +834,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
 
       <Modal
         open={deleteOpen}
-        title={deleteEntry?.title ? `Delete "${deleteEntry.title}"?` : "Delete template?"}
+        title={deleteEntry?.title ? `Unpublish "${deleteEntry.title}"?` : "Unpublish template?"}
         onClose={() => {
           if (loading) return;
           setDeleteOpen(false);
@@ -845,8 +867,8 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
                   setDeleteOpen(false);
                   setDeleteEntry(null);
                   await refreshSharedTemplates();
-                  setNotice("Template deleted.");
-                  toast("Template deleted", "success");
+                  setNotice("Template unpublished.");
+                  toast("Template unpublished", "success");
                 } catch (e) {
                   setError(e?.message || "Delete failed");
                 } finally {
@@ -855,14 +877,70 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
               }}
               disabled={busy || loading || !token || !templatesRoom?.isOwner || !deleteEntry?.id}
             >
-              {loading ? "Loading..." : "Delete"}
+              {loading ? "Loading..." : "Unpublish"}
             </button>
           </>
         }
       >
         <EmptyState
           title="Only the room owner can delete published templates."
-          description="This removes the file from the shared templates room."
+          description="This removes the file from the shared templates room (published list). Your original draft stays in My documents."
+        />
+      </Modal>
+
+      <Modal
+        open={deleteDraftOpen}
+        title={deleteDraftEntry?.title ? `Delete "${deleteDraftEntry.title}"?` : "Delete template?"}
+        onClose={() => {
+          if (loading) return;
+          setDeleteDraftOpen(false);
+          setDeleteDraftEntry(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteDraftOpen(false);
+                setDeleteDraftEntry(null);
+              }}
+              disabled={busy || loading}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={async () => {
+                const fid = normalize(deleteDraftEntry?.id);
+                if (!fid) return;
+                setLoading(true);
+                setError("");
+                setNotice("");
+                try {
+                  if (!token) throw new Error("Authorization token is required");
+                  await deleteDraftTemplate({ token, fileId: fid });
+                  setDeleteDraftOpen(false);
+                  setDeleteDraftEntry(null);
+                  await refresh();
+                  setNotice("Template deleted.");
+                  toast("Template deleted", "success");
+                } catch (e) {
+                  setError(e?.message || "Delete failed");
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={busy || loading || !token || !deleteDraftEntry?.id}
+            >
+              {loading ? "Loading..." : "Delete"}
+            </button>
+          </>
+        }
+      >
+        <EmptyState
+          title="This will delete the file from My documents."
+          description="Published copies in projects or the shared room will not be removed automatically."
         />
       </Modal>
 

@@ -305,6 +305,24 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.delete("/:fileId", async (req, res) => {
+  try {
+    const auth = requireUserToken(req);
+    const fileId = String(req.params?.fileId || "").trim();
+    if (!fileId) return res.status(400).json({ error: "fileId is required" });
+
+    const contents = await getMyDocuments(auth);
+    const items = Array.isArray(contents?.items) ? contents.items : [];
+    const exists = items.some((i) => i.type === "file" && String(i?.id || "") === fileId && isPdfEntry(i));
+    if (!exists) return res.status(404).json({ error: "Template file not found in My documents" });
+
+    const result = await deleteFile(fileId, auth);
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message, details: error.details || null });
+  }
+});
+
 router.post("/publish", async (req, res) => {
   try {
     const auth = requireUserToken(req);

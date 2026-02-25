@@ -166,20 +166,6 @@ export async function createRoom({ title, roomType } = {}) {
   });
 }
 
-async function tryRoomAction(path, { auth } = {}) {
-  const methods = ["PUT", "POST"];
-  let lastError = null;
-  for (const method of methods) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      return await apiRequest(path, { method, auth });
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError || new Error("Room action failed");
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -254,7 +240,14 @@ async function waitFileOp(opId, auth, { timeoutMs = 12000, intervalMs = 650 } = 
 export async function archiveRoom(roomId, auth) {
   const rid = String(roomId || "").trim();
   if (!rid) throw new Error("roomId is required");
-  const op = await tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, { auth });
+
+  // DocSpace expects JSON content-type even when the body is empty.
+  const op = await apiRequest(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, {
+    method: "PUT",
+    auth,
+    body: {}
+  });
+
   const opId = normalizeFileOpId(op?.id ?? op?.operationId);
   const finished = op?.finished === undefined ? null : Boolean(op.finished);
 
@@ -269,7 +262,12 @@ export async function archiveRoom(roomId, auth) {
 export async function unarchiveRoom(roomId, auth) {
   const rid = String(roomId || "").trim();
   if (!rid) throw new Error("roomId is required");
-  return tryRoomAction(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/unarchive`, { auth });
+  // DocSpace expects JSON content-type even when the body is empty.
+  return apiRequest(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/unarchive`, {
+    method: "PUT",
+    auth,
+    body: {}
+  });
 }
 
 export async function findRoomByCandidates(candidates, auth) {

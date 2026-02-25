@@ -312,22 +312,6 @@ export default function Settings({ busy, onOpenDrafts }) {
           </section>
         ) : null}
 
-        {tab === "connection" && typeof onOpenDrafts === "function" ? (
-          <section className="card compact">
-            <div className="card-header compact">
-              <div>
-                <h3>Next steps</h3>
-                <p className="muted">Open Templates to publish a PDF form, then start a request from a project.</p>
-              </div>
-              <div className="card-header-actions">
-                <button type="button" onClick={onOpenDrafts} disabled={busy || connLoading}>
-                  Open Templates
-                </button>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
         {tab === "branding" ? (
           <section className="card">
             <div className="card-header">
