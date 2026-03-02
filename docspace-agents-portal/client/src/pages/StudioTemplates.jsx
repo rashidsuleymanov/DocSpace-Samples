@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../services/http.js";
 import { AGENT_TEMPLATES } from "../templates/agentTemplates.js";
 
@@ -32,23 +32,30 @@ export default function StudioTemplates() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Templates</h1>
-          <div className="page-sub">Start from a proven agent layout, then connect knowledge and models.</div>
+          <div className="page-sub">
+            Templates create a new agent. After that, connect knowledge and models in the agent settings.
+          </div>
+        </div>
+        <div className="row page-actions" style={{ gap: 10 }}>
+          <Link className="btn secondary" to="/studio" style={{ textDecoration: "none" }}>
+            Back to agents
+          </Link>
         </div>
       </div>
 
       {error ? <div style={{ color: "#b91c1c", marginBottom: 12 }}>{error}</div> : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+      <div className="template-grid">
         {AGENT_TEMPLATES.map((t) => (
-          <div key={t.id} className="card">
-            <div className="card-pad" style={{ display: "grid", gap: 10 }}>
+          <div key={t.id} className="card template-card">
+            <div className="card-pad">
               <div style={{ display: "grid", gap: 4 }}>
                 <div style={{ fontWeight: 900, fontSize: "1.05rem" }}>{t.name}</div>
                 <div className="muted" style={{ lineHeight: 1.4 }}>
                   {t.description}
                 </div>
               </div>
-              <div className="row" style={{ justifyContent: "flex-start" }}>
+              <div className="row" style={{ justifyContent: "flex-start", marginTop: "auto" }}>
                 <button className="btn" onClick={() => useTemplate(t)} disabled={loadingId === t.id}>
                   {loadingId === t.id ? "Creating..." : "Use template"}
                 </button>
@@ -60,4 +67,3 @@ export default function StudioTemplates() {
     </div>
   );
 }
-

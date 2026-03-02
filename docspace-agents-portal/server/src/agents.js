@@ -10,10 +10,11 @@ function defaultTools() {
   return { allowAllDocSpace: false };
 }
 
-function defaultTheme() {
+function defaultTheme({ name } = {}) {
+  const title = String(name || "Chat").trim() || "Chat";
   return {
-    title: "Chat",
-    launcherText: "Chat",
+    title,
+    launcherText: title,
     primaryColor: "#0f172a",
     accentColor: "#38bdf8",
     borderRadius: 18,
@@ -65,7 +66,7 @@ function normalize(agent) {
       fileIds: agent.kbFileIds || []
     },
     tools: agent.tools || defaultTools(),
-    theme: agent.theme || defaultTheme(),
+    theme: agent.theme || defaultTheme({ name: agent.name }),
     billing: agent.billing || defaultBilling(),
     embedKey: agent.embedKey || null,
     createdAt: agent.createdAt,
@@ -130,7 +131,7 @@ export function createAgentStore(store) {
       kbFolderIds: [],
       kbFileIds: [],
       tools: defaultTools(),
-      theme: defaultTheme(),
+      theme: defaultTheme({ name }),
       billing: defaultBilling(),
       embedKey,
       embedKeySalt: salt,
@@ -191,10 +192,16 @@ export function createAgentStore(store) {
       kbFolderIds: Array.isArray(patch?.kb?.folderIds) ? patch.kb.folderIds.map(String) : existing.kbFolderIds || [],
       kbFileIds: Array.isArray(patch?.kb?.fileIds) ? patch.kb.fileIds.map(String) : existing.kbFileIds || [],
       tools: patch?.tools ? patch.tools : existing.tools || defaultTools(),
-      theme: patch?.theme ? { ...(existing.theme || defaultTheme()), ...(patch.theme || {}) } : (existing.theme || defaultTheme()),
+      theme: patch?.theme
+        ? { ...(existing.theme || defaultTheme({ name: String(patch?.name ?? existing.name ?? "Chat") })), ...(patch.theme || {}) }
+        : (existing.theme || defaultTheme({ name: String(patch?.name ?? existing.name ?? "Chat") })),
       billing: patch?.billing ? { ...(existing.billing || defaultBilling()), ...(patch.billing || {}) } : (existing.billing || defaultBilling()),
       updatedAt: nowIso()
     };
+
+    if (!updated.theme?.title) {
+      updated.theme = { ...(updated.theme || {}), title: updated.name, launcherText: updated.theme?.launcherText || updated.name };
+    }
 
     const next = agents.slice();
     next[idx] = updated;

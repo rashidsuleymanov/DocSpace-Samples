@@ -2,7 +2,7 @@ export const AGENT_TEMPLATES = [
   {
     id: "support",
     name: "Support Agent",
-    description: "Answers product questions using your DocSpace knowledge base, escalates when unsure.",
+    description: "Answers product questions using your knowledge base, escalates when unsure.",
     systemPrompt:
       "You are a customer support agent. Be concise, friendly, and step-by-step.\n\n" +
       "- Use the provided knowledge snippets when relevant.\n" +
@@ -33,7 +33,7 @@ export const AGENT_TEMPLATES = [
   {
     id: "onboarding",
     name: "Product Onboarding",
-    description: "Guides users through setup and first success. Uses your DocSpace docs and checklists.",
+    description: "Guides users through setup and first success. Uses your docs and checklists.",
     systemPrompt:
       "You are an onboarding assistant.\n\n" +
       "- Provide short checklists.\n" +
@@ -41,4 +41,3 @@ export const AGENT_TEMPLATES = [
       "- Use the provided knowledge snippets when relevant.\n"
   }
 ];
-

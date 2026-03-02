@@ -143,7 +143,7 @@ export default function ChatWidget({
           </div>
           <div style={{ display: "grid" }}>
             <div style={{ fontWeight: 800, lineHeight: 1.15 }}>{theme.title}</div>
-            <div style={{ fontSize: 12, opacity: 0.82 }}>{trialNote || "Powered by DocSpace"}</div>
+            {trialNote ? <div style={{ fontSize: 12, opacity: 0.82 }}>{trialNote}</div> : null}
           </div>
         </div>
       </div>

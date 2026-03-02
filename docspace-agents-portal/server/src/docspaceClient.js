@@ -186,7 +186,7 @@ export function createDocSpaceClient() {
     });
   }
 
-  async function uploadFileToFolder({ folderId, fileName, buffer, contentType = "application/octet-stream" }) {
+  async function uploadFileToFolder({ folderId, fileName, buffer, contentType = "application/octet-stream", auth } = {}) {
     if (!folderId || !fileName || !buffer) throw new Error("folderId, fileName and buffer are required");
 
     const form = new FormData();
@@ -195,7 +195,8 @@ export function createDocSpaceClient() {
 
     return apiRequestForm(`/api/2.0/files/${encodeURIComponent(String(folderId))}/upload`, {
       method: "POST",
-      body: form
+      body: form,
+      auth
     });
   }
 

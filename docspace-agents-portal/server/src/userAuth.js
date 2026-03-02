@@ -111,7 +111,7 @@ export function createUserAuth({ store, docspace }) {
     }
     const token = await docspace.authenticateUser({ userName: em, password: pw });
     if (!token) {
-      const err = new Error("DocSpace authentication failed");
+      const err = new Error("Authentication failed");
       err.status = 401;
       throw err;
     }
@@ -141,4 +141,3 @@ export function createUserAuth({ store, docspace }) {
     getSessionFromReq
   };
 }
-

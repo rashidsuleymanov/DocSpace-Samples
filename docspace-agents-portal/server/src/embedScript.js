@@ -2,8 +2,8 @@ export function renderEmbedScript({ baseUrl }) {
   const origin = String(baseUrl || "").replace(/\/+$/, "");
   return `(() => {
   const script = document.currentScript;
-  const publicId = script?.dataset?.docspaceAgent || "";
-  const embedKey = script?.dataset?.docspaceKey || "";
+  const publicId = script?.dataset?.agentId || script?.dataset?.docspaceAgent || "";
+  const embedKey = script?.dataset?.agentKey || script?.dataset?.docspaceKey || "";
   if (!publicId || !embedKey) return;
 
   let theme = { launcherText: "Chat", position: "right", primaryColor: "#0f172a" };
@@ -27,7 +27,7 @@ export function renderEmbedScript({ baseUrl }) {
   }
 
   const root = document.createElement("div");
-  root.id = "docspace-agent-widget-root";
+  root.id = "agent-widget-root";
   root.style.position = "fixed";
   root.style.bottom = "18px";
   root.style.zIndex = "2147483000";
@@ -59,7 +59,7 @@ export function renderEmbedScript({ baseUrl }) {
   panel.style.display = "none";
 
   const iframe = document.createElement("iframe");
-  iframe.title = "DocSpace Agent";
+  iframe.title = "Chat Agent";
   iframe.src = "${origin}/w/" + encodeURIComponent(publicId) + "?k=" + encodeURIComponent(embedKey);
   iframe.style.width = "100%";
   iframe.style.height = "100%";

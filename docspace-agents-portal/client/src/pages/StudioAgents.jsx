@@ -69,7 +69,7 @@ export default function StudioAgents() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Agents</h1>
-          <div className="page-sub">Create, configure, and embed DocSpace-powered chat agents.</div>
+          <div className="page-sub">Create, configure, and embed chat agents backed by your files.</div>
         </div>
         <div className="row page-actions" style={{ gap: 10 }}>
           <button className="btn secondary" onClick={load} disabled={loading}>

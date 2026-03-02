@@ -25,9 +25,9 @@ export default function StudioLayout() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">DS</div>
+          <div className="brand-mark">A</div>
           <div className="brand-text">
-            <div className="brand-title">DocSpace Agents</div>
+            <div className="brand-title">Agents</div>
             <div className="brand-sub">Studio</div>
           </div>
         </div>
@@ -45,7 +45,7 @@ export default function StudioLayout() {
             </span>
           </div>
           <button className="btn secondary" onClick={logout} style={{ marginTop: 8, width: "100%" }}>
-            Logout
+            Sign out
           </button>
         </div>
       </aside>

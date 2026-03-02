@@ -28,9 +28,9 @@ export default function StudioLogin() {
   return (
     <div className="container">
       <div className="card">
-        <div className="card-pad">
+          <div className="card-pad">
           <div className="title">Sign in</div>
-          <p className="muted">Use your DocSpace account to manage agents.</p>
+          <p className="muted">Use your workspace account to manage agents.</p>
           <form onSubmit={onSubmit} className="field" style={{ maxWidth: 420 }}>
             <label>Email</label>
             <input
@@ -45,7 +45,7 @@ export default function StudioLogin() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Your DocSpace password"
+              placeholder="Password"
               autoComplete="current-password"
               required
             />

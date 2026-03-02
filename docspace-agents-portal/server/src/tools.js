@@ -5,7 +5,7 @@ export function listToolSpecs() {
   return [
     {
       name: "docspace_list_rooms",
-      description: "List DocSpace rooms (only allowed when allowAllDocSpace is enabled).",
+      description: "List rooms (only allowed when allowAllDocSpace is enabled).",
       args: {}
     },
     {
@@ -15,7 +15,7 @@ export function listToolSpecs() {
     },
     {
       name: "docspace_create_room",
-      description: "Create a new DocSpace room (only allowed when allowAllDocSpace is enabled).",
+      description: "Create a new room (only allowed when allowAllDocSpace is enabled).",
       args: { title: "string" }
     },
     {
@@ -40,7 +40,7 @@ export function listToolSpecs() {
     },
     {
       name: "docspace_publish_file_download",
-      description: "Create a signed external download URL (keeps DocSpace hidden).",
+      description: "Create a signed external download URL (keeps the workspace hidden).",
       args: { fileId: "string", title: "string?" }
     }
   ];
