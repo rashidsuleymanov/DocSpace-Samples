@@ -23,6 +23,7 @@ export default function App() {
   const [view, setView] = useState("login");
   const [session, setSession] = useState(null);
   const [doctorSession, setDoctorSession] = useState(null);
+  const [doctorAccess, setDoctorAccess] = useState(false);
   const [recordsFolderTitle, setRecordsFolderTitle] = useState("");
   const [fillSignInitialTab, setFillSignInitialTab] = useState("");
   const [booting, setBooting] = useState(true);
@@ -40,6 +41,16 @@ export default function App() {
           const nextView =
             !settingsEnabled && active?.view === "settings" ? "dashboard" : active?.view;
           setView(nextView || "dashboard");
+          try {
+            const doctor = await getDoctorSession();
+            if (doctor?.email) {
+              setDoctorSession(doctor);
+              setDoctorAccess(true);
+            }
+          } catch {
+            setDoctorSession(null);
+            setDoctorAccess(false);
+          }
         }
       } catch {
         setSession(null);
@@ -59,8 +70,44 @@ export default function App() {
         try {
           const next = await loginUser(credentials);
           setSession(next);
+
+          const role = String(credentials?.role || "patient").toLowerCase();
+          if (role === "doctor") {
+            try {
+              const doctor = await getDoctorSession();
+              setDoctorSession(doctor);
+              setDoctorAccess(true);
+              setView("doctor");
+              toast.success("Signed in as doctor.");
+            } catch (error) {
+              await logoutUser();
+              setSession(null);
+              setDoctorSession(null);
+              setDoctorAccess(false);
+              const message = error?.message || "Doctor sign-in failed";
+              setAuthError(message);
+              toast.error(message);
+              setView("login");
+            }
+            return;
+          }
+
           setView("dashboard");
           toast.success("Signed in.");
+          // Background check: if the same account also has doctor access, enable the switch.
+          try {
+            const doctor = await getDoctorSession();
+            if (doctor?.email) {
+              setDoctorSession(doctor);
+              setDoctorAccess(true);
+            } else {
+              setDoctorSession(null);
+              setDoctorAccess(false);
+            }
+          } catch {
+            setDoctorSession(null);
+            setDoctorAccess(false);
+          }
         } catch (error) {
           const message = error?.message || "Sign-in failed";
           setAuthError(message);
@@ -88,17 +135,22 @@ export default function App() {
       async onLogout() {
         await logoutUser();
         setSession(null);
+        setDoctorSession(null);
+        setDoctorAccess(false);
         setView("login");
       },
-      async onGoDoctor() {
+      async onGoDoctorPortal() {
         setBusy(true);
         setAuthError("");
         try {
           const doctor = await getDoctorSession();
           setDoctorSession(doctor);
+          setDoctorAccess(true);
           setView("doctor");
         } catch (error) {
-          setAuthError(error?.message || "Doctor session failed");
+          const message = error?.message || "Doctor session failed";
+          setAuthError(message);
+          toast.error(message);
         } finally {
           setBusy(false);
         }
@@ -139,7 +191,6 @@ export default function App() {
           success={registerSuccess}
           onLogin={actions.onLogin}
           onGoRegister={() => actions.onNavigate("register")}
-          onGoDoctor={actions.onGoDoctor}
         />
       )}
       {view === "register" && (
@@ -156,6 +207,8 @@ export default function App() {
           onLogout={actions.onLogout}
           onNavigate={actions.onNavigate}
           onOpenFolder={actions.onOpenRecordsFolder}
+          doctorAccess={doctorAccess}
+          onGoDoctorPortal={actions.onGoDoctorPortal}
         />
       )}
       {view === "appointments" && session && (
@@ -187,7 +240,7 @@ export default function App() {
           doctor={doctorSession}
           onExit={() => {
             setDoctorSession(null);
-            setView("login");
+            setView(session ? "dashboard" : "login");
           }}
         />
       )}

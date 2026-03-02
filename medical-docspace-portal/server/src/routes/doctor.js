@@ -16,6 +16,7 @@ import {
   getRoomFolderByTitle,
   getRoomInfo,
   getRoomSummary,
+  getSelfProfileWithToken,
   listRooms,
   requireLabRoom,
   createRoomFileFromTemplate,
@@ -77,13 +78,42 @@ const allowedFolderTitles = new Map(
   ].map((title) => [normalizeFolderTitle(title), title])
 );
 
-router.get("/session", async (_req, res) => {
+router.use(async (req, res, next) => {
   try {
-    const doctor = await getDoctorProfile();
-    if (!doctor) {
-      return res.status(404).json({ error: "Doctor is not configured" });
+    const auth = String(req.headers.authorization || "").trim();
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
     }
-    const token = normalizeAuthHeader(config.rawAuthToken || "");
+
+    const user = await getSelfProfileWithToken(auth).catch(() => null);
+    const email = String(user?.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(401).json({ error: "Unable to resolve doctor from token" });
+    }
+
+    const allowed = Array.isArray(config.doctorEmails) ? config.doctorEmails : [];
+    if (allowed.length && !allowed.includes(email)) {
+      return res.status(403).json({ error: "Forbidden (not a doctor account)" });
+    }
+
+    req.doctorUser = user;
+    req.doctorAuth = auth;
+    return next();
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      error: error.message,
+      details: error.details || null
+    });
+  }
+});
+
+router.get("/session", async (req, res) => {
+  try {
+    const doctor = req.doctorUser || (await getDoctorProfile().catch(() => null));
+    if (!doctor?.id) {
+      return res.status(401).json({ error: "Doctor session is missing" });
+    }
+    const token = normalizeAuthHeader(req.doctorAuth || "");
     return res.json({
       doctor: {
         id: doctor.id,

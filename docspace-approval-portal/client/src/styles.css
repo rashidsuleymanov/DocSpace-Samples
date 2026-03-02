@@ -418,6 +418,7 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   display: grid;
   gap: 16px;
   align-content: start;
+  grid-auto-rows: max-content;
   padding-right: 6px;
 }
 
@@ -529,7 +530,7 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   justify-content: center;
 }
 
-.projects-nav { display: grid; gap: 6px; }
+.projects-nav { display: grid; gap: 6px; align-self: start; }
 .projects-nav-toggle {
   width: 100%;
   text-align: left;
@@ -537,8 +538,9 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   border-radius: var(--radius-md);
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: #ffffff;
-  display: grid;
-  grid-template-columns: 1fr auto;
+  height: auto;
+  display: flex;
+  justify-content: space-between;
   gap: 10px;
   align-items: center;
   cursor: pointer;
@@ -551,7 +553,7 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   background: var(--accentSoft);
   border-color: rgba(37, 99, 235, 0.30);
 }
-.projects-nav-toggle-right { display: grid; place-items: center; color: var(--muted); }
+.projects-nav-toggle-right { flex: 0 0 auto; display: grid; place-items: center; color: var(--muted); }
 .projects-nav-toggle .chevron { transition: transform 140ms ease; }
 .projects-nav-toggle .chevron.is-open { transform: rotate(180deg); }
 
@@ -1520,6 +1522,54 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
 .icon-button[aria-label="More actions"] { font-size: 0; }
 .icon-button[aria-label="More actions"]::before { content: "..."; font-size: 16px; line-height: 1; letter-spacing: 1px; }
 .icon-button[aria-label="More actions"] svg { display: none; }
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+}
+.tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  pointer-events: auto;
+}
+.tour-spotlight {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.82), 0 0 0 9999px rgba(15, 23, 42, 0.55);
+  pointer-events: none;
+}
+.tour-popover {
+  position: fixed;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  padding: 12px 12px;
+  pointer-events: auto;
+}
+.tour-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tour-popover-title {
+  display: grid;
+  gap: 2px;
+}
+.tour-popover-title .muted { font-size: 12px; }
+.tour-popover-body { margin: 10px 0 0; color: var(--text); font-size: 13px; line-height: 1.45; }
+.tour-popover-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.tour-popover-actions-right { display: inline-flex; gap: 8px; align-items: center; }
 
 .modal-actions { display: grid; gap: 12px; }
 .action-list {

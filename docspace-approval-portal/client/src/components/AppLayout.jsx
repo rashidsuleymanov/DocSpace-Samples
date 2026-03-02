@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { activateProject, getProjectsSidebar } from "../services/portalApi.js";
 import ToastHost from "./ToastHost.jsx";
+import TourOverlay from "./TourOverlay.jsx";
 
 function initialsFrom(value) {
   const text = String(value || "").trim();
@@ -32,6 +33,14 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
   const displayName = session?.user?.displayName || session?.user?.email || "User";
   const token = session?.token || "";
   const projectsActive = active === "projects" || active === "project";
+  const tourStorageKey = "portal:onboarding:v4";
+  const [tourOpen, setTourOpen] = useState(() => {
+    try {
+      return Boolean(token) && active === "dashboard" && window.localStorage.getItem(tourStorageKey) !== "1";
+    } catch {
+      return false;
+    }
+  });
 
   const portalName = String(branding?.portalName || "Requests Center").trim() || "Requests Center";
   const portalTagline = String(branding?.portalTagline || "Sign, approve, and track.").trim() || "Sign, approve, and track.";
@@ -52,6 +61,17 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
   const [projects, setProjects] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState("");
   const [projectsQuery, setProjectsQuery] = useState("");
+
+  useEffect(() => {
+    if (!token) return;
+    if (tourOpen) return;
+    try {
+      const shouldOpen = window.localStorage.getItem(tourStorageKey) !== "1";
+      if (shouldOpen && active === "dashboard") setTourOpen(true);
+    } catch {
+      // ignore
+    }
+  }, [active, token, tourOpen]);
 
   useEffect(() => {
     try {
@@ -153,6 +173,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
               onClick={() => setProjectsOpen((s) => !s)}
               disabled={projectsLoading}
               title={projectsOpen ? "Hide project list" : "Show project list"}
+              data-tour="projects"
             >
               <span className="projects-nav-text">
                 <span className="projects-nav-label">Current project</span>
@@ -300,6 +321,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                     type="button"
                     className={`nav-item${active === item.id ? " is-active" : ""}`}
                     onClick={() => onNavigate(item.id)}
+                    data-tour={`nav:${item.id}`}
                   >
                     {item.label}
                   </button>
@@ -337,6 +359,7 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
                       type="button"
                       className={`nav-item${active === item.id ? " is-active" : ""}`}
                       onClick={() => onNavigate(item.id)}
+                      data-tour={`tools:${item.id}`}
                     >
                       {item.label}
                     </button>
@@ -364,6 +387,189 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
       </aside>
 
       <main className="content">{children}</main>
+
+      <TourOverlay
+        open={tourOpen}
+        steps={[
+          {
+            id: "home",
+            selector: '[data-tour="home:header"]',
+            title: "Welcome",
+            body: "Quick tour: pick a project, publish templates, create requests, and track results. You can skip anytime.",
+            placement: "right",
+            route: "dashboard"
+          },
+          {
+            id: "projects",
+            selector: '[data-tour="projects"]',
+            title: "Current project",
+            body: "Most screens are scoped to the current project. Pick one here before creating templates or requests.",
+            placement: "right",
+            route: "dashboard"
+          },
+          {
+            id: "projects-tabs",
+            selector: '[data-tour="projects:tabs"]',
+            title: "Projects: Active vs Archived",
+            body: "Active projects are where you work day-to-day. Archived projects stay visible (read-only) and can be restored later.",
+            placement: "left",
+            route: "projects"
+          },
+          {
+            id: "projects-more",
+            selector: '[data-tour="projects:more-current"]',
+            title: "Project actions",
+            body: "Use this menu to set the project as current, invite people, or archive it when you're done.",
+            placement: "left",
+            route: "projects"
+          },
+          {
+            id: "projects-archive",
+            selector: '[data-tour="projects:archive-action"]',
+            title: "Archive a project",
+            body: "Archiving moves the project room to archive. If there are open requests, you will be prompted to cancel them first or keep the project active.",
+            placement: "left",
+            route: "projects",
+            autoClickSelector: '[data-tour="projects:more-current"]'
+          },
+          {
+            id: "projects-archived-tab",
+            selector: '[data-tour="projects:tab-archived"]',
+            title: "See archived projects",
+            body: "Switch to the Archived tab to review old projects. You can still open them (read-only) without restoring.",
+            placement: "left",
+            route: "projects",
+            autoClickSelector: '[data-tour="projects:tab-archived"]'
+          },
+          {
+            id: "projects-restore",
+            selector: '[data-tour="projects:restore"]',
+            title: "Restore when needed",
+            body: "Restore brings the project back to Active so you can continue working. Existing requests and results remain available.",
+            placement: "left",
+            route: "projects",
+            autoClickSelector: '[data-tour="projects:tab-archived"]'
+          },
+          {
+            id: "templates",
+            selector: '[data-tour="templates:new"]',
+            title: "Templates",
+            body: "Create or upload a PDF template, then publish it to a project room so it can be used in requests.",
+            placement: "left",
+            route: "drafts"
+          },
+          {
+            id: "requests",
+            selector: '[data-tour="requests:new"]',
+            title: "Requests",
+            body: "Start a request from a published template. You'll get a link and can track progress here.",
+            placement: "left",
+            route: "requests"
+          },
+          {
+            id: "requests-filters",
+            selector: '[data-tour="requests:filters"]',
+            title: "Filter and search",
+            body: "Use scope tabs and status filters to focus the list. Search works within the current scope.",
+            placement: "left",
+            route: "requests"
+          },
+          {
+            id: "requests-toolbar",
+            selector: '[data-tour="requests:toolbar"]',
+            title: "Refresh and auto-refresh",
+            body: "Refresh pulls the latest statuses. Auto-refresh updates the list periodically while you're on this page.",
+            placement: "left",
+            route: "requests"
+          },
+          {
+            id: "requests-row-actions",
+            selector: '[data-tour="requests:row-actions"]',
+            title: "Per-request actions",
+            body: "Open shows the document or result. Details and Activity show progress. Admins may see Cancel/Complete when available.",
+            placement: "left",
+            route: "requests"
+          },
+          {
+            id: "requests-wizard-template",
+            selector: '[data-tour="requests:wizard:template"]',
+            title: "New request wizard: template",
+            body: "Pick a template first. Next you'll choose recipients and create the request.",
+            placement: "left",
+            route: "requests",
+            tourEvent: { page: "requests", action: "openNewRequest", step: "setup" }
+          },
+          {
+            id: "requests-wizard-recipients",
+            selector: '[data-tour="requests:wizard:recipients"]',
+            title: "New request wizard: recipients",
+            body: "Select recipients from the project or contacts. Then click Create request to generate the link and start tracking.",
+            placement: "left",
+            route: "requests",
+            tourEvent: { page: "requests", action: "openNewRequest", step: "recipients" }
+          },
+          {
+            id: "results",
+            selector: '[data-tour="results:new"]',
+            title: "Results",
+            body: "Completed requests produce result files. Open, copy links, or review details from this section.",
+            placement: "left",
+            route: "documents"
+          },
+          {
+            id: "contacts",
+            selector: '[data-tour="contacts:recipients"]',
+            title: "Contacts",
+            body: "Save people and groups so you can quickly reuse recipients in requests and bulk tools.",
+            placement: "left",
+            route: "contacts"
+          },
+          {
+            id: "settings",
+            selector: '[data-tour="settings:connection"]',
+            title: "Settings",
+            body: "Connect the portal to your workspace and adjust basic portal settings and branding.",
+            placement: "left",
+            route: "settings",
+            settingsTab: "connection"
+          }
+        ]}
+        onBeforeStep={(s) => {
+          const route = String(s?.route || "").trim();
+          const shouldNavigate = Boolean(route) && route !== String(active || "");
+          if (shouldNavigate) onNavigate(route);
+          const delay = shouldNavigate ? 350 : 0;
+
+          const autoClickSelector = String(s?.autoClickSelector || "").trim();
+          if (autoClickSelector) {
+            setTimeout(() => {
+              const el = document.querySelector(autoClickSelector);
+              if (el && typeof el.click === "function") el.click();
+            }, delay);
+          }
+
+          const tourEvent = s?.tourEvent && typeof s.tourEvent === "object" ? s.tourEvent : null;
+          if (tourEvent) {
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("portal:tour", { detail: tourEvent }));
+            }, delay);
+          }
+          const settingsTab = String(s?.settingsTab || "").trim();
+          if (settingsTab) {
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("portal:tour", { detail: { page: "settings", tab: settingsTab } }));
+            }, delay);
+          }
+        }}
+        onClose={() => {
+          try {
+            window.localStorage.setItem(tourStorageKey, "1");
+          } catch {
+            // ignore
+          }
+          setTourOpen(false);
+        }}
+      />
 
       <ToastHost />
     </div>

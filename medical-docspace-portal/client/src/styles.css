@@ -1800,6 +1800,30 @@ main {
   width: 100%;
 }
 
+.assigned-doctor {
+  min-height: 1.25rem;
+}
+
+.inline-skeleton {
+  display: inline-block;
+  width: 14rem;
+  height: 0.95em;
+  border-radius: 999px;
+  vertical-align: -0.1em;
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 37%, #e5e7eb 63%);
+  background-size: 400% 100%;
+  animation: skeleton-loading 1.2s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
 .error-banner {
   display: inline-flex;
   align-items: center;

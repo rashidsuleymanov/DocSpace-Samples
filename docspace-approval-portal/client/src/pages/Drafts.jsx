@@ -338,6 +338,7 @@ export default function Drafts({ session, busy, onOpenProject, onOpenProjects, o
             className="primary"
             onClick={() => setCreateOpen(true)}
             disabled={busy || loading || !token}
+            data-tour="templates:new"
           >
             New template
           </button>

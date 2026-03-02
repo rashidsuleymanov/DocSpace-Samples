@@ -118,6 +118,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
   });
 
   const [doctorInfo, setDoctorInfo] = useState(null);
+  const [doctorLoading, setDoctorLoading] = useState(true);
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
@@ -203,6 +204,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
       } catch {
 
         setDoctorInfo(null);
+
+      } finally {
+
+        setDoctorLoading(false);
 
       }
 
@@ -732,15 +737,19 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
             </div>
 
-          {doctorInfo && (
-
-            <p className="muted">
-
-              Assigned doctor: {doctorInfo.displayName}{doctorInfo.title ? ` - ${doctorInfo.title}` : ""}
-
-            </p>
-
-          )}
+          <p className="muted assigned-doctor">
+            Assigned doctor:{" "}
+            {doctorLoading ? (
+              <span className="inline-skeleton" aria-label="Loading doctor" />
+            ) : doctorInfo ? (
+              <span>
+                {doctorInfo.displayName}
+                {doctorInfo.title ? ` - ${doctorInfo.title}` : ""}
+              </span>
+            ) : (
+              <span>-</span>
+            )}
+          </p>
 
           <form className="auth-form" onSubmit={submit}>
 

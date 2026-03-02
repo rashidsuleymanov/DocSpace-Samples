@@ -26,6 +26,23 @@ export default function Settings({ busy, onOpenDrafts }) {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("connection");
 
+  useEffect(() => {
+    const handler = (e) => {
+      const detail = e?.detail && typeof e.detail === "object" ? e.detail : null;
+      if (!detail || detail.page !== "settings") return;
+      const next = String(detail.tab || "").trim();
+      if (!next) return;
+      setTab(next);
+      try {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("portal:tour", handler);
+    return () => window.removeEventListener("portal:tour", handler);
+  }, []);
+
   const [connLoading, setConnLoading] = useState(false);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [requiredRooms, setRequiredRooms] = useState(null);
@@ -219,11 +236,11 @@ export default function Settings({ busy, onOpenDrafts }) {
 
       <div className="page-scroll">
         {tab === "connection" ? (
-          <section className="card">
-        <div className="card-header">
-          <h3>Connection</h3>
-          <p className="muted">Saved on the server. The token is never returned to the browser.</p>
-        </div>
+          <section className="card" data-tour="settings:connection">
+            <div className="card-header">
+              <h3>Connection</h3>
+              <p className="muted">Saved on the server. The token is never returned to the browser.</p>
+            </div>
 
         <form className="auth-form" onSubmit={(e) => e.preventDefault()}>
           <label>

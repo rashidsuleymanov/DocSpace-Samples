@@ -326,6 +326,7 @@ export default function Documents({ session, busy, projects = [], onOpenRequests
               setTimeout(() => window.dispatchEvent(new CustomEvent("portal:requestsNew")), 0);
             }}
             disabled={busy || loading}
+            data-tour="results:new"
           >
             New request
           </button>

@@ -246,7 +246,7 @@ export default function Dashboard({
 
   return (
     <div className="page-shell">
-      <header className="topbar">
+      <header className="topbar" data-tour="home:header">
         <div>
           <h2>Home</h2>
           <p className="muted">
@@ -279,11 +279,13 @@ export default function Dashboard({
       <div className="dashboard-grid">
         <div className="dashboard-main">
           {showQuickStart ? (
-            <StepsCard
-              title="Quick start"
-              subtitle="Follow these steps to create your first approval flow."
-              steps={quickStartSteps}
-            />
+            <div data-tour="home:quickstart">
+              <StepsCard
+                title="Quick start"
+                subtitle="Follow these steps to create your first approval flow."
+                steps={quickStartSteps}
+              />
+            </div>
           ) : null}
           <section className="stats-grid">
             <StatCard title="Projects" value={projectsCount} meta="Project rooms you can access" onClick={onOpenProjects} />

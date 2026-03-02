@@ -1143,13 +1143,30 @@ export default function Requests({
     }
   };
 
-  const onNewRequest = () => {
+  const onNewRequest = useCallback(() => {
     if (!hasProject) {
       onOpenProjects();
       return;
     }
+    setSendStep("setup");
     setSendOpen(true);
-  };
+  }, [hasProject, onOpenProjects]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      const detail = event?.detail && typeof event.detail === "object" ? event.detail : null;
+      if (!detail || String(detail.page || "") !== "requests" || String(detail.action || "") !== "openNewRequest") return;
+      if (!hasProject) {
+        onOpenProjects();
+        return;
+      }
+      const desiredStep = String(detail.step || "").trim();
+      if (desiredStep === "setup" || desiredStep === "recipients") setSendStep(desiredStep);
+      setSendOpen(true);
+    };
+    window.addEventListener("portal:tour", handler);
+    return () => window.removeEventListener("portal:tour", handler);
+  }, [hasProject, onOpenProjects]);
 
   const onCopyLink = async (value) => {
     const url = String(value || "").trim();
@@ -1324,7 +1341,7 @@ export default function Requests({
           <button type="button" onClick={onOpenDrafts} disabled={busy}>
             Templates
           </button>
-          <button type="button" className="primary" onClick={onNewRequest} disabled={busy}>
+          <button type="button" className="primary" onClick={onNewRequest} disabled={busy} data-tour="requests:new">
             {hasProject ? "New request" : "Choose project"}
           </button>
         </div>
@@ -1339,7 +1356,7 @@ export default function Requests({
             <p className="muted">{scope === "current" ? "Showing requests from the current project." : "Showing requests from all projects you can access."}</p>
           </div>
           <div className="card-header-actions request-header-actions">
-            <div className="request-header-tools">
+            <div className="request-header-tools" data-tour="requests:toolbar">
               {flowsRefreshing ? (
                 <span className="muted" style={{ fontSize: 12 }}>
                   Updating...
@@ -1404,7 +1421,7 @@ export default function Requests({
           </div>
         </div>
 
-        <div className="request-filters">
+        <div className="request-filters" data-tour="requests:filters">
           <Tabs className="tabs-scope" value={scope} onChange={setScope} items={scopeTabs} ariaLabel="Project scope" />
           <Tabs className="tabs-who" value={who} onChange={setWho} items={whoTabs} ariaLabel="Requests scope" />
           <div className="chip-row" aria-label="Status filter">
@@ -1563,7 +1580,7 @@ export default function Requests({
               />
             )
           ) : (
-            filteredGroups.map((group) => {
+            filteredGroups.map((group, idx) => {
               const flow = group.primaryFlow || group.flows?.[0] || {};
               const title = flow.fileTitle || flow.templateTitle || `Template ${flow.templateFileId}`;
               const kindLower = String(flow?.kind || "").toLowerCase();
@@ -1616,7 +1633,7 @@ export default function Requests({
                     {createdAt ? <StatusPill tone="gray">{`Created: ${createdAt}`}</StatusPill> : null}
                   </span>
                 </div>
-                <div className="list-actions">
+                <div className="list-actions" data-tour={idx === 0 ? "requests:row-actions" : undefined}>
                   <button
                     type="button"
                     className="primary"
@@ -2146,7 +2163,7 @@ export default function Requests({
                   : "Creates a shareable link you can send to recipients."}
               </p>
             </div>
-            <div className="wizard-section">
+            <div className="wizard-section" data-tour="requests:wizard:template">
               <div className="wizard-head">
                 <strong>1) Choose a template</strong>
                 {sendSelectedTitle ? <span className="muted truncate">Selected: {sendSelectedTitle}</span> : null}
@@ -2225,7 +2242,7 @@ export default function Requests({
             {(!sendFlows.length && sendStep === "recipients") || sendFlows.length ? <div className="wizard-divider" /> : null}
 
             {!sendFlows.length && sendStep === "recipients" ? (
-                <div className="wizard-section">
+                <div className="wizard-section" data-tour="requests:wizard:recipients">
                   <div className="wizard-head">
                     <div style={{ display: "grid", gap: 2 }}>
                       <strong>2) Recipients {sendKind === "fillSign" || sendKind === "sharedSign" ? "" : "(optional)"}</strong>

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { toast } from "../utils/toast.js";
 
-export default function Login({ busy, error, success, onLogin, onGoRegister, onGoDoctor }) {
+export default function Login({ busy, error, success, onLogin, onGoRegister }) {
   const [form, setForm] = useState({ email: "", password: "" });
+  const [role, setRole] = useState("patient");
 
   const submit = (event) => {
     event.preventDefault();
@@ -16,7 +17,7 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
       toast.error("Please enter your password.");
       return;
     }
-    onLogin({ email, password });
+    onLogin({ email, password, role });
   };
 
   return (
@@ -26,8 +27,30 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
           <span className="brand-mark" />
           City Clinic
         </div>
-        <h1>Patient sign in</h1>
-        <p className="muted">Sign in to access your medical room, documents, and upcoming appointments.</p>
+        <h1>{role === "doctor" ? "Doctor sign in" : "Patient sign in"}</h1>
+        <p className="muted">
+          {role === "doctor"
+            ? "Sign in to access patient rooms, documents, and requests."
+            : "Sign in to access your medical room, documents, and upcoming appointments."}
+        </p>
+        <div className="mode-toggle" role="tablist" aria-label="Sign in role">
+          <button
+            className={`mode-pill ${role === "patient" ? "active" : ""}`}
+            type="button"
+            onClick={() => setRole("patient")}
+            disabled={busy}
+          >
+            Patient
+          </button>
+          <button
+            className={`mode-pill ${role === "doctor" ? "active" : ""}`}
+            type="button"
+            onClick={() => setRole("doctor")}
+            disabled={busy}
+          >
+            Doctor
+          </button>
+        </div>
         <form className="auth-form" onSubmit={submit}>
           <label>
             Email
@@ -58,9 +81,6 @@ export default function Login({ busy, error, success, onLogin, onGoRegister, onG
         <div className="auth-footer">
           <button className="link" onClick={onGoRegister}>
             Create a new patient account
-          </button>
-          <button className="link" type="button" onClick={onGoDoctor}>
-            Doctor portal
           </button>
           <div className="auth-support-inline">support@cityclinic.com</div>
         </div>

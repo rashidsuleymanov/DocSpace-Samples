@@ -5,6 +5,14 @@ const rawAuthToken =
   process.env.DOCSPACE_API_KEY ||
   "";
 const doctorEmail = process.env.DOCSPACE_DOCTOR_EMAIL || "";
+const doctorEmails = Array.from(
+  new Set(
+    [doctorEmail, ...(process.env.DOCSPACE_DOCTOR_EMAILS || "").split(",")]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .map((value) => value.toLowerCase())
+  )
+);
 const doctorAccess = process.env.DOCSPACE_DOCTOR_ACCESS || "RoomManager";
 // DocSpace room sharing access level for the patient. Common values include "Read" and "Editing".
 const patientAccess = process.env.DOCSPACE_PATIENT_ACCESS || "Editing";
@@ -31,6 +39,7 @@ export const config = {
   baseUrl,
   rawAuthToken,
   doctorEmail,
+  doctorEmails,
   doctorAccess,
   patientAccess,
   formsRoomTitle,

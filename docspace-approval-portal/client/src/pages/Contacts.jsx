@@ -986,7 +986,7 @@ export default function Contacts({ session, busy, onOpenBulk }) {
         </div>
       </Modal>
 
-      <section className="card page-card">
+      <section className="card page-card" data-tour="contacts:recipients">
         <div className="card-header compact">
           <div>
             <h3>Recipients</h3>

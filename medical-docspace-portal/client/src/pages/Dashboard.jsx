@@ -27,7 +27,7 @@ function saveSeenNews(session, set) {
   } catch {}
 }
 
-export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder }) {
+export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder, doctorAccess, onGoDoctorPortal }) {
   const [showBanner, setShowBanner] = useState(true);
   const [news, setNews] = useState([]);
   const [newsError, setNewsError] = useState("");
@@ -189,6 +189,11 @@ export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder 
           <button className="ghost ghost-dark" type="button" onClick={() => onNavigate("records")}>
             Open documents
           </button>
+          {doctorAccess && (
+            <button className="ghost ghost-dark" type="button" onClick={onGoDoctorPortal}>
+              Doctor portal
+            </button>
+          )}
         </div>
       </section>
 
@@ -249,4 +254,3 @@ function mapFoldersFromSummary(base, summary) {
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
 }
-

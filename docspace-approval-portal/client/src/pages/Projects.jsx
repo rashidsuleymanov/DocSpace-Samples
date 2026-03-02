@@ -350,7 +350,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
 
-      <div className="chip-row" aria-label="Project list mode" style={{ marginBottom: 14 }}>
+      <div className="chip-row" aria-label="Project list mode" style={{ marginBottom: 14 }} data-tour="projects:tabs">
         <button
           type="button"
           className={`chip${tab === "active" ? " is-active" : ""}`}
@@ -364,6 +364,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           className={`chip${tab === "archived" ? " is-active" : ""}`}
           onClick={() => setTab("archived")}
           disabled={busy || loading}
+          data-tour="projects:tab-archived"
         >
           Archived
         </button>
@@ -435,7 +436,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
           </div>
 
           <div className="projects-grid scroll-area" aria-label="Projects grid">
-            {filtered.map((p) => {
+            {filtered.map((p, idx) => {
               const isCurrent = activeRoomId && String(p.roomId) === String(activeRoomId);
               const disabled = busy || loading;
               const canManage = Boolean(permissions?.[String(p.id)]);
@@ -488,7 +489,12 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                         {isCurrent ? "Current" : "Set current"}
                       </button>
                     ) : (
-                      <button type="button" onClick={() => openRestore(p)} disabled={disabled || !canManage}>
+                      <button
+                        type="button"
+                        onClick={() => openRestore(p)}
+                        disabled={disabled || !canManage}
+                        data-tour={idx === 0 ? "projects:restore" : undefined}
+                      >
                         Restore
                       </button>
                     )}
@@ -503,6 +509,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                       disabled={disabled}
                       aria-label="More actions"
                       title="More actions"
+                      data-tour={isCurrent ? "projects:more-current" : undefined}
                     />
                   </div>
                 </div>
@@ -604,6 +611,7 @@ export default function Projects({ session, busy, onOpenProject, onOpenDrafts })
                   }}
                   disabled={disabled || !canManage}
                   role="menuitem"
+                  data-tour="projects:archive-action"
                 >
                   <span>Archive</span>
                   <span className="menu-item-meta">{canManage ? "Hide from active" : "Admin only"}</span>
