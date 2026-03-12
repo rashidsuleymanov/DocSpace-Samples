@@ -1,4 +1,6 @@
-﻿const navItems = [
+import DemoRoleSwitch from "./DemoRoleSwitch.jsx";
+
+const navItems = [
   { id: "dashboard", label: "Overview", icon: "overview" },
   { id: "records", label: "Documents", icon: "documents" },
   { id: "fill-sign", label: "Fill & Sign", icon: "fill" },
@@ -6,7 +8,7 @@
   { id: "settings", label: "Profile", icon: "profile" }
 ];
 
-export default function PatientHeader({ user, active, onNavigate, onLogout, badgeCounts }) {
+export default function PatientHeader({ user, active, onNavigate, onLogout, badgeCounts, roleSwitcher }) {
   return (
     <header className="patient-header">
       <div className="patient-brand">
@@ -38,6 +40,14 @@ export default function PatientHeader({ user, active, onNavigate, onLogout, badg
         })}
       </nav>
       <div className="patient-meta">
+        {roleSwitcher ? (
+          <DemoRoleSwitch
+            activeRole={roleSwitcher.activeRole}
+            onSelectPatient={roleSwitcher.onSelectPatient}
+            onSelectDoctor={roleSwitcher.onSelectDoctor}
+            disabledDoctor={roleSwitcher.disabledDoctor}
+          />
+        ) : null}
         <span className="status-pill silver">Silver status</span>
         <div className="avatar avatar-ring">{user?.initials || "PT"}</div>
         <button className="ghost ghost-dark" type="button" onClick={onLogout}>

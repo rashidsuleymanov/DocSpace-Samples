@@ -6,6 +6,9 @@ async function request(path, { method = "GET", body } = {}) {
     credentials: "include",
     body: body ? JSON.stringify(body) : undefined
   });
+
+  if (response.status === 204) return null;
+
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = data?.error || data?.message || `Request failed (${response.status})`;
@@ -14,15 +17,21 @@ async function request(path, { method = "GET", body } = {}) {
   return data;
 }
 
-export async function createFileShareLink({ fileId } = {}) {
-  const fid = String(fileId || "").trim();
-  if (!fid) {
-    throw new Error("fileId is required");
-  }
-  const data = await request("/api/patients/file-share-link", {
+export async function getDemoSession() {
+  return request("/api/demo/session");
+}
+
+export async function startDemo({ patientName, doctorName } = {}) {
+  return request("/api/demo/start", {
     method: "POST",
-    body: { fileId: fid }
+    body: {
+      patientName: patientName || "Demo Patient",
+      doctorName: doctorName || "Demo Doctor"
+    }
   });
-  return data.link || null;
+}
+
+export async function endDemo() {
+  return request("/api/demo/end", { method: "POST" });
 }
 

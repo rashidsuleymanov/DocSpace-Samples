@@ -9,7 +9,19 @@ import authRoutes from "./routes/auth.js";
 import patientRoutes from "./routes/patients.js";
 import doctorRoutes from "./routes/doctor.js";
 import debugRoutes from "./routes/debug.js";
+import demoRoutes from "./routes/demo.js";
 import { validateConfig } from "./config.js";
+import {
+  cleanupStoredDemoSessions,
+  flushDemoSessions,
+  getDemoSessionById,
+  getDemoSessionId,
+  hydrateDemoSessions,
+  listDemoSessions,
+  touchDemoSession,
+  startDemoJanitor
+} from "./demoSessionStore.js";
+import { cleanupDemoSession } from "./routes/demoCleanup.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,12 +30,25 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "35mb" }));
 
+app.use((req, _res, next) => {
+  const sid = getDemoSessionId(req);
+  const session = sid ? getDemoSessionById(sid) : null;
+  if (session) {
+    req.demoSession = session;
+    touchDemoSession(session);
+  } else {
+    req.demoSession = null;
+  }
+  next();
+});
+
 const configErrors = validateConfig({ requiresAuth: true });
 if (configErrors.length) {
   console.warn("[medical-portal] config warnings:");
   configErrors.forEach((message) => console.warn(`- ${message}`));
 }
 
+app.use("/api/demo", demoRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/patients", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
@@ -85,6 +110,13 @@ function isPortAvailable(portToCheck) {
 }
 
 async function start() {
+  await hydrateDemoSessions();
+  const recovered = listDemoSessions();
+  if (recovered.length) {
+    console.warn(`[medical-portal] Found ${recovered.length} stale demo session(s). Running startup cleanup.`);
+    await cleanupStoredDemoSessions({ onCleanup: cleanupDemoSession });
+  }
+
   if (hasExplicitPort && requestedPort == null) {
     console.error(`[medical-portal] Invalid PORT value: ${JSON.stringify(rawPort)}`);
     console.error("[medical-portal] Set PORT to an integer between 1 and 65535.");
@@ -117,6 +149,38 @@ async function start() {
   }
 
   const httpServer = http.createServer(app);
+  let shuttingDown = false;
+
+  const cleanupLiveDemoSessions = async (reason) => {
+    const active = listDemoSessions();
+    if (!active.length) {
+      await flushDemoSessions();
+      return;
+    }
+    console.warn(`[medical-portal] ${reason}: cleaning ${active.length} active demo session(s).`);
+    await cleanupStoredDemoSessions({ onCleanup: cleanupDemoSession });
+  };
+
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await cleanupLiveDemoSessions(signal);
+    } catch (error) {
+      console.warn("[medical-portal] shutdown demo cleanup failed", error?.message || error);
+    }
+    httpServer.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 5_000).unref?.();
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
 
   if (!isProd) {
     const { createServer } = await import("vite");
@@ -164,4 +228,9 @@ async function start() {
   });
 }
 
-start();
+start().catch((error) => {
+  console.error("[medical-portal] failed to start", error);
+  process.exit(1);
+});
+
+startDemoJanitor({ onExpire: cleanupDemoSession });

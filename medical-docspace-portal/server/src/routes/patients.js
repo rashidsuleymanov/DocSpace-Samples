@@ -39,6 +39,16 @@ import { resolveFillSignAssignments } from "../fillSignStatus.js";
 
 const router = Router();
 
+function getPatientAuth(req) {
+  return String(req?.demoSession?.patient?.token || req?.headers?.authorization || "").trim();
+}
+
+function asDoctorDisplayName(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Dr. Doctor";
+  return /^dr\.\s/i.test(raw) ? raw : `Dr. ${raw}`;
+}
+
 async function loadClientTemplates() {
   const explicitFolderId = String(config.clientTemplatesFolderId || "").trim();
   if (explicitFolderId) {
@@ -126,7 +136,7 @@ async function ensureTemplateInFormsRoom({ sourceFileId, sourceTitle } = {}) {
 
 router.post("/bootstrap", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -205,7 +215,7 @@ router.get("/room-summary", async (req, res) => {
     if (!roomId) {
       return res.status(400).json({ error: "roomId is required" });
     }
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -226,7 +236,7 @@ router.get("/folder-contents", async (req, res) => {
     if (!folderId) {
       return res.status(400).json({ error: "folderId is required" });
     }
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -246,7 +256,7 @@ router.get("/medical-records", async (req, res) => {
     if (!roomId) {
       return res.status(400).json({ error: "roomId is required" });
     }
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -260,18 +270,21 @@ router.get("/medical-records", async (req, res) => {
   }
 });
 
-router.get("/doctor", async (_req, res) => {
+router.get("/doctor", async (req, res) => {
   try {
-    const doctor = await getDoctorProfile();
+    const demoDoctor = req?.demoSession?.doctor?.user || null;
+    const doctor = demoDoctor || (await getDoctorProfile().catch(() => null));
     if (!doctor) {
       return res.status(404).json({ error: "Doctor not configured" });
     }
     return res.json({
       doctor: {
         id: doctor.id,
-        displayName: doctor.displayName || doctor.userName,
+        displayName: asDoctorDisplayName(
+          doctor.displayName || [doctor.firstName, doctor.lastName].filter(Boolean).join(" ") || doctor.userName
+        ),
         email: doctor.email,
-        title: doctor.title || "",
+        title: doctor.title || (demoDoctor ? "Demo doctor" : ""),
         avatar: doctor.avatar || ""
       }
     });
@@ -303,7 +316,8 @@ router.post("/appointments/ticket", async (req, res) => {
           id: file.id,
           title: file.title,
           url: file.webUrl || file.viewUrl || file.url || null,
-          shareToken: file.shareToken || null
+          shareToken: file.shareToken || null,
+          requestToken: file.requestToken || null
         }
       : null;
     recordAppointment({
@@ -324,7 +338,7 @@ router.post("/appointments/ticket", async (req, res) => {
 
 router.post("/contact-change-request", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -395,7 +409,7 @@ router.post("/contact-change-request", async (req, res) => {
 
 router.post("/contracts/save", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -480,7 +494,7 @@ router.post("/contracts/save", async (req, res) => {
 
 router.post("/insurance-update-request", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -551,7 +565,7 @@ router.post("/insurance-update-request", async (req, res) => {
 
 router.post("/sick-leave-request", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -625,7 +639,7 @@ async function handleImagingNote(req, res) {
     return res.status(403).json({
       error: "Imaging notes must be created by the doctor."
     });
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -704,7 +718,7 @@ router.post("/imaging/upload", async (req, res) => {
     return res.status(403).json({
       error: "Imaging files can only be uploaded by the doctor."
     });
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -812,7 +826,7 @@ router.post("/file-share-link", async (req, res) => {
     if (!fileId) {
       return res.status(400).json({ error: "fileId is required" });
     }
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -846,7 +860,7 @@ router.post("/fill-sign/complete", async (req, res) => {
 router.get("/fill-sign/contents", async (req, res) => {
   try {
     const tab = String(req.query.tab || "action").toLowerCase();
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -904,7 +918,7 @@ router.get("/fill-sign/contents", async (req, res) => {
 
 router.post("/fill-sign/cancel", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -969,7 +983,7 @@ router.post("/fill-sign/cancel", async (req, res) => {
 
 router.post("/fill-sign/decline", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -1034,7 +1048,7 @@ router.post("/fill-sign/decline", async (req, res) => {
 
 router.get("/fill-sign/client-templates", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -1066,7 +1080,7 @@ router.get("/fill-sign/client-templates", async (req, res) => {
 
 router.post("/fill-sign/request", async (req, res) => {
   try {
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -1174,7 +1188,7 @@ router.get("/room-news", async (req, res) => {
     if (!roomId) {
       return res.status(400).json({ error: "roomId is required" });
     }
-    const auth = req.headers.authorization || "";
+    const auth = getPatientAuth(req);
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }

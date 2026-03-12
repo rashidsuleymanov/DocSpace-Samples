@@ -10,6 +10,9 @@ function safeJsonParse(raw) {
 }
 
 export function getStorePath() {
+  if (process.env.DEMO_MODE === "true" && process.env.MEDICAL_PORTAL_STORE_PATH == null) {
+    return null;
+  }
   const raw = process.env.MEDICAL_PORTAL_STORE_PATH;
   const value = String(raw || "").trim();
   if (value.toLowerCase() === "off" || value.toLowerCase() === "false") return null;

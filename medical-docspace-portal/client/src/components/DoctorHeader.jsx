@@ -1,3 +1,5 @@
+import DemoRoleSwitch from "./DemoRoleSwitch.jsx";
+
 const navItems = [
   { id: "doctor-schedule", label: "Schedule", icon: "appointments" },
   { id: "doctor-patients", label: "Patients", icon: "documents" },
@@ -5,7 +7,7 @@ const navItems = [
   { id: "doctor-fill-sign", label: "Fill & Sign", icon: "fill" }
 ];
 
-export default function DoctorHeader({ doctor, active, onNavigate, onExit }) {
+export default function DoctorHeader({ doctor, active, onNavigate, onExit, roleSwitcher }) {
   const initials = (doctor?.displayName || "Doctor")
     .split(" ")
     .map((part) => part[0])
@@ -36,7 +38,14 @@ export default function DoctorHeader({ doctor, active, onNavigate, onExit }) {
         ))}
       </nav>
       <div className="patient-meta">
-        <span className="status-pill silver">Doctor</span>
+        {roleSwitcher ? (
+          <DemoRoleSwitch
+            activeRole={roleSwitcher.activeRole}
+            onSelectPatient={roleSwitcher.onSelectPatient}
+            onSelectDoctor={roleSwitcher.onSelectDoctor}
+            disabledDoctor={roleSwitcher.disabledDoctor}
+          />
+        ) : null}
         <div className="avatar avatar-ring">{initials || "DR"}</div>
         <button className="ghost ghost-dark" type="button" onClick={onExit}>
           Exit doctor mode

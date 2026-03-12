@@ -1,23 +1,12 @@
-﻿async function request(path, { method = "GET", body } = {}) {
-  let token = "";
-  try {
-    const raw = localStorage.getItem("medical.portal.session");
-    const parsed = raw ? JSON.parse(raw) : null;
-    token = parsed?.session?.user?.token || "";
-  } catch {
-    token = "";
-  }
-
+async function request(path, { method = "GET", body } = {}) {
   const headers = {
     "Content-Type": "application/json"
   };
-  if (token) {
-    headers.Authorization = token;
-  }
 
   const response = await fetch(path, {
     method,
     headers,
+    credentials: "include",
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await response.json().catch(() => ({}));
@@ -178,3 +167,4 @@ export async function createDoctorFileShareLink(fileId) {
   });
   return data.link || null;
 }
+

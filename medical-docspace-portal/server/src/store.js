@@ -260,3 +260,38 @@ export function setFillSignAssignmentState({ patientRoomId, assignmentId, state,
   return fillSignAssignments[idx];
 }
 
+export function purgeDemoData({ roomId, patientUserId, doctorUserId } = {}) {
+  const rid = String(roomId || "").trim();
+  const patientId = String(patientUserId || "").trim();
+  const doctorId = String(doctorUserId || "").trim();
+
+  if (rid) {
+    for (let i = appointments.length - 1; i >= 0; i -= 1) {
+      if (String(appointments[i]?.roomId || "") === rid) {
+        appointments.splice(i, 1);
+      }
+    }
+    for (let i = medicalRecords.length - 1; i >= 0; i -= 1) {
+      if (String(medicalRecords[i]?.roomId || "") === rid) {
+        medicalRecords.splice(i, 1);
+      }
+    }
+    for (let i = fillSignAssignments.length - 1; i >= 0; i -= 1) {
+      if (String(fillSignAssignments[i]?.patientRoomId || "") === rid) {
+        fillSignAssignments.splice(i, 1);
+      }
+    }
+
+    patientUserByRoomId.delete(rid);
+  }
+
+  if (patientId) {
+    patientRoomByUserId.delete(patientId);
+  }
+  if (doctorId) {
+    patientRoomByUserId.delete(doctorId);
+  }
+
+  scheduleSave();
+}
+

@@ -14,6 +14,7 @@ export default function PatientShell({
   active,
   onNavigate,
   onLogout,
+  roleSwitcher,
   badgeCounts,
   roomId,
   token,
@@ -24,10 +25,10 @@ export default function PatientShell({
 
   useEffect(() => {
     const loadCount = async () => {
-      if (!token) return;
       try {
-        const headers = { Authorization: token };
-        const response = await fetch("/api/patients/fill-sign/contents?tab=action", { headers });
+        const response = await fetch("/api/patients/fill-sign/contents?tab=action", {
+          credentials: "include"
+        });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data?.error || "Failed to load Fill & Sign count");
         setFillSignCount(countFiles(data?.contents || null));
@@ -53,6 +54,7 @@ export default function PatientShell({
         active={active}
         onNavigate={onNavigate}
         onLogout={onLogout}
+        roleSwitcher={roleSwitcher}
         badgeCounts={mergedBadges}
       />
       <main className="patient-main">

@@ -23,6 +23,12 @@ function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function toTimestamp(value) {
+  if (!value) return 0;
+  const ts = Date.parse(String(value));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 function matchesInstanceTitle({ title, patientName, templateBase }) {
   const t = normalize(title).replace(/[–—]/g, "-").replace(/\s+/g, " ");
   const p = normalize(patientName).replace(/[–—]/g, "-").replace(/\s+/g, " ");
@@ -63,7 +69,7 @@ async function resolveFormFolderId({ parentFolderId, templateTitle, cache }) {
   return resolved;
 }
 
-async function listInstances({ folderIds, patientName, templateTitle, fileInfoCache }) {
+async function listInstances({ folderIds, patientName, templateTitle, fileInfoCache, matchByPatient = true }) {
   const ids = Array.isArray(folderIds) ? folderIds.filter(Boolean) : [];
   if (!ids.length) return [];
   const base = stripExtension(templateTitle);
@@ -71,9 +77,9 @@ async function listInstances({ folderIds, patientName, templateTitle, fileInfoCa
   for (const folderId of ids) {
     const contents = await getFolderContents(folderId).catch(() => null);
     const files = (contents?.items || []).filter((item) => item.type === "file");
-    const filtered = files.filter((file) =>
-      matchesInstanceTitle({ title: file.title, patientName, templateBase: base })
-    );
+    const filtered = matchByPatient
+      ? files.filter((file) => matchesInstanceTitle({ title: file.title, patientName, templateBase: base }))
+      : files.filter((file) => normalize(file?.title || "").includes(normalize(base)));
     for (const file of filtered) {
       const fid = String(file.id || "");
       if (!fid) continue;
@@ -158,21 +164,54 @@ export async function resolveFillSignAssignments(assignments, { patientName } = 
       folderIds: inProcessFolderIds,
       patientName: safePatientName,
       templateTitle: templateBase,
-      fileInfoCache
+      fileInfoCache,
+      matchByPatient: true
     });
     const completeInstances = await listInstances({
       folderIds: completeFolderIds,
       patientName: safePatientName,
       templateTitle: templateBase,
-      fileInfoCache
+      fileInfoCache,
+      matchByPatient: true
     });
 
+    const hasStrictMatches = inProcessInstances.length > 0 || completeInstances.length > 0;
+    const fallbackMode = !hasStrictMatches;
+    const finalInProcessInstances = hasStrictMatches
+      ? inProcessInstances
+      : await listInstances({
+          folderIds: inProcessFolderIds,
+          patientName: safePatientName,
+          templateTitle: templateBase,
+          fileInfoCache,
+          matchByPatient: false
+        });
+    const finalCompleteInstances = hasStrictMatches
+      ? completeInstances
+      : await listInstances({
+          folderIds: completeFolderIds,
+          patientName: safePatientName,
+          templateTitle: templateBase,
+          fileInfoCache,
+          matchByPatient: false
+        });
+
+    // In fallback mode (title-only), avoid matching historical instances from older demo sessions.
+    const firstAssignmentTs = toTimestamp(sortedAssignments[0]?.createdAt);
+    const fallbackCutoffTs = firstAssignmentTs ? firstAssignmentTs - 2 * 60 * 1000 : 0;
+    const scopedInProcessInstances = fallbackMode
+      ? finalInProcessInstances.filter((item) => toTimestamp(item?.createdAt) >= fallbackCutoffTs)
+      : finalInProcessInstances;
+    const scopedCompleteInstances = fallbackMode
+      ? finalCompleteInstances.filter((item) => toTimestamp(item?.createdAt) >= fallbackCutoffTs)
+      : finalCompleteInstances;
+
     let completeIdx = 0;
-    const inProcessCompleted = inProcessInstances.filter((item) => {
+    const inProcessCompleted = scopedInProcessInstances.filter((item) => {
       if (normalize(item.formFillingStatus) === "complete") return true;
       return normalize(item.comment) === "submitted form";
     });
-    const inProcessActive = inProcessInstances.filter(
+    const inProcessActive = scopedInProcessInstances.filter(
       (item) => !inProcessCompleted.includes(item)
     );
     let inProcessCompletedIdx = 0;
@@ -181,8 +220,8 @@ export async function resolveFillSignAssignments(assignments, { patientName } = 
     for (const assignment of sortedAssignments) {
       const sentLink = assignment?.shareLink || null;
 
-      if (completeIdx < completeInstances.length) {
-        const instance = completeInstances[completeIdx++];
+      if (completeIdx < scopedCompleteInstances.length) {
+        const instance = scopedCompleteInstances[completeIdx++];
         const link = await ensurePublicViewLink(instance.id);
         results.push({
           ...assignment,

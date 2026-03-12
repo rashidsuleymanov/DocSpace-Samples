@@ -308,6 +308,67 @@ export async function createPatientRoom({ fullName, userId }) {
   });
 }
 
+export async function archiveRoom(roomId, auth) {
+  const rid = String(roomId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  // Doc: PUT /api/2.0/files/rooms/{id}/archive
+  return apiRequest(`/api/2.0/files/rooms/${encodeURIComponent(rid)}/archive`, {
+    method: "PUT",
+    body: {},
+    auth
+  });
+}
+
+export async function deleteRoom(roomId, auth) {
+  const rid = String(roomId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  // Some DocSpace setups require the room to be archived before permanent deletion.
+  await archiveRoom(rid, auth).catch(() => null);
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      // Doc: DELETE /api/2.0/files/rooms/{id}
+      return await apiRequest(`/api/2.0/files/rooms/${encodeURIComponent(rid)}`, {
+        method: "DELETE",
+        body: {},
+        auth
+      });
+    } catch (error) {
+      if (error?.status === 404) {
+        return { ok: true, deleted: false, reason: "not_found" };
+      }
+      lastError = error;
+      if (error?.status === 400 && attempt < 2) {
+        // The room can be in transient state right after archive; retry shortly.
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error("Failed to delete room");
+}
+
+export async function terminateUsers(userIds, auth) {
+  const ids = Array.isArray(userIds) ? userIds.map((v) => String(v || "").trim()).filter(Boolean) : [];
+  if (!ids.length) throw new Error("userIds are required");
+  // Doc: PUT /api/2.0/people/status/Terminated
+  return apiRequest("/api/2.0/people/status/Terminated", {
+    method: "PUT",
+    auth,
+    body: { userIds: ids }
+  });
+}
+
+export async function deleteUser(userId, auth) {
+  const id = String(userId || "").trim();
+  if (!id) throw new Error("userId is required");
+  // Doc: DELETE /api/2.0/people/{id}
+  return apiRequest(`/api/2.0/people/${encodeURIComponent(id)}`, { method: "DELETE", auth });
+}
+
 export async function createMedicalRoom() {
   // 1 = Form filling room (FillingFormsRoom) per DocSpace API docs.
   return apiRequest("/api/2.0/files/rooms", {
@@ -702,7 +763,7 @@ export async function createRoomFileFromTemplate({ roomId, folderTitle, template
   };
 }
 
-async function createFileShareLink(fileId, access = "ReadWrite") {
+export async function createFileShareLink(fileId, access = "ReadWrite") {
   try {
     const link = await apiRequest(`/api/2.0/files/file/${fileId}/link`, {
       method: "PUT",
@@ -950,16 +1011,19 @@ export async function createAppointmentTicket({ roomId, appointment }) {
   const info = await apiRequest(`/api/2.0/files/file/${createdFileId}`);
   let webUrl = info?.webUrl || info?.viewUrl || null;
   let shareToken = null;
+  let requestToken = null;
   try {
     // Prefer the classic /link endpoint (works well with DocSpace SDK `requestToken` in our sample UIs).
     const linkInfo = await createFileShareLink(createdFileId, "ReadWrite");
     webUrl = linkInfo?.shareLink || webUrl;
-    shareToken = linkInfo?.shareToken || extractShareToken(webUrl);
+    requestToken = linkInfo?.requestToken || null;
+    shareToken = linkInfo?.requestToken || linkInfo?.shareToken || extractShareToken(webUrl);
   } catch {
     try {
       // Fallback: external link via /links (some portals enforce it).
       const linkInfo = await setFileExternalLink(createdFileId, "", { access: "ReadWrite" });
       webUrl = linkInfo?.shareLink || webUrl;
+      requestToken = linkInfo?.requestToken || null;
       shareToken = linkInfo?.requestToken || linkInfo?.shareToken || extractShareToken(webUrl);
     } catch {
       shareToken = extractShareToken(webUrl);
@@ -969,7 +1033,8 @@ export async function createAppointmentTicket({ roomId, appointment }) {
     id: createdFileId,
     title: info?.title || createdTitle || destTitle,
     webUrl,
-    shareToken
+    shareToken,
+    requestToken
   };
 }
 

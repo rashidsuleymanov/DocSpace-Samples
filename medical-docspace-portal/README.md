@@ -43,8 +43,19 @@ DOCSPACE_TEMPLATE_WELCOME_ID=YOUR_WELCOME_TEMPLATE_ID
 Notes:
 
 - **Admin token** is stored **server‑side only** and never sent to the browser.
-- **User tokens** are created during login and stored **in the browser** (localStorage).
+- In **demo mode**, the portal uses a **server-side cookie session** and does not store DocSpace tokens in the browser.
 - `VITE_DOCSPACE_URL` is only used to build the **Open in DocSpace** link in UI.
+
+### Demo mode (recommended for buyer demos)
+
+Set:
+
+```
+DEMO_MODE=true
+```
+
+Then the UI starts with a **Start demo** screen that provisions an anonymous patient + doctor and a fresh patient room.
+Sessions are cleaned up automatically by a TTL/idle janitor (configurable via `DEMO_SESSION_*` env vars).
 
 ## How the flow works
 

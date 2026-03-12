@@ -14,7 +14,7 @@ function withFillAction(url) {
   }
 }
 
-export default function FillSign({ session, onLogout, onNavigate, initialTab }) {
+export default function FillSign({ session, onLogout, onNavigate, initialTab, roleSwitcher }) {
   const [tab, setTab] = useState("action");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,18 +43,9 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
     try {
       setLoading(true);
       setError("");
-
-      const token = session?.user?.token || "";
-      if (!token) {
-        setActionItems([]);
-        setCompletedItems([]);
-        return { action: [], completed: [] };
-      }
-
-      const headers = { Authorization: token };
       const [actionRes, completedRes] = await Promise.all([
-        fetch("/api/patients/fill-sign/contents?tab=action", { headers }),
-        fetch("/api/patients/fill-sign/contents?tab=completed", { headers })
+        fetch("/api/patients/fill-sign/contents?tab=action", { credentials: "include" }),
+        fetch("/api/patients/fill-sign/contents?tab=completed", { credentials: "include" })
       ]);
 
       const actionData = await actionRes.json().catch(() => ({}));
@@ -98,7 +89,7 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
     loadItems();
     loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.token]);
+  }, [session?.user?.docspaceId]);
 
   const items = useMemo(() => {
     if (tab === "action") return actionItems;
@@ -121,17 +112,15 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
     setError("");
     setInfo("");
     try {
-      const token = session?.user?.token || "";
-      if (!token) throw new Error("Authorization token is missing");
       const roomId = String(session?.room?.id || "").trim();
       if (!roomId) throw new Error("Patient room is missing");
 
       const res = await fetch("/api/patients/contracts/save", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ roomId, instanceFileId })
       });
       const data = await res.json().catch(() => ({}));
@@ -155,8 +144,6 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
 
   const cancelStatement = async (item) => {
     try {
-      const token = session?.user?.token || "";
-      if (!token) return;
       const assignmentId = String(item?.assignmentId || "").trim();
       if (!assignmentId) return;
       setError("");
@@ -164,9 +151,9 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
       const res = await fetch("/api/patients/fill-sign/cancel", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ assignmentId })
       });
       const data = await res.json().catch(() => ({}));
@@ -180,8 +167,6 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
 
   const declineDoctorRequest = async (item) => {
     try {
-      const token = session?.user?.token || "";
-      if (!token) return;
       const assignmentId = String(item?.assignmentId || "").trim();
       if (!assignmentId) return;
       setError("");
@@ -189,9 +174,9 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
       const res = await fetch("/api/patients/fill-sign/decline", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ assignmentId })
       });
       const data = await res.json().catch(() => ({}));
@@ -234,13 +219,7 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
     try {
       setTemplatesLoading(true);
       setTemplatesError("");
-      const token = session?.user?.token || "";
-      if (!token) {
-        setTemplates([]);
-        return;
-      }
-      const headers = { Authorization: token };
-      const res = await fetch("/api/patients/fill-sign/client-templates", { headers });
+      const res = await fetch("/api/patients/fill-sign/client-templates", { credentials: "include" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data?.error || "Failed to load client templates");
@@ -256,16 +235,14 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
 
   const requestTemplate = async (templateFileId) => {
     try {
-      const token = session?.user?.token || "";
-      if (!token) return;
       setRequestingTemplateId(String(templateFileId || ""));
       setTemplatesError("");
       const res = await fetch("/api/patients/fill-sign/request", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ templateFileId })
       });
       const data = await res.json().catch(() => ({}));
@@ -289,6 +266,7 @@ export default function FillSign({ session, onLogout, onNavigate, initialTab }) 
       badgeCounts={badgeCounts}
       onLogout={onLogout}
       onNavigate={onNavigate}
+      roleSwitcher={roleSwitcher}
       active="fill-sign"
       roomId={session?.room?.id}
       token={session?.user?.token}

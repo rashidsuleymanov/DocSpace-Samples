@@ -28,7 +28,7 @@ function loadDocSpaceSdk(src) {
   return sdkLoaderPromise;
 }
 
-export default function Settings({ session, onLogout, onNavigate, onSave }) {
+export default function Settings({ session, onLogout, onNavigate, onSave, roleSwitcher }) {
   const initialRef = useRef({
     fullName: session?.user?.fullName || "",
     email: session?.user?.email || "",
@@ -285,8 +285,6 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
     setRequestMessage("");
     setRequestMessageType("");
     try {
-      const token = String(session?.user?.token || "").trim();
-      if (!token) throw new Error("Authorization token is missing");
       const roomId = String(session?.room?.id || "").trim();
       if (!roomId) throw new Error("Patient room is missing");
 
@@ -304,9 +302,9 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
       const response = await fetch("/api/patients/contact-change-request", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ roomId, payload })
       });
 
@@ -340,6 +338,7 @@ export default function Settings({ session, onLogout, onNavigate, onSave }) {
       active="settings"
       onNavigate={onNavigate}
       onLogout={onLogout}
+      roleSwitcher={roleSwitcher}
       roomId={session?.room?.id}
       token={session?.user?.token}
     >

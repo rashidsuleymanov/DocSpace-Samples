@@ -27,7 +27,7 @@ function saveSeenNews(session, set) {
   } catch {}
 }
 
-export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder, doctorAccess, onGoDoctorPortal }) {
+export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder, roleSwitcher }) {
   const [showBanner, setShowBanner] = useState(true);
   const [news, setNews] = useState([]);
   const [newsError, setNewsError] = useState("");
@@ -44,9 +44,8 @@ export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder,
     const loadNews = async () => {
       if (!session?.room?.id || session.room.id === "DOCSPACE") return;
       try {
-        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
         const response = await fetch(`/api/patients/room-news?roomId=${session.room.id}`, {
-          headers
+          credentials: "include"
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -65,9 +64,8 @@ export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder,
     const loadFolders = async () => {
       if (!session?.room?.id || session.room.id === "DOCSPACE") return;
       try {
-        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
         const response = await fetch(`/api/patients/room-summary?roomId=${session.room.id}`, {
-          headers
+          credentials: "include"
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -128,6 +126,7 @@ export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder,
       active="dashboard"
       onNavigate={onNavigate}
       onLogout={onLogout}
+      roleSwitcher={roleSwitcher}
       roomId={session?.room?.id}
       token={session?.user?.token}
       banner={
@@ -189,11 +188,6 @@ export default function Dashboard({ session, onLogout, onNavigate, onOpenFolder,
           <button className="ghost ghost-dark" type="button" onClick={() => onNavigate("records")}>
             Open documents
           </button>
-          {doctorAccess && (
-            <button className="ghost ghost-dark" type="button" onClick={onGoDoctorPortal}>
-              Doctor portal
-            </button>
-          )}
         </div>
       </section>
 

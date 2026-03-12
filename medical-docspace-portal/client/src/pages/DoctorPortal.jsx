@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 
-import DoctorSidebar from "../components/DoctorSidebar.jsx";
+import DoctorHeader from "../components/DoctorHeader.jsx";
 import DoctorTopbar from "../components/DoctorTopbar.jsx";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import FolderTile from "../components/FolderTile.jsx";
@@ -61,8 +61,14 @@ function normalizeTitle(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function getLocalDateInputValue() {
+  const now = new Date();
+  const tzOffsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - tzOffsetMs).toISOString().slice(0, 10);
+}
 
-export default function DoctorPortal({ doctor, onExit }) {
+
+export default function DoctorPortal({ doctor, onExit, roleSwitcher }) {
   const [view, setView] = useState("doctor-schedule");
   const [rooms, setRooms] = useState([]);
   const [patientQuery, setPatientQuery] = useState("");
@@ -89,7 +95,7 @@ export default function DoctorPortal({ doctor, onExit }) {
   const [inboxError, setInboxError] = useState("");
   const [inboxCounts, setInboxCounts] = useState({ action: 0, completed: 0 });
   const [fillPatientQuery, setFillPatientQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFilter, setDateFilter] = useState(getLocalDateInputValue());
   const [appointments, setAppointments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -126,7 +132,7 @@ export default function DoctorPortal({ doctor, onExit }) {
     appointmentId: "",
     type: "Visit note",
     title: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: getLocalDateInputValue(),
     summary: ""
   });
   const [docCreateForm, setDocCreateForm] = useState({ title: "" });
@@ -376,9 +382,10 @@ export default function DoctorPortal({ doctor, onExit }) {
   useEffect(() => {
     let host = document.getElementById(editorFrameId);
     if (!host) {
-      host = document.createElement("div");
+      host = document.createElement("iframe");
       host.id = editorFrameId;
       host.className = "hidden-editor";
+      host.setAttribute("title", "Doctor editor");
       document.body.appendChild(host);
     }
     return () => {
@@ -389,15 +396,17 @@ export default function DoctorPortal({ doctor, onExit }) {
   }, []);
 
   const destroyEditor = () => {
-    if (editorRef.current?.destroy) {
+    if (editorRef.current?.destroyFrame) {
+      editorRef.current.destroyFrame();
+    } else if (editorRef.current?.destroy) {
       editorRef.current.destroy();
     }
     editorRef.current = null;
   };
 
   const runHiddenEditor = async (file, payload) => {
-    const requestToken = file?.requestToken || file?.shareToken || "";
-    if (!file?.id || !requestToken) return;
+    const token = doctor?.token || file?.requestToken || file?.shareToken || "";
+    if (!file?.id || !token) return;
     if (!docspaceUrl) {
       setMessage("VITE_DOCSPACE_URL is not set.");
       return;
@@ -420,12 +429,13 @@ export default function DoctorPortal({ doctor, onExit }) {
       try {
         await loadDocSpaceSdk(docspaceUrl);
         const instance = window.DocSpace?.SDK?.initEditor({
-          src: docspaceUrl,
-          id: String(file.id),
-          frameId: editorFrameId,
-          requestToken,
-          width: "1px",
-          height: "1px",
+        src: docspaceUrl,
+        id: String(file.id),
+        frameId: editorFrameId,
+        requestToken: token,
+        mode: "edit",
+        width: "1px",
+        height: "1px",
           events: {
             onAppReady: () => {
               const frameInstance = window.DocSpace?.SDK?.frames?.[editorFrameId];
@@ -452,188 +462,83 @@ export default function DoctorPortal({ doctor, onExit }) {
                       var data = Asc.scope.payload || {};
                       var doc = Api.GetDocument();
 
-                      if (doc.RemoveAllElements) doc.RemoveAllElements();
-
-                      var textPr = doc.GetDefaultTextPr();
-                      textPr.SetFontFamily("Calibri");
-                      textPr.SetFontSize(26);
-                      textPr.SetLanguage("en-US");
-
-                      var normalStyle = doc.GetDefaultStyle("paragraph");
-                      var normalParaPr = normalStyle.GetParaPr();
-                      normalParaPr.SetSpacingLine(240, "auto");
-                      normalParaPr.SetSpacingAfter(120);
-                      normalParaPr.SetJc("left");
-
-                      var normalTextPr = normalStyle.GetTextPr();
-                      normalTextPr.SetColor(0x26, 0x26, 0x26, false);
-
-                      var titleStyle = doc.CreateStyle("DoctorDocTitle", "paragraph");
-                      var titleParaPr = titleStyle.GetParaPr();
-                      titleParaPr.SetJc("left");
-                      titleParaPr.SetSpacingAfter(180);
-                      var titleTextPr = titleStyle.GetTextPr();
-                      titleTextPr.SetFontFamily("Calibri Light");
-                      titleTextPr.SetFontSize(54);
-                      titleTextPr.SetColor(0x22, 0x33, 0x55, false);
-
-                      var subtitleStyle = doc.CreateStyle("DoctorDocSubtitle", "paragraph");
-                      var subParaPr = subtitleStyle.GetParaPr();
-                      subParaPr.SetJc("left");
-                      subParaPr.SetSpacingAfter(160);
-                      var subTextPr = subtitleStyle.GetTextPr();
-                      subTextPr.SetFontFamily("Calibri");
-                      subTextPr.SetFontSize(24);
-                      subTextPr.SetColor(0x5f, 0x6b, 0x7a, false);
-
-                      var sectionStyle = doc.CreateStyle("DoctorDocSection", "paragraph");
-                      var sectionParaPr = sectionStyle.GetParaPr();
-                      sectionParaPr.SetJc("left");
-                      sectionParaPr.SetSpacingBefore(160);
-                      sectionParaPr.SetSpacingAfter(120);
-                      var sectionTextPr = sectionStyle.GetTextPr();
-                      sectionTextPr.SetFontFamily("Calibri");
-                      sectionTextPr.SetFontSize(28);
-                      sectionTextPr.SetBold(true);
-                      sectionTextPr.SetColor(0x22, 0x33, 0x55, false);
-
-                      var fieldStyle = doc.CreateStyle("DoctorDocField", "paragraph");
-                      var fieldParaPr = fieldStyle.GetParaPr();
-                      fieldParaPr.SetJc("left");
-                      fieldParaPr.SetIndLeft(480);
-                      fieldParaPr.SetIndRight(480);
-                      fieldParaPr.SetSpacingAfter(110);
-                      var fieldTextPr = fieldStyle.GetTextPr();
-                      fieldTextPr.SetFontFamily("Calibri");
-                      fieldTextPr.SetFontSize(26);
-                      fieldTextPr.SetColor(0x26, 0x26, 0x26, false);
-
                       function safeText(v) {
                         return (v && String(v).trim()) ? String(v) : "-";
                       }
 
                       function pushPara(p) {
-                        if (doc.Push) doc.Push(p);
-                        else doc.InsertContent([p]);
-                      }
-
-                      function addTitle(text, subtitle, meta) {
-                        var p = Api.CreateParagraph();
-                        p.SetStyle(titleStyle);
-                        p.AddText(text);
-                        pushPara(p);
-
-                        if (subtitle) {
-                          var sp = Api.CreateParagraph();
-                          sp.SetStyle(subtitleStyle);
-                          sp.AddText(subtitle);
-                          pushPara(sp);
+                        if (doc.Push) {
+                          doc.Push(p);
+                          return;
                         }
-
-                        if (meta) {
-                          var mp = Api.CreateParagraph();
-                          mp.SetStyle(subtitleStyle);
-                          mp.SetSpacingAfter(200);
-                          mp.AddText(meta);
-                          pushPara(mp);
+                        if (doc.InsertContent) {
+                          doc.InsertContent([p], true);
                         }
                       }
 
-                      function addSection(text) {
+                      function addLine(text, spacingAfter) {
                         var p = Api.CreateParagraph();
-                        p.SetStyle(sectionStyle);
-                        p.AddText(text);
-                        pushPara(p);
-                      }
-
-                      function addField(label, value) {
-                        var p = Api.CreateParagraph();
-                        p.SetStyle(fieldStyle);
-                        var r1 = p.AddText(label + ": ");
-                        r1.SetBold(true);
-                        r1.SetColor(0x29, 0x33, 0x4F, false);
-                        p.AddText(safeText(value));
-                        pushPara(p);
-                      }
-
-                      function addBody(text) {
-                        var p = Api.CreateParagraph();
-                        p.SetStyle(fieldStyle);
-                        p.SetIndLeft(0);
-                        p.SetIndRight(0);
-                        p.SetSpacingAfter(160);
+                        if (p.SetSpacingAfter) p.SetSpacingAfter(spacingAfter || 80);
                         p.AddText(safeText(text));
                         pushPara(p);
                       }
 
-	                      if (data.type === "prescription") {
-	                        addTitle(
-	                          "Prescription",
-                          data.patient ? "Issued for " + data.patient : "",
-                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
-                        );
-                        addSection("Patient Details");
-                        addField("Patient", data.patient);
-                        addField("Doctor", data.doctor);
-                        addField("Date", data.date);
-                        addSection("Medication");
-                        addField("Name", data.medication);
-                        addField("Dosage", data.dosage);
-	                        addSection("Instructions");
-	                        addBody(data.instructions);
-	                      } else if (data.type === "medical-record") {
-	                        addTitle(
-	                          "Medical Record",
-                          data.patient ? "Visit summary for " + data.patient : "",
-                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
-                        );
-                        addSection("Visit Details");
-                        addField("Patient", data.patient);
-                        addField("Doctor", data.doctor);
-                        addField("Appointment", data.appointment);
-	                        addField("Record type", data.recordType);
-	                        addSection("Summary");
-	                        addBody(data.summary);
-	                      } else if (data.type === "sick-leave") {
-	                        addTitle(
-	                          "Sick Leave Certificate",
-	                          data.patient ? "Issued for " + data.patient : "",
-	                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
-	                        );
-	                        addSection("Certificate Details");
-	                        addField("Patient", data.patient);
-	                        addField("Doctor", data.doctor);
-	                        addField("Issue date", data.date);
-	                        addField("Start date", data.startDate);
-	                        addField("End date", data.endDate);
-	                        addField("Diagnosis", data.diagnosis);
-	                        if (data.note) {
-	                          addSection("Notes");
-	                          addBody(data.note);
-	                        }
-	                      } else if (data.type === "imaging-report") {
-	                        addTitle(
-	                          "Imaging Report",
-	                          data.patient ? "Report for " + data.patient : "",
-	                          data.date ? data.date + " · " + safeText(data.doctor) : safeText(data.doctor)
-	                        );
-	                        addSection("Study");
-	                        addField("Patient", data.patient);
-	                        addField("Doctor", data.doctor);
-	                        addField("Report date", data.date);
-	                        addField("Modality", data.modality);
-	                        addField("Study date", data.studyDate);
-	                        addSection("Findings");
-	                        addBody(data.findings);
-	                        addSection("Impression");
-	                        addBody(data.impression);
-	                        if (data.attachments && data.attachments.length) {
-	                          addSection("Attachments");
-	                          for (var i = 0; i < data.attachments.length; i++) {
-	                            addField("File " + (i + 1), data.attachments[i]);
-	                          }
-	                        }
-	                      }
+                      function addBlank() {
+                        addLine(" ", 40);
+                      }
+
+                      if (doc.RemoveAllElements) doc.RemoveAllElements();
+
+                      if (data.type === "prescription") {
+                        addLine("Prescription", 120);
+                        addLine("Patient: " + safeText(data.patient));
+                        addLine("Doctor: " + safeText(data.doctor));
+                        addLine("Date: " + safeText(data.date));
+                        addBlank();
+                        addLine("Medication: " + safeText(data.medication));
+                        addLine("Dosage: " + safeText(data.dosage));
+                        addLine("Instructions: " + safeText(data.instructions));
+                      } else if (data.type === "medical-record") {
+                        addLine("Medical Record", 120);
+                        addLine("Patient: " + safeText(data.patient));
+                        addLine("Doctor: " + safeText(data.doctor));
+                        addLine("Appointment: " + safeText(data.appointment));
+                        addLine("Record type: " + safeText(data.recordType));
+                        addBlank();
+                        addLine("Summary: " + safeText(data.summary));
+                      } else if (data.type === "sick-leave") {
+                        addLine("Sick Leave Certificate", 120);
+                        addLine("Patient: " + safeText(data.patient));
+                        addLine("Doctor: " + safeText(data.doctor));
+                        addLine("Issue date: " + safeText(data.date));
+                        addLine("Start date: " + safeText(data.startDate));
+                        addLine("End date: " + safeText(data.endDate));
+                        addLine("Diagnosis: " + safeText(data.diagnosis));
+                        if (data.note) {
+                          addBlank();
+                          addLine("Note: " + safeText(data.note));
+                        }
+                      } else if (data.type === "imaging-report") {
+                        addLine("Imaging Report", 120);
+                        addLine("Patient: " + safeText(data.patient));
+                        addLine("Doctor: " + safeText(data.doctor));
+                        addLine("Report date: " + safeText(data.date));
+                        addLine("Modality: " + safeText(data.modality));
+                        addLine("Study date: " + safeText(data.studyDate));
+                        addBlank();
+                        addLine("Findings: " + safeText(data.findings));
+                        addBlank();
+                        addLine("Impression: " + safeText(data.impression));
+                        if (data.attachments && data.attachments.length) {
+                          addBlank();
+                          addLine("Attachments:", 80);
+                          for (var i = 0; i < data.attachments.length; i++) {
+                            addLine("- " + safeText(data.attachments[i]), 60);
+                          }
+                        }
+                      } else {
+                        addLine("Clinical document", 120);
+                      }
 
                       Api.Save();
                     } catch (e) {
@@ -1133,18 +1038,18 @@ export default function DoctorPortal({ doctor, onExit }) {
   const topbar = getTopbarProps({ view, selectedRoom, dateFilter, onDateFilter: setDateFilter });
 
   return (
-    <div className="dashboard-layout doctor-layout">
-      <DoctorSidebar
+    <div className="patient-shell doctor-shell">
+      <DoctorHeader
         doctor={doctor}
         active={view}
-        hasPatient={Boolean(selectedRoom)}
         onNavigate={(next) => {
           if (next === "doctor-patient" && !selectedRoom) return;
           setView(next);
         }}
         onExit={onExit}
+        roleSwitcher={roleSwitcher}
       />
-      <main>
+      <main className="patient-main doctor-main">
         <DoctorTopbar {...topbar} />
 
         {view === "doctor-schedule" && (
@@ -1206,9 +1111,10 @@ export default function DoctorPortal({ doctor, onExit }) {
                     <h4 className="record-title">{room.patientName}</h4>
                     {room.lastVisit && <span className="doctor-last-visit">{room.lastVisit}</span>}
                   </div>
+                  <p className="muted doctor-patient-subtitle">Current demo patient</p>
                   <div className="record-actions">
                     <button className="primary" type="button" onClick={() => openPatient(room.id)}>
-                      Open patient
+                      Open chart
                     </button>
                   </div>
                 </article>

@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import {
   copyFileToFolder,
+  createFileShareLink,
   createFolderDocument,
   createRoomDocument,
   ensureFolderByTitleWithin,
@@ -60,6 +61,22 @@ function patientNameFromRoom(title) {
   return isPatientRoom(value) ? value.slice(0, -patientRoomSuffix.length) : value;
 }
 
+function patientNameFromSession(req) {
+  const user = req?.demoSession?.patient?.user || null;
+  const fullName = String(
+    user?.displayName ||
+      user?.fullName ||
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ")
+  ).trim();
+  return fullName || "";
+}
+
+function asDoctorDisplayName(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Dr. Doctor";
+  return /^dr\.\s/i.test(raw) ? raw : `Dr. ${raw}`;
+}
+
 function normalizeFolderTitle(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -80,7 +97,7 @@ const allowedFolderTitles = new Map(
 
 router.use(async (req, res, next) => {
   try {
-    const auth = String(req.headers.authorization || "").trim();
+    const auth = String(req?.demoSession?.doctor?.token || req.headers.authorization || "").trim();
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
@@ -91,9 +108,9 @@ router.use(async (req, res, next) => {
       return res.status(401).json({ error: "Unable to resolve doctor from token" });
     }
 
-    const allowed = Array.isArray(config.doctorEmails) ? config.doctorEmails : [];
-    if (allowed.length && !allowed.includes(email)) {
-      return res.status(403).json({ error: "Forbidden (not a doctor account)" });
+    const expectedDoctorId = String(req?.demoSession?.doctor?.userId || "").trim();
+    if (expectedDoctorId && String(user?.id || "") !== expectedDoctorId) {
+      return res.status(401).json({ error: "Doctor session mismatch" });
     }
 
     req.doctorUser = user;
@@ -107,21 +124,48 @@ router.use(async (req, res, next) => {
   }
 });
 
+function getAllowedPatientRoomId(req) {
+  return String(req?.demoSession?.patient?.roomId || "").trim();
+}
+
+function getAllowedPatientRoom(req) {
+  const room = req?.demoSession?.patient?.room || null;
+  if (!room?.id) return null;
+  return {
+    id: String(room.id),
+    title: String(room.title || "").trim(),
+    webUrl: room.webUrl || room.shortWebUrl || null
+  };
+}
+
+function requirePatientRoomAccess(req, res) {
+  const allowedRoomId = getAllowedPatientRoomId(req);
+  const requested = String(req?.params?.roomId || "").trim();
+  if (!allowedRoomId) {
+    res.status(400).json({ error: "Demo patient room is missing" });
+    return null;
+  }
+  if (requested && requested !== allowedRoomId) {
+    res.status(403).json({ error: "Forbidden (room out of demo scope)" });
+    return null;
+  }
+  return allowedRoomId;
+}
+
 router.get("/session", async (req, res) => {
   try {
     const doctor = req.doctorUser || (await getDoctorProfile().catch(() => null));
     if (!doctor?.id) {
       return res.status(401).json({ error: "Doctor session is missing" });
     }
-    const token = normalizeAuthHeader(req.doctorAuth || "");
     return res.json({
       doctor: {
         id: doctor.id,
-        displayName: doctor.displayName || doctor.userName,
+        displayName: asDoctorDisplayName(doctor.displayName || doctor.userName),
         email: doctor.email,
-        title: doctor.title || "",
+        title: doctor.title || "Demo doctor",
         avatar: doctor.avatar || "",
-        token: token || null
+        token: req?.demoSession?.doctor?.token ? String(req.demoSession.doctor.token) : null
       }
     });
   } catch (error) {
@@ -134,7 +178,14 @@ router.get("/session", async (req, res) => {
 
 router.get("/rooms", async (_req, res) => {
   try {
-    const rooms = await listRooms();
+    const allowedRoomId = getAllowedPatientRoomId(_req);
+    if (!allowedRoomId) return res.json({ rooms: [] });
+
+    const sessionRoom = getAllowedPatientRoom(_req);
+    const room =
+      (sessionRoom?.id === allowedRoomId ? sessionRoom : null) ||
+      (await getRoomInfo(allowedRoomId, _req.doctorAuth).catch(() => null)) ||
+      (await getRoomInfo(allowedRoomId).catch(() => null));
     const lastByRoomId = new Map();
     for (const appt of listAppointments()) {
       const roomId = String(appt.roomId || "");
@@ -145,16 +196,17 @@ router.get("/rooms", async (_req, res) => {
         lastByRoomId.set(roomId, { key, date: appt.date || "", time: appt.time || "" });
       }
     }
-    const patientRooms = (rooms || [])
-      .filter((room) => isPatientRoom(room.title))
-      .map((room) => ({
-        id: room.id,
-        title: room.title,
-        patientName: patientNameFromRoom(room.title),
-        url: room.webUrl || room.shortWebUrl || null,
-        lastVisit: lastByRoomId.get(String(room.id))?.date || null
-      }))
-      .sort((a, b) => a.patientName.localeCompare(b.patientName));
+    const patientRooms = room?.id
+      ? [
+          {
+            id: room.id,
+            title: room.title,
+            patientName: patientNameFromSession(_req) || patientNameFromRoom(room.title) || "Patient",
+            url: room.webUrl || room.shortWebUrl || null,
+            lastVisit: lastByRoomId.get(String(room.id))?.date || null
+          }
+        ]
+      : [];
     return res.json({ rooms: patientRooms });
   } catch (error) {
     return res.status(error.status || 500).json({
@@ -167,6 +219,8 @@ router.get("/rooms", async (_req, res) => {
 router.get("/rooms/:roomId/folder-contents", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const title = String(req.query.title || "").trim();
     if (!title) {
       return res.status(400).json({ error: "title is required" });
@@ -198,6 +252,8 @@ router.get("/rooms/:roomId/folder-contents", async (req, res) => {
 router.get("/rooms/:roomId/summary", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const summary = await getRoomSummary(roomId);
     return res.json({ summary });
   } catch (error) {
@@ -211,6 +267,8 @@ router.get("/rooms/:roomId/summary", async (req, res) => {
 router.get("/rooms/:roomId/fill-sign/contents", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const tab = String(req.query.tab || "action").toLowerCase();
     const assignments = listFillSignAssignmentsForRoom(roomId).filter(
       (item) => String(item?.state || "active") === "active"
@@ -344,6 +402,8 @@ router.get("/fill-sign/incoming", async (req, res) => {
 router.post("/rooms/:roomId/documents", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const rawFolderTitle = String(req.body?.folderTitle || "").trim();
     const title = String(req.body?.title || "").trim();
     if (!rawFolderTitle) {
@@ -380,6 +440,8 @@ router.post("/rooms/:roomId/documents", async (req, res) => {
 router.post("/rooms/:roomId/lab-result/copy", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const { fileId, title } = req.body || {};
     if (!fileId) {
       return res.status(400).json({ error: "fileId is required" });
@@ -418,6 +480,8 @@ router.post("/rooms/:roomId/lab-result/copy", async (req, res) => {
 router.post("/rooms/:roomId/lab-result", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const { title, description } = req.body || {};
     const safeTitle = String(title || "Lab result").trim();
     const docTitle = `${safeTitle}.docx`;
@@ -466,6 +530,8 @@ router.get("/folders/:folderId/contents", async (req, res) => {
 router.post("/rooms/:roomId/imaging/package", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     if (!roomId) {
       return res.status(400).json({ error: "roomId is required" });
     }
@@ -557,7 +623,7 @@ router.post("/file-share-link", async (req, res) => {
     if (!fileId) {
       return res.status(400).json({ error: "fileId is required" });
     }
-    const link = await setFileExternalLink(String(fileId), "");
+    const link = await createFileShareLink(String(fileId), "ReadWrite");
     return res.json({ link });
   } catch (error) {
     return res.status(error.status || 500).json({
@@ -570,6 +636,8 @@ router.post("/file-share-link", async (req, res) => {
 router.post("/rooms/:roomId/imaging/upload", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const file = req.body?.file && typeof req.body.file === "object" ? req.body.file : null;
     const fileName = String(file?.fileName || "").trim();
     const base64 = String(file?.base64 || "").trim();
@@ -626,6 +694,8 @@ router.post("/rooms/:roomId/imaging/upload", async (req, res) => {
 router.post("/rooms/:roomId/prescription", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const { medication, dosage, instructions } = req.body || {};
     const med = String(medication || "Prescription").trim();
     const date = new Date().toISOString().slice(0, 10);
@@ -658,11 +728,14 @@ router.post("/rooms/:roomId/prescription", async (req, res) => {
 router.post("/rooms/:roomId/medical-record", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const { appointmentId, date, patientName: patientNameOverride } = req.body || {};
     const safeDate = String(date || new Date().toISOString().slice(0, 10)).slice(0, 10);
     const room = await getRoomInfo(roomId).catch(() => null);
     const patientName =
       String(patientNameOverride || "").trim() ||
+      patientNameFromSession(req) ||
       patientNameFromRoom(room?.title || "") ||
       "Patient";
 
@@ -718,6 +791,8 @@ router.post("/rooms/:roomId/medical-record", async (req, res) => {
 router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const { fileId } = req.body || {};
     if (!fileId) {
       return res.status(400).json({ error: "fileId is required" });
@@ -778,6 +853,8 @@ router.post("/rooms/:roomId/fill-sign/request", async (req, res) => {
 router.post("/rooms/:roomId/fill-sign/cancel", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const allowedRoomId = requirePatientRoomAccess(req, res);
+    if (!allowedRoomId) return;
     const assignmentId = String(req.body?.assignmentId || req.body?.fileId || req.body?.id || "").trim();
     if (!roomId) {
       return res.status(400).json({ error: "roomId is required" });

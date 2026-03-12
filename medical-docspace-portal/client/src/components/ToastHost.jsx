@@ -38,11 +38,10 @@ export default function ToastHost() {
             onClick={() => removeToast(toast.id)}
             aria-label="Close"
           >
-            ×
+            x
           </button>
         </div>
       ))}
     </div>
   );
 }
-

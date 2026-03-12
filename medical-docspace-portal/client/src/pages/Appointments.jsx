@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import PatientShell from "../components/PatientShell.jsx";
 import ShareQrModal from "../components/ShareQrModal.jsx";
@@ -35,7 +35,7 @@ function loadDocSpaceSdk(src) {
 
     if (!src) {
 
-      reject(new Error("Workspace URL is missing"));
+      reject(new Error("DocSpace URL is missing"));
 
       return;
 
@@ -49,7 +49,7 @@ function loadDocSpaceSdk(src) {
 
     script.onload = () => resolve(window.DocSpace?.SDK);
 
-    script.onerror = () => reject(new Error("Failed to load editor SDK"));
+    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
 
     document.head.appendChild(script);
 
@@ -99,7 +99,7 @@ function saveAppointments(session, items) {
 
 
 
-export default function Appointments({ session, onLogout, onNavigate }) {
+export default function Appointments({ session, onLogout, onNavigate, roleSwitcher }) {
 
   const [items, setItems] = useState([]);
   const submitRef = useRef(false);
@@ -118,13 +118,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
   });
 
   const [doctorInfo, setDoctorInfo] = useState(null);
-  const [doctorLoading, setDoctorLoading] = useState(true);
 
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("");
 
   const [ticketMessage, setTicketMessage] = useState("");
-  const [ticketMessageType, setTicketMessageType] = useState("");
   const [shareModal, setShareModal] = useState({ open: false, title: "", link: "", loading: false, error: "" });
   const [docModal, setDocModal] = useState({ open: false, title: "", url: "" });
 
@@ -140,6 +137,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
         "Content-Type": "application/json",
         ...(session?.user?.token ? { Authorization: session.user.token } : {})
       },
+      credentials: "include",
       body: JSON.stringify({ fullName })
     });
     const data = await response.json().catch(() => ({}));
@@ -205,10 +203,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
         setDoctorInfo(null);
 
-      } finally {
-
-        setDoctorLoading(false);
-
       }
 
     };
@@ -254,11 +248,10 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
 
   const destroyEditor = () => {
-
-    if (editorRef.current?.destroy) {
-
+    if (editorRef.current?.destroyFrame) {
+      editorRef.current.destroyFrame();
+    } else if (editorRef.current?.destroy) {
       editorRef.current.destroy();
-
     }
 
     editorRef.current = null;
@@ -274,18 +267,16 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     if (!docspaceUrl) {
 
       setTicketMessage("VITE_DOCSPACE_URL is not set.");
-      setTicketMessageType("error");
 
       return;
 
     }
 
-    const token = file?.shareToken || session?.user?.token || "";
+    const token = session?.user?.token || file?.requestToken || file?.shareToken || "";
 
     if (!token) {
 
-      setTicketMessage("Access token is missing.");
-      setTicketMessageType("error");
+      setTicketMessage("DocSpace token is missing.");
 
       return;
 
@@ -310,6 +301,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
         frameId: editorFrameId,
 
         requestToken: token,
+        mode: "edit",
 
         width: "1px",
 
@@ -324,7 +316,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
             if (!frameInstance) {
 
               setTicketMessage("Editor frame is not available.");
-              setTicketMessageType("error");
 
               destroyEditor();
 
@@ -356,8 +347,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
             };
 
-            const ticketText = buildTicketText(templateData);
-
             const editorCallback = new Function(
               "editorInstance",
               `
@@ -381,72 +370,11 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
                       var doc = Api.GetDocument();
 
-                      // Clear document if possible
                       if (doc.RemoveAllElements) doc.RemoveAllElements();
 
-                      // Base typography
                       var textPr = doc.GetDefaultTextPr();
                       textPr.SetFontFamily("Calibri");
-                      textPr.SetFontSize(22);
                       textPr.SetLanguage("en-US");
-
-                      var normalStyle = doc.GetDefaultStyle("paragraph");
-                      var normalParaPr = normalStyle.GetParaPr();
-                      normalParaPr.SetSpacingLine(240, "auto");
-                      normalParaPr.SetSpacingAfter(120);
-                      normalParaPr.SetJc("left");
-
-                      var normalTextPr = normalStyle.GetTextPr();
-                      normalTextPr.SetColor(0x26, 0x26, 0x26, false);
-
-                      // Title style
-                      var titleStyle = doc.CreateStyle("TicketTitle", "paragraph");
-                      var titleParaPr = titleStyle.GetParaPr();
-                      titleParaPr.SetJc("center");
-                      titleParaPr.SetSpacingAfter(180);
-
-                      var titleTextPr = titleStyle.GetTextPr();
-                      titleTextPr.SetFontFamily("Calibri Light");
-                      titleTextPr.SetFontSize(52);
-                      titleTextPr.SetColor(0x29, 0x33, 0x4F, false);
-
-                      // Subtitle style
-                      var subtitleStyle = doc.CreateStyle("TicketSubtitle", "paragraph");
-                      var subParaPr = subtitleStyle.GetParaPr();
-                      subParaPr.SetJc("center");
-                      subParaPr.SetSpacingAfter(240);
-
-                      var subTextPr = subtitleStyle.GetTextPr();
-                      subTextPr.SetFontFamily("Calibri");
-                      subTextPr.SetFontSize(20);
-                      subTextPr.SetColor(0x55, 0x55, 0x55, false);
-
-                      // Field style (card-like indent)
-                      var fieldStyle = doc.CreateStyle("TicketField", "paragraph");
-                      var fieldParaPr = fieldStyle.GetParaPr();
-                      fieldParaPr.SetJc("left");
-                      fieldParaPr.SetIndLeft(720);
-                      fieldParaPr.SetIndRight(720);
-                      fieldParaPr.SetSpacingAfter(120);
-
-                      var fieldTextPr = fieldStyle.GetTextPr();
-                      fieldTextPr.SetFontFamily("Calibri");
-                      fieldTextPr.SetFontSize(22);
-                      fieldTextPr.SetColor(0x26, 0x26, 0x26, false);
-
-                      // Footer style
-                      var footerStyle = doc.CreateStyle("TicketFooter", "paragraph");
-                      var footerParaPr = footerStyle.GetParaPr();
-                      footerParaPr.SetJc("right");
-                      footerParaPr.SetIndLeft(720);
-                      footerParaPr.SetIndRight(720);
-                      footerParaPr.SetSpacingBefore(180);
-                      footerParaPr.SetSpacingAfter(0);
-
-                      var footerTextPr = footerStyle.GetTextPr();
-                      footerTextPr.SetFontFamily("Calibri");
-                      footerTextPr.SetFontSize(18);
-                      footerTextPr.SetColor(0x55, 0x55, 0x55, false);
 
                       function safeText(v) {
                         return (v && String(v).trim()) ? String(v) : "-";
@@ -454,48 +382,55 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
                       function pushPara(p) {
                         if (doc.Push) doc.Push(p);
-                        else doc.InsertContent([p]);
+                        else doc.InsertContent([p], true);
                       }
 
-                      function addDivider() {
+                      function addTitle(text) {
                         var p = Api.CreateParagraph();
                         p.SetJc("center");
-                        p.SetSpacingAfter(180);
-                        var run = p.AddText("────────────────────────────────────────");
-                        run.SetColor(0x99, 0x99, 0x99, false);
+                        var run = p.AddText(text);
+                        run.SetBold(true);
+                        run.SetFontSize(34);
+                        run.SetColor(0x29, 0x33, 0x4F, false);
+                        pushPara(p);
+                      }
+
+                      function addSubtitle(text) {
+                        var p = Api.CreateParagraph();
+                        p.SetJc("center");
+                        var run = p.AddText(text);
+                        run.SetItalic(true);
                         run.SetFontSize(18);
+                        run.SetColor(0x55, 0x55, 0x55, false);
+                        pushPara(p);
+                      }
+
+                      function addSection(text) {
+                        var p = Api.CreateParagraph();
+                        p.SetJc("left");
+                        p.SetSpacingBefore(180);
+                        var run = p.AddText(text);
+                        run.SetBold(true);
+                        run.SetFontSize(22);
+                        run.SetColor(0x29, 0x33, 0x4F, false);
                         pushPara(p);
                       }
 
                       function addField(label, value) {
                         var p = Api.CreateParagraph();
-                        p.SetStyle(fieldStyle);
-
+                        p.SetJc("left");
+                        p.SetSpacingAfter(80);
                         var r1 = p.AddText(label + ": ");
                         r1.SetBold(true);
-                        r1.SetColor(0x29, 0x33, 0x4F, false);
-
                         var r2 = p.AddText(safeText(value));
                         r2.SetBold(false);
-
                         pushPara(p);
                       }
 
-                      // Title
-                      var title = Api.CreateParagraph();
-                      title.SetStyle(titleStyle);
-                      title.AddText("APPOINTMENT TICKET");
-                      pushPara(title);
+                      addTitle("APPOINTMENT TICKET");
+                      addSubtitle("Please arrive 10 minutes early and bring your ID.");
 
-                      // Subtitle (optional)
-                      var sub = Api.CreateParagraph();
-                      sub.SetStyle(subtitleStyle);
-                      var subRun = sub.AddText("Please arrive 10 minutes early and bring your ID.");
-                      subRun.SetItalic(true);
-                      pushPara(sub);
-
-                      addDivider();
-
+                      addSection("Appointment");
                       addField("Patient", t.customerName);
                       addField("Document", t.projectName);
                       addField("Date", t.startDate);
@@ -503,14 +438,8 @@ export default function Appointments({ session, onLogout, onNavigate }) {
                       addField("Doctor", t.doctor);
                       addField("Reason", t.reason);
 
-                      addDivider();
-
-                      // Footer
-                      var footer = Api.CreateParagraph();
-                      footer.SetStyle(footerStyle);
-                      var f = footer.AddText("Generated: " + new Date().toLocaleString());
-                      f.SetItalic(true);
-                      pushPara(footer);
+                      addSection("Generated");
+                      addField("Date", new Date().toISOString().slice(0, 10));
 
                       Api.Save();
                     } catch (e) {
@@ -538,10 +467,9 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
           onAppError: (error) => {
 
-            console.error("Editor error", error);
+            console.error("DocSpace editor error", error);
 
             setTicketMessage(`Editor error: ${error?.message || error}`);
-            setTicketMessageType("error");
 
             setTimeout(() => destroyEditor(), 1500);
 
@@ -556,7 +484,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     } catch (error) {
 
       setTicketMessage(error?.message || "Failed to open editor.");
-      setTicketMessageType("error");
 
     }
 
@@ -568,7 +495,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     if (!ticket?.id) return;
     setShareModal({ open: true, title: ticket.title, link: "", loading: true, error: "" });
     try {
-      const link = await createFileShareLink({ fileId: ticket.id, token: session?.user?.token });
+      const link = await createFileShareLink({ fileId: ticket.id });
       setShareModal({ open: true, title: ticket.title, link: link?.shareLink || "", loading: false, error: "" });
     } catch (error) {
       setShareModal({ open: true, title: ticket.title, link: "", loading: false, error: typeof error?.message === "string" ? error.message : JSON.stringify(error?.message || error || "", null, 2) });
@@ -587,7 +514,6 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     if (!form.date || !form.time || !form.doctor) {
 
       setMessage("Please fill date, time, and doctor.");
-      setMessageType("error");
 
       submitRef.current = false;
       setSubmitting(false);
@@ -616,10 +542,8 @@ export default function Appointments({ session, onLogout, onNavigate }) {
     setForm({ date: "", time: "", doctor: "", reason: "" });
 
     setMessage("Appointment scheduled.");
-    setMessageType("success");
 
     setTicketMessage("");
-    setTicketMessageType("");
 
     try {
 
@@ -665,14 +589,12 @@ export default function Appointments({ session, onLogout, onNavigate }) {
       const title = file?.title || "ticket";
 
       setTicketMessage(`Ticket created in room: ${title}`);
-      setTicketMessageType("success");
 
       await fillTicketHidden(file, draft);
 
     } catch (error) {
 
       setTicketMessage(error?.message || "Ticket not created");
-      setTicketMessageType("error");
 
     }
     finally {
@@ -719,6 +641,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
         active="appointments"
         onNavigate={onNavigate}
         onLogout={onLogout}
+        roleSwitcher={roleSwitcher}
         roomId={session?.room?.id}
         token={session?.user?.token}
       >
@@ -737,19 +660,15 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
             </div>
 
-          <p className="muted assigned-doctor">
-            Assigned doctor:{" "}
-            {doctorLoading ? (
-              <span className="inline-skeleton" aria-label="Loading doctor" />
-            ) : doctorInfo ? (
-              <span>
-                {doctorInfo.displayName}
-                {doctorInfo.title ? ` - ${doctorInfo.title}` : ""}
-              </span>
-            ) : (
-              <span>-</span>
-            )}
-          </p>
+          {doctorInfo && (
+
+            <p className="muted">
+
+              Assigned doctor: {doctorInfo.displayName}{doctorInfo.title ? ` - ${doctorInfo.title}` : ""}
+
+            </p>
+
+          )}
 
           <form className="auth-form" onSubmit={submit}>
 
@@ -835,33 +754,9 @@ export default function Appointments({ session, onLogout, onNavigate }) {
 
           </form>
 
-          {message && (
-            <div
-              className={
-                messageType === "error"
-                  ? "error-banner"
-                  : messageType === "success"
-                  ? "success-banner"
-                  : "notice-banner"
-              }
-            >
-              {message}
-            </div>
-          )}
+          {message && <p className="muted">{message}</p>}
 
-          {ticketMessage && (
-            <div
-              className={
-                ticketMessageType === "error"
-                  ? "error-banner"
-                  : ticketMessageType === "success"
-                  ? "success-banner"
-                  : "notice-banner"
-              }
-            >
-              {ticketMessage}
-            </div>
-          )}
+          {ticketMessage && <p className="muted">{ticketMessage}</p>}
 
         </section>
 
@@ -1083,7 +978,7 @@ export default function Appointments({ session, onLogout, onNavigate }) {
           url={docModal.url}
           onClose={() => setDocModal({ open: false, title: "", url: "" })}
         />
-        <div id={editorFrameId} className="hidden-editor" />
+        <iframe id={editorFrameId} className="hidden-editor" title="Appointment editor" />
 
       </PatientShell>
 

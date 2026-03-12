@@ -68,6 +68,7 @@ export default function MedicalRecords({
   session,
   onLogout,
   onNavigate,
+  roleSwitcher,
   initialFolderTitle,
   onInitialFolderOpened
 }) {
@@ -102,7 +103,7 @@ export default function MedicalRecords({
     const title = String(item?.title || "");
     const isImage = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(title);
     if (isImage && item?.id) {
-      createFileShareLink({ fileId: item.id, token: session?.user?.token || "" })
+      createFileShareLink({ fileId: item.id })
         .then((link) => {
           const url = link?.shareLink || link?.shareUrl || link?.url || item.openUrl || "";
           if (!url) return;
@@ -301,7 +302,7 @@ export default function MedicalRecords({
     setFolderContents([]);
     setFolderLoading(true);
     try {
-      const contents = await fetchFolderContents(folder.id, session?.user?.token);
+      const contents = await fetchFolderContents(folder.id);
       const nextItems = filterFolderItems(folder, contents.items || [], session);
       setFolderContents(nextItems);
     } finally {
@@ -313,9 +314,8 @@ export default function MedicalRecords({
     if (!session?.room?.id || session.room.id === "DOCSPACE") return;
     const load = async () => {
       try {
-        const headers = session?.user?.token ? { Authorization: session.user.token } : undefined;
         const response = await fetch(`/api/patients/room-summary?roomId=${session.room.id}`, {
-          headers
+          credentials: "include"
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -355,7 +355,7 @@ export default function MedicalRecords({
     if (!item?.id) return;
     setShareModal({ open: true, title: item.title, link: "", loading: true, error: "" });
     try {
-      const link = await createFileShareLink({ fileId: item.id, token: session?.user?.token });
+      const link = await createFileShareLink({ fileId: item.id });
       setShareModal({
         open: true,
         title: item.title,
@@ -386,8 +386,6 @@ export default function MedicalRecords({
     setInsuranceBusy(true);
     setInsuranceMessage("");
     try {
-      const token = String(session?.user?.token || "").trim();
-      if (!token) throw new Error("Authorization token is missing");
       const roomId = String(session?.room?.id || "").trim();
       if (!roomId) throw new Error("Patient room is missing");
 
@@ -403,9 +401,9 @@ export default function MedicalRecords({
       const response = await fetch("/api/patients/insurance-update-request", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token
+          "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({ roomId, payload })
       });
       const data = await response.json().catch(() => ({}));
@@ -439,6 +437,7 @@ export default function MedicalRecords({
       active="records"
       onNavigate={onNavigate}
       onLogout={onLogout}
+      roleSwitcher={roleSwitcher}
       roomId={session?.room?.id}
       token={session?.user?.token}
     >
@@ -699,10 +698,9 @@ function normalize(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-async function fetchFolderContents(folderId, token) {
-  const headers = token ? { Authorization: token } : undefined;
+async function fetchFolderContents(folderId) {
   const response = await fetch(`/api/patients/folder-contents?folderId=${folderId}`, {
-    headers
+    credentials: "include"
   });
   const data = await response.json();
   if (!response.ok) {

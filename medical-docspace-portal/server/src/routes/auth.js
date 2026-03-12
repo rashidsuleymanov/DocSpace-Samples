@@ -108,9 +108,13 @@ async function ensureContractTemplateInRoom({ roomId, fullName } = {}) {
 }
 
 const router = Router();
+const demoMode = process.env.DEMO_MODE === "true";
 
 router.post("/login", async (req, res) => {
   try {
+    if (demoMode) {
+      return res.status(403).json({ error: "Direct login is disabled in demo mode" });
+    }
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
@@ -172,6 +176,9 @@ router.post("/login", async (req, res) => {
 
 router.post("/register", async (req, res) => {
   try {
+    if (demoMode) {
+      return res.status(403).json({ error: "Direct registration is disabled in demo mode" });
+    }
     const { fullName, email, password, phone } = req.body;
     if (!fullName || !email || !password) {
       return res.status(400).json({ error: "Full name, email, and password are required" });
