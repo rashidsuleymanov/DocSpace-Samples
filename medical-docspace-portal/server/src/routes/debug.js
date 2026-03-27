@@ -30,9 +30,10 @@ router.get("/admin-claims", async (_req, res) => {
       claims
     });
   } catch (error) {
-    res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
+    const status = Number(error?.status) || 500;
+    res.status(status).json({
+      error: status < 500 ? error.message : "Internal server error",
+      ...(status < 500 && error.details ? { details: error.details } : {})
     });
   }
 });

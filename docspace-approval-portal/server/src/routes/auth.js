@@ -13,6 +13,20 @@ import { getConfig, updateConfig } from "../config.js";
 
 const router = Router();
 
+const _authAttempts = new Map();
+function checkAuthRateLimit(ip) {
+  const key = String(ip || "unknown");
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 5;
+  if (_authAttempts.size > 5000) _authAttempts.clear();
+  const timestamps = (_authAttempts.get(key) || []).filter((t) => now - t < windowMs);
+  if (timestamps.length >= max) return false;
+  timestamps.push(now);
+  _authAttempts.set(key, timestamps);
+  return true;
+}
+
 function projectTemplatesCandidates(cfg) {
   return [
     cfg?.projectTemplatesRoomTitle,
@@ -53,6 +67,13 @@ async function ensureProjectTemplatesRoom() {
 }
 
 router.post("/login", async (req, res) => {
+  if (process.env.DEMO_MODE === "true") {
+    return res.status(403).json({ error: "Login is disabled in demo mode. Use /api/demo/start instead." });
+  }
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+  if (!checkAuthRateLimit(ip)) {
+    return res.status(429).json({ error: "Too many login attempts. Please try again in a minute." });
+  }
   try {
     const { email, password } = req.body || {};
     if (!email || !password) {
@@ -95,14 +116,19 @@ router.post("/login", async (req, res) => {
 
     res.json({ user, formsRoom, token });
   } catch (error) {
-    res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
-    });
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ error: status < 500 ? error.message : "Internal server error" });
   }
 });
 
 router.post("/register", async (req, res) => {
+  if (process.env.DEMO_MODE === "true") {
+    return res.status(403).json({ error: "Registration is disabled in demo mode. Use /api/demo/start instead." });
+  }
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+  if (!checkAuthRateLimit(ip)) {
+    return res.status(429).json({ error: "Too many registration attempts. Please try again in a minute." });
+  }
   try {
     const cfg = getConfig();
     if (!String(cfg.rawAuthToken || "").trim()) {
@@ -143,10 +169,8 @@ router.post("/register", async (req, res) => {
     }
     res.status(201).json({ user, token });
   } catch (error) {
-    res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
-    });
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ error: status < 500 ? error.message : "Internal server error" });
   }
 });
 

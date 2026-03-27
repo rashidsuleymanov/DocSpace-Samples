@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/http.js";
+import { useSession } from "../services/session.js";
 
 export default function StudioAgents() {
   const [agents, setAgents] = useState([]);
@@ -8,6 +9,7 @@ export default function StudioAgents() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const nav = useNavigate();
+  const session = useSession();
 
   async function load() {
     setError("");
@@ -75,9 +77,11 @@ export default function StudioAgents() {
           <button className="btn secondary" onClick={load} disabled={loading}>
             Refresh
           </button>
-          <button className="btn" onClick={createAgent}>
-            Create agent
-          </button>
+          {!session.isDemo ? (
+            <button className="btn" onClick={createAgent}>
+              Create agent
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -106,11 +110,13 @@ export default function StudioAgents() {
                 </div>
                 <div className="row" style={{ gap: 10 }}>
                   <button className="btn secondary" onClick={() => nav(`/studio/agents/${a.id}`)}>
-                    Edit
+                    {session.isDemo ? "Посмотреть" : "Edit"}
                   </button>
-                  <button className="btn secondary" onClick={() => deleteAgent(a)}>
-                    Delete
-                  </button>
+                  {!session.isDemo ? (
+                    <button className="btn secondary" onClick={() => deleteAgent(a)}>
+                      Delete
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}

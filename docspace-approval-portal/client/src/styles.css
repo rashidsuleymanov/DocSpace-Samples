@@ -530,6 +530,39 @@ button:focus-visible, .link:focus-visible { outline: none; box-shadow: var(--rin
   justify-content: center;
 }
 
+/* Demo role switcher */
+.demo-role-switch-wrapper { padding: 4px 0 8px; }
+.demo-role-switch {
+  display: flex;
+  gap: 4px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  padding: 3px;
+}
+.mode-pill {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-muted, #64748b);
+  transition: background 0.15s, color 0.15s;
+}
+.mode-pill:hover:not(:disabled) { background: rgba(148, 163, 184, 0.18); color: var(--text, #1e293b); }
+.mode-pill.active { background: var(--surface, #fff); color: var(--accent, #0066cc); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.mode-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Auth screen used in StartDemo */
+.auth-layout { display: grid; place-items: center; height: 100%; min-height: 0; padding: 24px; overflow: auto; }
+.auth-layout-centered { align-content: center; }
+.auth-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; margin-bottom: 20px; }
+.auth-brand .brand-mark { width: 32px; height: 32px; border-radius: 8px; background: var(--accent, #0066cc); display: inline-block; }
+.auth-brand .brand-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 6px; }
+.error-banner { margin-top: 12px; color: var(--color-danger, #c0392b); font-size: 14px; }
+
 .projects-nav { display: grid; gap: 6px; align-self: start; }
 .projects-nav-toggle {
   width: 100%;

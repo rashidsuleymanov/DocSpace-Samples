@@ -30,6 +30,21 @@ import {
 import { cleanupDemoSession } from "./demoCleanup.js";
 
 const router = Router();
+
+// In-memory rate limiter: max 5 demo starts per IP per 60 s.
+const _startAttempts = new Map();
+function checkStartRateLimit(ip) {
+  const key = String(ip || "unknown");
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 5;
+  if (_startAttempts.size > 5000) _startAttempts.clear();
+  const timestamps = (_startAttempts.get(key) || []).filter((t) => now - t < windowMs);
+  if (timestamps.length >= max) return false;
+  timestamps.push(now);
+  _startAttempts.set(key, timestamps);
+  return true;
+}
 const DEMO_DOCTOR_FIRST_NAMES = [
   "Sarah",
   "Emily",
@@ -65,6 +80,26 @@ function normalizeEmailDomain(value) {
   return raw.replace(/^@+/, "");
 }
 
+// Cryptographically secure pick using rejection sampling to avoid modulo bias.
+function securePick(set) {
+  const limit = 256 - (256 % set.length);
+  let byte;
+  do {
+    [byte] = randomBytes(1);
+  } while (byte >= limit);
+  return set[byte % set.length];
+}
+
+function secureRandInt(max) {
+  if (max <= 1) return 0;
+  const limit = 256 - (256 % max);
+  let byte;
+  do {
+    [byte] = randomBytes(1);
+  } while (byte >= limit);
+  return byte % max;
+}
+
 function randomPassword() {
   const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const lower = "abcdefghijklmnopqrstuvwxyz";
@@ -73,14 +108,13 @@ function randomPassword() {
   const all = upper + lower + digits + special;
 
   const length = 16;
-  const pick = (set) => set[Math.floor(Math.random() * set.length)];
-  const chars = [pick(upper), pick(lower), pick(digits), pick(special)];
+  const chars = [securePick(upper), securePick(lower), securePick(digits), securePick(special)];
   while (chars.length < length) {
-    chars.push(pick(all));
+    chars.push(securePick(all));
   }
-  // Shuffle to avoid fixed positions
+  // Fisher-Yates shuffle with cryptographic RNG
   for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = secureRandInt(i + 1);
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
   return chars.join("");
@@ -332,6 +366,11 @@ router.get("/session", async (req, res) => {
 
 router.post("/start", async (req, res) => {
   try {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+    if (!checkStartRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many demo start attempts. Please try again in a minute." });
+    }
+
     const existing = req.demoSession || null;
     if (existing?.id) {
       await cleanupDemoSession(existing).catch(() => null);
@@ -432,9 +471,9 @@ router.post("/start", async (req, res) => {
     });
   } catch (error) {
     console.error("[demo/start]", error?.message || error, error?.details || "");
-    return res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({
+      error: status < 500 ? error.message : "Failed to start demo. Please try again."
     });
   }
 });
@@ -453,10 +492,8 @@ router.post("/end", async (req, res) => {
     clearDemoSessionCookie(res);
     return res.json({ ok: true, cleanupPending: !cleanup?.ok });
   } catch (error) {
-    return res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
-    });
+    console.error("[demo/end]", error?.message || error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 

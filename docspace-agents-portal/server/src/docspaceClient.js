@@ -10,6 +10,25 @@ function normalizeAuthHeader(value) {
   return trimmed;
 }
 
+const DOCSPACE_TIMEOUT_MS = Math.max(5_000, Number(process.env.DOCSPACE_TIMEOUT_MS || 15_000));
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DOCSPACE_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      const err = new Error("DocSpace request timed out");
+      err.status = 504;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export function createDocSpaceClient() {
   const cfg = loadConfig();
   const baseUrl = cfg.docspace.baseUrl;
@@ -17,7 +36,7 @@ export function createDocSpaceClient() {
 
   async function apiRequestRaw(path, { method = "GET", body, auth } = {}) {
     const authorization = normalizeAuthHeader(auth || authHeader);
-    const res = await fetch(`${baseUrl}${path}`, {
+    const res = await fetchWithTimeout(`${baseUrl}${path}`, {
       method,
       headers: {
         ...(body ? { "Content-Type": "application/json" } : {}),
@@ -51,7 +70,7 @@ export function createDocSpaceClient() {
 
   async function apiRequest(path, { method = "GET", body, auth } = {}) {
     const authorization = normalizeAuthHeader(auth || authHeader);
-    const res = await fetch(`${baseUrl}${path}`, {
+    const res = await fetchWithTimeout(`${baseUrl}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -72,7 +91,7 @@ export function createDocSpaceClient() {
   }
 
   async function authenticateUser({ userName, password }) {
-    const response = await fetch(`${baseUrl}/api/2.0/authentication`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/2.0/authentication`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userName, password })
@@ -95,7 +114,7 @@ export function createDocSpaceClient() {
 
   async function apiRequestForm(path, { method = "POST", body, auth } = {}) {
     const authorization = normalizeAuthHeader(auth || authHeader);
-    const res = await fetch(`${baseUrl}${path}`, {
+    const res = await fetchWithTimeout(`${baseUrl}${path}`, {
       method,
       headers: {
         ...(authorization ? { Authorization: authorization } : {})
@@ -226,11 +245,11 @@ export function createDocSpaceClient() {
     if (!fid) throw new Error("fileId is required");
 
     const authorization = normalizeAuthHeader(auth || authHeader);
-    const res = await fetch(`${baseUrl}/api/2.0/files/file/${encodeURIComponent(fid)}/download`, {
-      method: "GET",
-      headers: authorization ? { Authorization: authorization } : {},
-      redirect: "follow"
-    });
+    const res = await fetchWithTimeout(
+      `${baseUrl}/api/2.0/files/file/${encodeURIComponent(fid)}/download`,
+      { method: "GET", headers: authorization ? { Authorization: authorization } : {}, redirect: "follow" },
+      60_000
+    );
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");

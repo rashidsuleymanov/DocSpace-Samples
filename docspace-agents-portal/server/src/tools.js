@@ -84,7 +84,12 @@ export function createToolExecutor({ cfg, store, docspace, rag }) {
   }
 
   async function runTool({ agentId, tools, name, args }) {
-    store.audit(agentId, "tool_call", { name, args });
+    // Omit large binary payloads from audit logs to prevent bloat.
+    const auditArgs =
+      name === "docspace_upload_file_base64" && args?.base64
+        ? { ...args, base64: `[${String(args.base64).length} chars omitted]` }
+        : args;
+    store.audit(agentId, "tool_call", { name, args: auditArgs });
     switch (name) {
       case "docspace_list_rooms": {
         requireAllowAll(tools);

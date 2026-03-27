@@ -783,6 +783,55 @@ async function updateFileTitle({ fileId, title }, auth) {
   });
 }
 
+export async function terminateUsers(userIds, auth) {
+  const ids = Array.isArray(userIds) ? userIds.map((v) => String(v || "").trim()).filter(Boolean) : [];
+  if (!ids.length) throw new Error("userIds are required");
+  return apiRequest("/api/2.0/people/status/Terminated", {
+    method: "PUT",
+    auth,
+    body: { userIds: ids }
+  });
+}
+
+export async function deleteRoom(roomId, auth) {
+  const rid = String(roomId || "").trim();
+  if (!rid) throw new Error("roomId is required");
+  // Some DocSpace setups require the room to be archived before permanent deletion.
+  await archiveRoom(rid, auth).catch(() => null);
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await apiRequest(`/api/2.0/files/rooms/${encodeURIComponent(rid)}`, {
+        method: "DELETE",
+        body: {},
+        auth
+      });
+    } catch (error) {
+      if (error?.status === 404) {
+        return { ok: true, deleted: false, reason: "not_found" };
+      }
+      lastError = error;
+      if (error?.status === 400 && attempt < 2) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error("Failed to delete room");
+}
+
+// Alias that accepts { fullName, email, password } like the medical portal pattern.
+export async function createDocSpaceUser({ fullName, email, password } = {}) {
+  const name = String(fullName || "").trim();
+  const parts = name.split(" ").filter(Boolean);
+  const firstName = parts[0] || "Demo";
+  const lastName = parts.slice(1).join(" ") || "User";
+  return createUser({ firstName, lastName, email, password });
+}
+
 export async function copyFileToFolder({ fileId, destFolderId, toFillOut = false }, auth) {
   const fid = String(fileId || "").trim();
   const did = String(destFolderId || "").trim();

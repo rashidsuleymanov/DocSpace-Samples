@@ -4,60 +4,13 @@ import PatientShell from "../components/PatientShell.jsx";
 import ShareQrModal from "../components/ShareQrModal.jsx";
 import DocSpaceModal from "../components/DocSpaceModal.jsx";
 import { createFileShareLink } from "../services/docspaceApi.js";
-
-
+import { destroyHiddenEditor, initHiddenEditor } from "../services/hiddenEditor.js";
 
 const storageKey = "medical.portal.appointments";
 
 const docspaceUrl = import.meta.env.VITE_DOCSPACE_URL || "";
 
 const editorFrameId = "appointment-ticket-editor-hidden";
-
-
-
-let sdkLoaderPromise = null;
-
-
-
-function loadDocSpaceSdk(src) {
-
-  if (sdkLoaderPromise) return sdkLoaderPromise;
-
-  sdkLoaderPromise = new Promise((resolve, reject) => {
-
-    if (window.DocSpace?.SDK) {
-
-      resolve(window.DocSpace.SDK);
-
-      return;
-
-    }
-
-    if (!src) {
-
-      reject(new Error("DocSpace URL is missing"));
-
-      return;
-
-    }
-
-    const script = document.createElement("script");
-
-    script.src = `${src}/static/scripts/sdk/2.0.0/api.js`;
-
-    script.async = true;
-
-    script.onload = () => resolve(window.DocSpace?.SDK);
-
-    script.onerror = () => reject(new Error("Failed to load DocSpace SDK"));
-
-    document.head.appendChild(script);
-
-  });
-
-  return sdkLoaderPromise;
-
-}
 
 
 
@@ -248,14 +201,7 @@ export default function Appointments({ session, onLogout, onNavigate, roleSwitch
 
 
   const destroyEditor = () => {
-    if (editorRef.current?.destroyFrame) {
-      editorRef.current.destroyFrame();
-    } else if (editorRef.current?.destroy) {
-      editorRef.current.destroy();
-    }
-
-    editorRef.current = null;
-
+    destroyHiddenEditor(editorRef);
   };
 
 
@@ -290,23 +236,14 @@ export default function Appointments({ session, onLogout, onNavigate, roleSwitch
 
     try {
 
-      await loadDocSpaceSdk(docspaceUrl);
-
-      const instance = window.DocSpace?.SDK?.initEditor({
-
-        src: docspaceUrl,
-
-        id: String(file.id),
-
+      const instance = await initHiddenEditor({
+        docspaceUrl,
+        fileId: String(file.id),
         frameId: editorFrameId,
-
         requestToken: token,
         mode: "edit",
-
         width: "1px",
-
         height: "1px",
-
         events: {
 
           onAppReady: () => {
@@ -476,7 +413,6 @@ export default function Appointments({ session, onLogout, onNavigate, roleSwitch
           }
 
         }
-
       });
 
       editorRef.current = instance;

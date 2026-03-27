@@ -129,6 +129,7 @@ async function runRoomActionWithFallback(action, roomId, auth) {
     if (alreadyOk) return { roomId: rid, ok: true, error: null, via: "noop", operationId: null, pending: false };
 
     if (e?.status === 403) {
+      console.warn(`[projects] user token 403 on room ${rid}, retrying with admin credentials`);
       try {
         // eslint-disable-next-line no-await-in-loop
         const result = await action(rid);
@@ -279,7 +280,14 @@ router.get("/sidebar", (req, res) => {
 
       const cfg = getConfig();
       const configuredActiveRoomId = String(cfg.formsRoomId || "").trim();
-      const activeRoomId = configuredActiveRoomId && accessibleRoomIds.has(configuredActiveRoomId) ? configuredActiveRoomId : "";
+      // In demo mode, prefer the requester's project room as the active room.
+      const demoProjectRoomId = req.demoSession?.requester?.projectRoomId
+        ? String(req.demoSession.requester.projectRoomId)
+        : null;
+      const activeRoomId =
+        (demoProjectRoomId && accessibleRoomIds.has(demoProjectRoomId) ? demoProjectRoomId : null) ||
+        (configuredActiveRoomId && accessibleRoomIds.has(configuredActiveRoomId) ? configuredActiveRoomId : "") ||
+        "";
 
       const flows = listFlowsForUser({ userId, userEmail });
       const countsByRoomId = new Map();

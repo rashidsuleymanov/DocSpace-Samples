@@ -5,7 +5,7 @@ import Documents from "./pages/Documents.jsx";
 import Requests from "./pages/Requests.jsx";
 import Projects from "./pages/Projects.jsx";
 import Project from "./pages/Project.jsx";
-import Login from "./pages/Login.jsx";
+import StartDemo from "./pages/StartDemo.jsx";
 import Drafts from "./pages/Drafts.jsx";
 import Library from "./pages/Library.jsx";
 import Contacts from "./pages/Contacts.jsx";
@@ -13,7 +13,9 @@ import BulkSend from "./pages/BulkSend.jsx";
 import BulkLinks from "./pages/BulkLinks.jsx";
 import SendDrafts from "./pages/SendDrafts.jsx";
 import Settings from "./pages/Settings.jsx";
-import { clearSession, loadSession, saveSession } from "./services/session.js";
+import DemoRoleSwitch from "./components/DemoRoleSwitch.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import { getDemoSession, startDemo, endDemo } from "./services/demoApi.js";
 import { toast } from "./utils/toast.js";
 import {
   createFlowFromTemplate,
@@ -21,10 +23,13 @@ import {
   getSettingsConfig,
   listDrafts,
   listFlows,
-  listTemplates,
-  login,
-  register
+  listTemplates
 } from "./services/portalApi.js";
+
+const _parsedIdle = Number(import.meta.env.VITE_DEMO_IDLE_TIMEOUT_MS);
+const DEMO_IDLE_TIMEOUT_MS = Number.isFinite(_parsedIdle) && _parsedIdle > 0 ? _parsedIdle : 5 * 60 * 1000;
+const _parsedHidden = Number(import.meta.env.VITE_DEMO_HIDDEN_TIMEOUT_MS);
+const DEMO_HIDDEN_TIMEOUT_MS = Number.isFinite(_parsedHidden) && _parsedHidden > 0 ? _parsedHidden : 30 * 1000;
 
 function isPdfFile(item) {
   const ext = String(item?.fileExst || "").trim().toLowerCase();
@@ -32,32 +37,24 @@ function isPdfFile(item) {
   return ext === "pdf" || ext === ".pdf" || title.endsWith(".pdf");
 }
 
-function viewFromHash() {
-  const raw = typeof window !== "undefined" ? String(window.location.hash || "") : "";
-  const hash = raw.replace(/^#\/?/, "").trim().toLowerCase();
-  if (!hash) return "";
-  const allowed = new Set([
-    "login",
-    "dashboard",
-    "documents",
-    "requests",
-    "projects",
-    "drafts",
-    "bulk",
-    "bulklinks",
-    "contacts",
-    "settings"
-  ]);
-  if (!allowed.has(hash)) return "";
-  return hash === "bulklinks" ? "bulkLinks" : hash;
+// A session has requesterToken + user for API calls.
+function makeSession(token, user) {
+  if (!token || !user?.id) return null;
+  return { token, user };
 }
 
 export default function App() {
-  const [view, setView] = useState("login");
-  const [session, setSession] = useState(null);
+  // Demo state
+  const [demoSessionId, setDemoSessionId] = useState(null);
+  const [recipientSession, setRecipientSession] = useState(null); // { token, user }
+  const [activeRole, setActiveRole] = useState("requester"); // "requester" | "recipient"
+
+  // App state
+  const [view, setView] = useState("start");
+  const [session, setSession] = useState(null); // { token, user } for the active role
   const [booting, setBooting] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [startError, setStartError] = useState("");
   const [hasWebhookSecret, setHasWebhookSecret] = useState(false);
   const [branding, setBranding] = useState({
     portalName: "Requests Center",
@@ -78,18 +75,142 @@ export default function App() {
   const [draftsPdfCount, setDraftsPdfCount] = useState(0);
   const [draftsLoaded, setDraftsLoaded] = useState(false);
 
+  // On mount: check for an existing demo session (page refresh recovery).
   useEffect(() => {
-    const existing = loadSession();
-    const initial = viewFromHash();
-    if (existing?.token && existing?.user?.id) {
-      setSession(existing);
-      setView(initial || "dashboard");
-    } else if (initial) {
-      setView(initial);
-    }
-    setBooting(false);
+    const init = async () => {
+      try {
+        const active = await getDemoSession();
+        if (active?.requester?.id && active?.requesterToken) {
+          const sess = makeSession(active.requesterToken, active.requester);
+          setSession(sess);
+          setDemoSessionId(active.sessionId);
+          if (active.recipient?.id && active.recipientToken) {
+            setRecipientSession(makeSession(active.recipientToken, active.recipient));
+          }
+          setView("dashboard");
+        } else {
+          setView("start");
+        }
+      } catch {
+        setView("start");
+      } finally {
+        setBooting(false);
+      }
+    };
+    init();
   }, []);
 
+  // Send beacon on page close to clean up the demo session.
+  useEffect(() => {
+    if (!demoSessionId) return;
+
+    let sent = false;
+    const endOnPageClose = () => {
+      if (sent) return;
+      sent = true;
+      try {
+        const payload = "{}";
+        const blob = new Blob([payload], { type: "application/json" });
+        const beaconOk =
+          typeof navigator !== "undefined" &&
+          typeof navigator.sendBeacon === "function" &&
+          navigator.sendBeacon("/api/demo/end", blob);
+        if (!beaconOk) {
+          fetch("/api/demo/end", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            keepalive: true,
+            body: payload
+          }).catch(() => null);
+        }
+      } catch {
+        // ignore close-phase errors
+      }
+    };
+
+    window.addEventListener("pagehide", endOnPageClose);
+    window.addEventListener("beforeunload", endOnPageClose);
+
+    return () => {
+      window.removeEventListener("pagehide", endOnPageClose);
+      window.removeEventListener("beforeunload", endOnPageClose);
+    };
+  }, [demoSessionId]);
+
+  // Idle and hidden-tab timeout logic.
+  useEffect(() => {
+    if (!demoSessionId) return;
+
+    let ended = false;
+    let idleTimer = null;
+    let hiddenTimer = null;
+
+    const finishDemo = async (reason) => {
+      if (ended) return;
+      ended = true;
+      try {
+        await endDemo().catch(() => null);
+      } finally {
+        setSession(null);
+        setRecipientSession(null);
+        setDemoSessionId(null);
+        setActiveRole("requester");
+        setTemplates([]);
+        setFlows([]);
+        setActiveRoomId("");
+        setActiveProject(null);
+        setView("start");
+        if (reason === "idle") toast.info("Demo ended after inactivity.");
+        else if (reason === "hidden") toast.info("Demo ended after tab was left in background.");
+      }
+    };
+
+    const armIdleTimer = () => {
+      if (!Number.isFinite(DEMO_IDLE_TIMEOUT_MS) || DEMO_IDLE_TIMEOUT_MS <= 0) return;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => finishDemo("idle"), DEMO_IDLE_TIMEOUT_MS);
+    };
+
+    const armHiddenTimer = () => {
+      if (!Number.isFinite(DEMO_HIDDEN_TIMEOUT_MS) || DEMO_HIDDEN_TIMEOUT_MS <= 0) return;
+      if (hiddenTimer) clearTimeout(hiddenTimer);
+      hiddenTimer = setTimeout(() => finishDemo("hidden"), DEMO_HIDDEN_TIMEOUT_MS);
+    };
+
+    const onActivity = () => {
+      if (ended) return;
+      if (document.visibilityState === "visible") {
+        if (hiddenTimer) { clearTimeout(hiddenTimer); hiddenTimer = null; }
+        armIdleTimer();
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (ended) return;
+      if (document.visibilityState === "hidden") {
+        armHiddenTimer();
+      } else {
+        if (hiddenTimer) { clearTimeout(hiddenTimer); hiddenTimer = null; }
+        armIdleTimer();
+      }
+    };
+
+    const activityEvents = ["pointerdown", "keydown", "mousemove", "touchstart", "scroll"];
+    for (const name of activityEvents) window.addEventListener(name, onActivity, { passive: true });
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    armIdleTimer();
+    if (document.visibilityState === "hidden") armHiddenTimer();
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (hiddenTimer) clearTimeout(hiddenTimer);
+      for (const name of activityEvents) window.removeEventListener(name, onActivity);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [demoSessionId]);
+
+  // Load settings / branding on mount.
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
@@ -116,7 +237,6 @@ export default function App() {
   useEffect(() => {
     const name = String(branding?.portalName || "").trim() || "Requests Center";
     if (typeof document !== "undefined") document.title = name;
-
     const accent = String(branding?.portalAccent || "").trim();
     const root = typeof document !== "undefined" ? document.documentElement : null;
     if (!root) return;
@@ -181,16 +301,23 @@ export default function App() {
     []
   );
 
+  // Declare effectiveSession early so it can be safely used in all effect dep arrays below.
+  // (const declarations after this point would be in TDZ when deps arrays are evaluated.)
+  const effectiveSession = useMemo(() => {
+    if (activeRole === "recipient" && recipientSession?.token) return recipientSession;
+    return session;
+  }, [activeRole, recipientSession, session]);
+
   useEffect(() => {
     if (!session?.token) return;
     refreshActiveProject().catch(() => null);
     const handler = () => refreshActiveProject().catch(() => null);
     const draftsHandler = () => refreshDraftsSummary(session).catch(() => null);
     const flowsHandler = () => {
-      refreshFlows(session).catch(() => null);
+      refreshFlows(effectiveSession).catch(() => null);
       refreshActiveProject().catch(() => null);
     };
-    const templatesHandler = () => loadTemplatesForSession(session).catch(() => null);
+    const templatesHandler = () => loadTemplatesForSession(effectiveSession).catch(() => null);
     window.addEventListener("portal:projectChanged", handler);
     window.addEventListener("portal:draftsChanged", draftsHandler);
     window.addEventListener("portal:flowsChanged", flowsHandler);
@@ -201,36 +328,31 @@ export default function App() {
       window.removeEventListener("portal:flowsChanged", flowsHandler);
       window.removeEventListener("portal:templatesChanged", templatesHandler);
     };
-  }, [refreshActiveProject, refreshDraftsSummary, session]);
+  }, [effectiveSession, refreshActiveProject, refreshDraftsSummary, session]);
 
   useEffect(() => {
-    if (!session?.token) return;
-    if (view === "login") return;
+    if (!effectiveSession?.token) return;
+    if (view === "start") return;
     if (hasWebhookSecret) return;
-
     const hasActive = Array.isArray(flows) && flows.some((f) => String(f?.status || "") === "InProgress");
     if (!hasActive) return;
-
     const id = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      refreshFlows(session).catch(() => null);
+      refreshFlows(effectiveSession).catch(() => null);
       refreshActiveProject().catch(() => null);
     }, 60000);
-
     return () => clearInterval(id);
-  }, [flows, hasWebhookSecret, refreshActiveProject, refreshFlows, session, view]);
+  }, [effectiveSession, flows, hasWebhookSecret, refreshActiveProject, refreshFlows, view]);
 
   const loadTemplatesForSession = async (activeSession) => {
     if (!activeSession?.token) return [];
     setBusy(true);
-    setError("");
     try {
       const data = await listTemplates({ token: activeSession.token });
       const items = Array.isArray(data?.templates) ? data.templates : [];
       setTemplates(items);
       return items;
-    } catch (e) {
-      setError(e?.message || "Failed to load templates");
+    } catch {
       setTemplates([]);
       return [];
     } finally {
@@ -241,7 +363,6 @@ export default function App() {
   const actions = useMemo(
     () => ({
       navigate(next) {
-        setError("");
         if (next === "requests") {
           setRequestsFilter("all");
           setRequestsScope("all");
@@ -249,7 +370,6 @@ export default function App() {
         setView(next);
       },
       openProjects(opts = {}) {
-        setError("");
         setView("projects");
         if (opts?.create) {
           setTimeout(() => {
@@ -258,76 +378,100 @@ export default function App() {
         }
       },
       openRequests(filter = "all", scope = "all") {
-        setError("");
         setRequestsFilter(String(filter || "all"));
         setRequestsScope(String(scope || "all"));
         setView("requests");
       },
       openProject(id) {
-        setError("");
         setProjectId(String(id || "").trim());
         setView("project");
       },
-      async onLogin({ email, password }) {
+
+      async onStartDemo({ requesterName }) {
         setBusy(true);
-        setError("");
+        setStartError("");
         try {
-          const next = await login({ email, password });
-          setSession(next);
-          saveSession(next);
-          setView(viewFromHash() || "dashboard");
-          await refreshFlows(next);
-          await refreshActiveProject();
-          await refreshDraftsSummary(next);
-        } catch (e) {
-          setError(e?.message || "Login failed");
-        } finally {
-          setBusy(false);
-        }
-      },
-      async onRegister({ firstName, lastName, email, password }) {
-        setBusy(true);
-        setError("");
-        try {
-          const created = await register({ firstName, lastName, email, password });
-          if (!created?.token || !created?.user) {
-            setError("Account created. Please sign in.");
-            setView("login");
-            return;
-          }
-          const next = { token: created.token, user: created.user };
-          setSession(next);
-          saveSession(next);
+          const started = await startDemo({ requesterName });
+          const requesterSession = makeSession(started.requesterToken, started.requester);
+          const recipSession = started.recipient?.id && started.recipientToken
+            ? makeSession(started.recipientToken, started.recipient)
+            : null;
+          setSession(requesterSession);
+          setRecipientSession(recipSession);
+          setDemoSessionId(started.sessionId);
+          setActiveRole("requester");
           setView("dashboard");
-          await refreshFlows(next);
-          await refreshActiveProject();
-        } catch (e) {
-          setError(e?.message || "Registration failed");
+          toast.success("Demo started.");
+          // Kick off initial data load for the requester.
+          // refreshActiveProject reads session from closure — let the session-change effect handle it.
+          await Promise.all([
+            refreshFlows(requesterSession).catch(() => null),
+            refreshDraftsSummary(requesterSession).catch(() => null)
+          ]);
+        } catch (error) {
+          const message = error?.message || "Failed to start demo";
+          setStartError(message);
+          toast.error(message);
         } finally {
           setBusy(false);
         }
       },
+
       async onLogout() {
-        clearSession();
+        await endDemo().catch(() => null);
         setSession(null);
+        setRecipientSession(null);
+        setDemoSessionId(null);
+        setActiveRole("requester");
         setTemplates([]);
         setFlows([]);
         setActiveRoomId("");
         setActiveProject(null);
         setDraftsPdfCount(0);
         setDraftsLoaded(false);
-        setView("login");
+        setView("start");
       },
-      async startFlow(templateFileId, projectId, recipientEmails, kind, recipientLevels, dueDate) {
+
+      switchToRequester() {
+        if (activeRole === "requester") return;
+        setActiveRole("requester");
+        setTemplates([]);
+        setFlows([]);
+        setActiveRoomId("");
+        setActiveProject(null);
+        setDraftsLoaded(false);
+        setView("dashboard");
+        // Reload data for requester — effects gate on effectiveSession which won't
+        // change if view was already "dashboard", so we kick off the load explicitly.
+        refreshFlows(session).catch(() => null);
+        refreshActiveProject().catch(() => null);
+        refreshDraftsSummary(session).catch(() => null);
+      },
+
+      switchToRecipient() {
+        if (activeRole === "recipient" || !recipientSession) return;
+        setActiveRole("recipient");
+        setTemplates([]);
+        setFlows([]);
+        setActiveRoomId("");
+        setActiveProject(null);
+        setDraftsLoaded(false);
+        setView("dashboard");
+        // Reload data for recipient explicitly — same reason as switchToRequester above.
+        refreshFlows(recipientSession).catch(() => null);
+        refreshActiveProject().catch(() => null);
+        refreshDraftsSummary(session).catch(() => null);
+      },
+
+      async startFlow(templateFileId, pid, recipientEmails, kind, recipientLevels, dueDate) {
         if (!session?.token) return;
         if (!templateFileId) return;
         setBusy(true);
-        setError("");
         try {
           const result = await createFlowFromTemplate({
             token: session.token,
             templateFileId,
-            projectId,
+            projectId: pid,
             recipientEmails,
             recipientLevels,
             dueDate,
@@ -340,7 +484,6 @@ export default function App() {
           return result;
         } catch (e) {
           const msg = e?.message || "Failed to start request";
-          setError(msg);
           toast(`Request creation failed\n${msg}`, "error");
           return null;
         } finally {
@@ -348,59 +491,65 @@ export default function App() {
         }
       }
     }),
-    [refreshFlows, session]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeRole, recipientSession, refreshActiveProject, refreshDraftsSummary, refreshFlows, session]
   );
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!effectiveSession?.token) return;
     if ((view === "dashboard" || view === "requests") && flows.length === 0) {
-      refreshFlows(session).catch(() => null);
+      refreshFlows(effectiveSession).catch(() => null);
     }
     if ((view === "dashboard" || view === "drafts") && !draftsLoaded) {
       refreshDraftsSummary(session).catch(() => null);
     }
-    // Intentionally not depending on flows/templates to avoid over-fetching.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, view]);
+  }, [effectiveSession, view]);
 
   useEffect(() => {
     if (!session?.token) return;
-    // If project changes, invalidate cached forms list for the new room.
     setTemplates([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId, session?.token]);
 
   useEffect(() => {
-    if (!session?.token) return;
+    if (!effectiveSession?.token) return;
     if (!String(activeRoomId || "").trim()) return;
     if (view !== "dashboard" && view !== "requests" && view !== "bulk" && view !== "bulkLinks") return;
     if (templates.length > 0) return;
-    loadTemplatesForSession(session).catch(() => null);
+    loadTemplatesForSession(effectiveSession).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId, session?.token, view]);
+  }, [activeRoomId, effectiveSession?.token, view]);
 
   useEffect(() => {
-    if (!session?.token) return;
+    if (!effectiveSession?.token) return;
     if (view !== "dashboard" && view !== "requests") return;
-
     const intervalMs = 15000;
-
     const tick = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      refreshFlows(session).catch(() => null);
+      refreshFlows(effectiveSession).catch(() => null);
     };
-
     const onVis = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
     };
-
     const timer = setInterval(tick, intervalMs);
     window.addEventListener("visibilitychange", onVis);
     return () => {
       clearInterval(timer);
       window.removeEventListener("visibilitychange", onVis);
     };
-  }, [refreshFlows, session, view]);
+  }, [effectiveSession, refreshFlows, view]);
+
+  // Role switcher shown in app shell when both roles are provisioned.
+  const roleSwitcher =
+    demoSessionId && recipientSession
+      ? {
+          activeRole,
+          onSelectRequester: actions.switchToRequester,
+          onSelectRecipient: actions.switchToRecipient,
+          disabledRecipient: !recipientSession?.token
+        }
+      : null;
 
   if (booting) {
     return (
@@ -413,160 +562,159 @@ export default function App() {
   if (!session) {
     return (
       <div className="app-shell">
-        {view === "settings" ? (
-          <Settings busy={busy} onOpenDrafts={() => actions.navigate("login")} />
-        ) : (
-          <Login
-            branding={branding}
+        <ErrorBoundary>
+          <StartDemo
             busy={busy}
-            error={error}
-            onLogin={actions.onLogin}
-            onRegister={actions.onRegister}
-            onOpenSettings={() => actions.navigate("settings")}
+            error={startError}
+            onStart={actions.onStartDemo}
+            branding={branding}
           />
-        )}
+        </ErrorBoundary>
       </div>
     );
   }
 
   return (
     <div className="app-shell">
-      <AppLayout
-        session={session}
-        branding={branding}
-        active={view}
-        onNavigate={actions.navigate}
-        onOpenProject={actions.openProject}
-        onLogout={actions.onLogout}
-      >
-        {view === "dashboard" && (
-          <Dashboard
-            session={session}
-             busy={busy}
-             error={error}
-             flows={flows}
-             flowsRefreshing={flowsRefreshing}
-             flowsUpdatedAt={flowsUpdatedAt}
-             activeRoomId={activeRoomId}
-             activeProject={activeProject}
-             projectsCount={Array.isArray(sidebarProjects) ? sidebarProjects.length : 0}
-             projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-             templates={templates}
-            draftsPdfCount={draftsPdfCount}
-            onRefresh={async () => {
-              await Promise.all([
-                refreshFlows(session).catch(() => null),
-                refreshActiveProject().catch(() => null),
-                refreshDraftsSummary(session).catch(() => null)
-              ]);
-            }}
-            onStartFlow={actions.startFlow}
-            onOpenDrafts={() => actions.navigate("drafts")}
-            onOpenProjects={(opts) => actions.openProjects(opts)}
-            onOpenRequests={actions.openRequests}
-            onOpenProject={actions.openProject}
-          />
-        )}
-        {view === "documents" && (
-          <Documents
-            session={session}
-            busy={busy}
-            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-            onOpenRequests={() => actions.openRequests("all", "all")}
-            onOpenProjects={(opts) => actions.openProjects(opts)}
-            onOpenTemplates={() => actions.navigate("drafts")}
-          />
-        )}
-        {view === "requests" && (
-          <Requests
-            session={session}
-             busy={busy}
-             error={error}
-             flows={flows}
-             flowsRefreshing={flowsRefreshing}
-             flowsUpdatedAt={flowsUpdatedAt}
-             onRefreshFlows={() => refreshFlows(session)}
-             activeRoomId={activeRoomId}
-             activeProject={activeProject}
-             projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-             templates={templates}
-            initialFilter={requestsFilter}
-            initialScope={requestsScope}
-            onBack={() => actions.navigate("dashboard")}
-            onStartFlow={actions.startFlow}
-            onOpenDrafts={() => actions.navigate("drafts")}
-            onOpenProjects={(opts) => actions.openProjects(opts)}
-          />
-        )}
-        {view === "sendDrafts" && (
-          <SendDrafts
-            session={session}
-            busy={busy}
-            onOpenRequests={() => actions.openRequests("all", "all")}
-            onOpenBulkSend={() => actions.navigate("bulk")}
-            onOpenBulkLinks={() => actions.navigate("bulkLinks")}
-          />
-        )}
-        {view === "bulk" && (
-          <BulkSend
-            session={session}
-            busy={busy}
-            activeRoomId={activeRoomId}
-            activeProject={activeProject}
-            templates={templates}
-            onStartFlow={actions.startFlow}
-            onOpenRequests={() => actions.openRequests("all", "all")}
-          />
-        )}
-        {view === "bulkLinks" && (
-          <BulkLinks
-            session={session}
-            busy={busy}
-            activeRoomId={activeRoomId}
-            activeProject={activeProject}
-            templates={templates}
-            onOpenRequests={() => actions.openRequests("all", "all")}
-          />
-        )}
-        {view === "contacts" && (
-          <Contacts
-            session={session}
-            busy={busy}
-            projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
-            activeProject={activeProject}
-            onOpenBulk={() => actions.navigate("bulk")}
-          />
-        )}
-        {view === "projects" && (
-          <Projects
-            session={session}
-            busy={busy}
-            onOpenProject={actions.openProject}
-            onOpenDrafts={() => actions.navigate("drafts")}
-          />
-        )}
-        {view === "drafts" && (
-          <Drafts
-            session={session}
-            busy={busy}
-            onOpenProject={actions.openProject}
-            onOpenProjects={(opts) => actions.openProjects(opts)}
-            onOpenSettings={() => actions.navigate("settings")}
-          />
-        )}
-        {view === "project" && (
-          <Project
-            session={session}
-            busy={busy}
-            projectId={projectId}
-            onBack={() => actions.navigate("projects")}
-            onStartFlow={actions.startFlow}
-            onOpenDrafts={() => actions.navigate("drafts")}
-          />
-        )}
-        {view === "library" && <Library session={session} busy={busy} />}
-        {view === "settings" && <Settings session={session} busy={busy} onOpenDrafts={() => actions.navigate("drafts")} />}
-      </AppLayout>
+      <ErrorBoundary>
+        <AppLayout
+          session={effectiveSession}
+          branding={branding}
+          active={view}
+          onNavigate={actions.navigate}
+          onOpenProject={actions.openProject}
+          onLogout={actions.onLogout}
+          roleSwitcher={roleSwitcher ? <DemoRoleSwitch {...roleSwitcher} /> : null}
+        >
+          {view === "dashboard" && (
+            <Dashboard
+              session={effectiveSession}
+              busy={busy}
+              flows={flows}
+              flowsRefreshing={flowsRefreshing}
+              flowsUpdatedAt={flowsUpdatedAt}
+              activeRoomId={activeRoomId}
+              activeProject={activeProject}
+              projectsCount={Array.isArray(sidebarProjects) ? sidebarProjects.length : 0}
+              projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+              templates={templates}
+              draftsPdfCount={draftsPdfCount}
+              onRefresh={async () => {
+                await Promise.all([
+                  refreshFlows(effectiveSession).catch(() => null),
+                  refreshActiveProject().catch(() => null),
+                  refreshDraftsSummary(effectiveSession).catch(() => null)
+                ]);
+              }}
+              onStartFlow={actions.startFlow}
+              onOpenDrafts={() => actions.navigate("drafts")}
+              onOpenProjects={(opts) => actions.openProjects(opts)}
+              onOpenRequests={actions.openRequests}
+              onOpenProject={actions.openProject}
+            />
+          )}
+          {view === "documents" && (
+            <Documents
+              session={effectiveSession}
+              busy={busy}
+              projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+              onOpenRequests={() => actions.openRequests("all", "all")}
+              onOpenProjects={(opts) => actions.openProjects(opts)}
+              onOpenTemplates={() => actions.navigate("drafts")}
+            />
+          )}
+          {view === "requests" && (
+            <Requests
+              session={effectiveSession}
+              busy={busy}
+              flows={flows}
+              flowsRefreshing={flowsRefreshing}
+              flowsUpdatedAt={flowsUpdatedAt}
+              onRefreshFlows={() => refreshFlows(effectiveSession)}
+              activeRoomId={activeRoomId}
+              activeProject={activeProject}
+              projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+              templates={templates}
+              initialFilter={requestsFilter}
+              initialScope={requestsScope}
+              onBack={() => actions.navigate("dashboard")}
+              onStartFlow={actions.startFlow}
+              onOpenDrafts={() => actions.navigate("drafts")}
+              onOpenProjects={(opts) => actions.openProjects(opts)}
+            />
+          )}
+          {view === "sendDrafts" && (
+            <SendDrafts
+              session={effectiveSession}
+              busy={busy}
+              onOpenRequests={() => actions.openRequests("all", "all")}
+              onOpenBulkSend={() => actions.navigate("bulk")}
+              onOpenBulkLinks={() => actions.navigate("bulkLinks")}
+            />
+          )}
+          {view === "bulk" && (
+            <BulkSend
+              session={effectiveSession}
+              busy={busy}
+              activeRoomId={activeRoomId}
+              activeProject={activeProject}
+              templates={templates}
+              onStartFlow={actions.startFlow}
+              onOpenRequests={() => actions.openRequests("all", "all")}
+            />
+          )}
+          {view === "bulkLinks" && (
+            <BulkLinks
+              session={effectiveSession}
+              busy={busy}
+              activeRoomId={activeRoomId}
+              activeProject={activeProject}
+              templates={templates}
+              onOpenRequests={() => actions.openRequests("all", "all")}
+            />
+          )}
+          {view === "contacts" && (
+            <Contacts
+              session={effectiveSession}
+              busy={busy}
+              projects={Array.isArray(sidebarProjects) ? sidebarProjects : []}
+              activeProject={activeProject}
+              onOpenBulk={() => actions.navigate("bulk")}
+            />
+          )}
+          {view === "projects" && (
+            <Projects
+              session={effectiveSession}
+              busy={busy}
+              onOpenProject={actions.openProject}
+              onOpenDrafts={() => actions.navigate("drafts")}
+            />
+          )}
+          {view === "drafts" && (
+            <Drafts
+              session={effectiveSession}
+              busy={busy}
+              onOpenProject={actions.openProject}
+              onOpenProjects={(opts) => actions.openProjects(opts)}
+              onOpenSettings={() => actions.navigate("settings")}
+            />
+          )}
+          {view === "project" && (
+            <Project
+              session={effectiveSession}
+              busy={busy}
+              projectId={projectId}
+              onBack={() => actions.navigate("projects")}
+              onStartFlow={actions.startFlow}
+              onOpenDrafts={() => actions.navigate("drafts")}
+            />
+          )}
+          {view === "library" && <Library session={effectiveSession} busy={busy} />}
+          {view === "settings" && (
+            <Settings session={effectiveSession} busy={busy} onOpenDrafts={() => actions.navigate("drafts")} />
+          )}
+        </AppLayout>
+      </ErrorBoundary>
     </div>
   );
 }

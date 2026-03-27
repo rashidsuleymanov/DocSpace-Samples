@@ -19,6 +19,17 @@ import { createKbSync } from "./syncKb.js";
 import { createToolExecutor, listToolSpecs } from "./tools.js";
 import { renderEmbedScript } from "./embedScript.js";
 import { extractText } from "./textExtract.js";
+import {
+  createDemoSession,
+  deleteDemoSession,
+  getDemoSessionById,
+  getDemoSessionId,
+  isDemoSessionExpired,
+  setDemoSessionCookie,
+  clearDemoSessionCookie,
+  startDemoJanitor,
+  touchDemoSession
+} from "./demoStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,17 +61,50 @@ function guessExt(name) {
 
 const ALLOWED_KB_UPLOAD_EXTS = new Set(["pdf", "docx", "txt", "md", "csv", "json", "xlsx", "xls"]);
 
-// Widget calls can happen cross-origin (embedded on any website).
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-embed-key"]
-  })
-);
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
+// Widget and embed routes are accessed cross-origin (embedded on any website).
+// Studio/auth routes are same-origin — no permissive CORS for them.
+const widgetCors = cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-embed-key"]
+});
+
+// Demo session middleware — runs on every request when demo mode is enabled.
+app.use((req, _res, next) => {
+  if (!cfg.demo.enabled) return next();
+  const sid = getDemoSessionId(req);
+  if (!sid) return next();
+  const session = getDemoSessionById(sid);
+  if (!session || isDemoSessionExpired(session, cfg.demo)) {
+    if (session) deleteDemoSession(session.id);
+    return next();
+  }
+  touchDemoSession(session);
+  req.demoSession = session;
+  req.user = session.user;
+  req.docspaceToken = cfg.docspace.authToken;
+  next();
+});
 
 function requireAdmin(req, res, next) {
+  // Demo sessions are already authorized by the middleware above.
+  if (cfg.demo.enabled && req.demoSession) return next();
   return userAuth.requireUser(req, res, next);
+}
+
+// Block destructive studio operations in demo mode.
+function requireNotDemo(req, res, next) {
+  if (cfg.demo.enabled && req.demoSession) {
+    return res.status(403).json({ error: "This action is not available in demo mode." });
+  }
+  next();
 }
 
 function requireAgentAccess(agentRecord, userId) {
@@ -211,7 +255,29 @@ function getKbStats(agentId) {
   };
 }
 
+// In-memory rate limiter for login: max 5 attempts per IP per 60 s.
+const _loginAttempts = new Map();
+function checkLoginRateLimit(ip) {
+  const key = String(ip || "unknown");
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 5;
+  if (_loginAttempts.size > 5000) _loginAttempts.clear();
+  const timestamps = (_loginAttempts.get(key) || []).filter((t) => now - t < windowMs);
+  if (timestamps.length >= max) return false;
+  timestamps.push(now);
+  _loginAttempts.set(key, timestamps);
+  return true;
+}
+
 app.post("/api/auth/login", async (req, res, next) => {
+  if (cfg.demo.enabled) {
+    return res.status(403).json({ error: "Login is disabled in demo mode. Use /api/demo/start instead." });
+  }
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+  if (!checkLoginRateLimit(ip)) {
+    return res.status(429).json({ error: "Too many login attempts. Please try again in a minute." });
+  }
   try {
     const email = String(req.body?.email || "").trim();
     const password = String(req.body?.password || "");
@@ -224,10 +290,24 @@ app.post("/api/auth/login", async (req, res, next) => {
 });
 
 app.get("/api/auth/session", (req, res) => {
+  if (cfg.demo.enabled && req.demoSession) {
+    const demoAgent = (store.state.agents || []).find((a) => a.isDemo === true);
+    return res.json({
+      user: req.demoSession.user,
+      hasServiceToken: Boolean(cfg.docspace.authToken),
+      isDemo: true,
+      demoEnabled: true,
+      demoAgentId: demoAgent?.id || null,
+      demoPublicId: demoAgent?.publicId || null,
+      demoExpiresAt: new Date(req.demoSession.createdAt + cfg.demo.ttlMs).toISOString()
+    });
+  }
   const session = userAuth.getSessionFromReq(req);
   res.json({
     user: session?.user?.id ? session.user : null,
-    hasServiceToken: Boolean(cfg.docspace.authToken)
+    hasServiceToken: Boolean(cfg.docspace.authToken),
+    isDemo: false,
+    demoEnabled: cfg.demo.enabled
   });
 });
 
@@ -240,7 +320,7 @@ app.get("/api/studio/agents", requireAdmin, (req, res) => {
   res.json({ agents: agents.listAgents({ ownerId: String(req.user?.id || "") }) });
 });
 
-app.post("/api/studio/agents", requireAdmin, (req, res, next) => {
+app.post("/api/studio/agents", requireAdmin, requireNotDemo, (req, res, next) => {
   try {
     const name = String(req.body?.name || "New agent");
     const agent = agents.createAgent({ name, ownerId: String(req.user?.id || "") });
@@ -250,7 +330,7 @@ app.post("/api/studio/agents", requireAdmin, (req, res, next) => {
   }
 });
 
-app.delete("/api/studio/agents/:id", requireAdmin, (req, res, next) => {
+app.delete("/api/studio/agents/:id", requireAdmin, requireNotDemo, (req, res, next) => {
   try {
     const id = String(req.params.id);
     const record = agents.getAgentRecordById(id);
@@ -304,7 +384,7 @@ app.get("/api/studio/agents/:id/usage", requireAdmin, (req, res) => {
   });
 });
 
-app.put("/api/studio/agents/:id", requireAdmin, (req, res, next) => {
+app.put("/api/studio/agents/:id", requireAdmin, requireNotDemo, (req, res, next) => {
   try {
     const id = String(req.params.id);
     const record = agents.getAgentRecordById(id);
@@ -317,7 +397,7 @@ app.put("/api/studio/agents/:id", requireAdmin, (req, res, next) => {
   }
 });
 
-app.post("/api/studio/agents/:id/rotate-embed-key", requireAdmin, (req, res, next) => {
+app.post("/api/studio/agents/:id/rotate-embed-key", requireAdmin, requireNotDemo, (req, res, next) => {
   try {
     const id = String(req.params.id);
     const record = agents.getAgentRecordById(id);
@@ -331,7 +411,7 @@ app.post("/api/studio/agents/:id/rotate-embed-key", requireAdmin, (req, res, nex
   }
 });
 
-app.post("/api/studio/agents/:id/sync", requireAdmin, async (req, res, next) => {
+app.post("/api/studio/agents/:id/sync", requireAdmin, requireNotDemo, async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const agentRecord = agents.getAgentRecordById(id);
@@ -679,7 +759,7 @@ app.post("/api/studio/openai/models", requireAdmin, async (req, res, next) => {
   }
 });
 
-app.get("/embed.js", (req, res) => {
+app.get("/embed.js", widgetCors, (req, res) => {
   const baseUrl = cfg.publicBaseUrl;
   res
     .status(200)
@@ -705,12 +785,13 @@ app.get("/public/file/:token", async (req, res, next) => {
     row.downloads = Number(row.downloads || 0) + 1;
     store.save();
 
-    const title = String(row.title || `file-${row.fileId}`);
+    // Strip control characters (including \r\n) to prevent header injection.
+    const title = String(row.title || `file-${row.fileId}`).replace(/[\r\n\0]/g, "").replace(/"/g, '\\"');
     res
       .status(200)
       .set({
         "Content-Type": row.contentType || "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${title.replace(/\"/g, "")}"`
+        "Content-Disposition": `attachment; filename="${title}"`
       })
       .send(buf);
   } catch (err) {
@@ -718,7 +799,7 @@ app.get("/public/file/:token", async (req, res, next) => {
   }
 });
 
-app.get("/api/widget/:publicId/config", async (req, res, next) => {
+app.get("/api/widget/:publicId/config", widgetCors, async (req, res, next) => {
   try {
     const publicId = String(req.params.publicId || "").trim();
     const embedKey = String(req.headers["x-embed-key"] || "").trim();
@@ -802,14 +883,34 @@ ${kbText || "(none)"}
 `.trim();
 }
 
-app.post("/api/widget/:publicId/chat", async (req, res, next) => {
+// In-memory rate limiter for widget chat: max 30 messages/min per IP+agent.
+const _widgetChatAttempts = new Map();
+function checkWidgetChatRateLimit(ip, publicId) {
+  const key = `${String(ip || "unknown")}:${String(publicId || "")}`;
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 30;
+  if (_widgetChatAttempts.size > 10_000) _widgetChatAttempts.clear();
+  const timestamps = (_widgetChatAttempts.get(key) || []).filter((t) => now - t < windowMs);
+  if (timestamps.length >= max) return false;
+  timestamps.push(now);
+  _widgetChatAttempts.set(key, timestamps);
+  return true;
+}
+
+app.post("/api/widget/:publicId/chat", widgetCors, async (req, res, next) => {
   try {
     const publicId = String(req.params.publicId || "").trim();
     const embedKey = String(req.headers["x-embed-key"] || "").trim();
     const userMessage = String(req.body?.message || "").trim();
-    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const history = Array.isArray(req.body?.history) ? req.body.history.slice(-10) : [];
     if (!publicId || !embedKey) return res.status(401).json({ error: "Missing embed key" });
     if (!userMessage) return res.status(400).json({ error: "Message is required" });
+
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+    if (!checkWidgetChatRateLimit(ip, publicId)) {
+      return res.status(429).json({ error: "Too many messages. Please slow down." });
+    }
 
     const auth = agents.verifyEmbedKey(publicId, embedKey);
     if (!auth) return res.status(403).json({ error: "Invalid embed key" });
@@ -967,13 +1068,94 @@ app.post("/api/widget/:publicId/chat", async (req, res, next) => {
   }
 });
 
+// ─── Demo stand API ─────────────────────────────────────────────────────────
+
+// Simple in-memory rate limiter: max 5 starts per IP per 60 s.
+const _demoStartAttempts = new Map();
+function checkDemoStartRateLimit(ip) {
+  const key = String(ip || "unknown");
+  const now = Date.now();
+  const window = 60_000;
+  const max = 5;
+  if (_demoStartAttempts.size > 5000) _demoStartAttempts.clear();
+  const timestamps = (_demoStartAttempts.get(key) || []).filter((t) => now - t < window);
+  if (timestamps.length >= max) return false;
+  timestamps.push(now);
+  _demoStartAttempts.set(key, timestamps);
+  return true;
+}
+
+app.post("/api/demo/start", async (req, res, next) => {
+  if (!cfg.demo.enabled) return res.status(404).json({ error: "Not found" });
+  try {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "");
+    if (!checkDemoStartRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many demo start attempts. Please try again in a minute." });
+    }
+
+    const visitorName = String(req.body?.name || "").trim().slice(0, 100) || "Demo User";
+
+    // Find the pre-seeded demo agent.
+    const demoAgent = (store.state.agents || []).find((a) => a.isDemo === true);
+    if (!demoAgent) {
+      console.error("[demo/start] No demo agent found. Check DEMO_MODE and startup seeding.");
+      return res.status(503).json({ error: "Demo is not available right now. Please try again later." });
+    }
+
+    // Demo sessions don't create DocSpace users — they use the service token.
+    // Fixed id "demo" must match the ownerId used when seeding the demo agent,
+    // so that listAgents and requireAgentAccess work correctly.
+    const user = {
+      id: "demo",
+      displayName: visitorName,
+      isDemo: true
+    };
+
+    const session = createDemoSession({ user, agentId: demoAgent.id });
+    setDemoSessionCookie(res, session.id, { ttlMs: cfg.demo.ttlMs, isProd: cfg.isProd });
+
+    res.json({
+      ok: true,
+      user,
+      agentId: demoAgent.id,
+      publicId: demoAgent.publicId,
+      expiresAt: new Date(session.createdAt + cfg.demo.ttlMs).toISOString()
+    });
+  } catch (err) {
+    console.error("[demo/start] unexpected error:", err?.message || err);
+    next(err);
+  }
+});
+
+app.get("/api/demo/session", (req, res) => {
+  if (!cfg.demo.enabled) return res.status(404).json({ error: "Not found" });
+  if (!req.demoSession) return res.json({ active: false });
+  const demoAgent = (store.state.agents || []).find((a) => a.isDemo === true);
+  res.json({
+    active: true,
+    user: req.demoSession.user,
+    agentId: demoAgent?.id || null,
+    publicId: demoAgent?.publicId || null,
+    expiresAt: new Date(req.demoSession.createdAt + cfg.demo.ttlMs).toISOString()
+  });
+});
+
+app.post("/api/demo/end", (req, res) => {
+  if (!cfg.demo.enabled) return res.status(404).json({ error: "Not found" });
+  const sid = getDemoSessionId(req);
+  if (sid) deleteDemoSession(sid);
+  clearDemoSessionCookie(res, { isProd: cfg.isProd });
+  res.json({ ok: true });
+});
+
+// ─── End demo stand API ──────────────────────────────────────────────────────
+
 app.use((err, _req, res, _next) => {
   const status = Number(err?.status) || 500;
-  const message = err?.message || "Internal server error";
   if (status >= 500) {
     console.error("[agents-portal] error", err);
   }
-  res.status(status).json({ error: message });
+  res.status(status).json({ error: status < 500 ? (err?.message || "Error") : "Internal server error" });
 });
 
 const clientRoot = path.resolve(__dirname, "../../client");
@@ -997,6 +1179,28 @@ function listenWithFallback(server, startPort, { maxTries = 25 } = {}) {
     }
     tryListen(base);
   });
+}
+
+async function seedDemoAgent() {
+  if (!cfg.demo.enabled) return;
+  const existing = (store.state.agents || []).find((a) => a.isDemo === true);
+  if (existing) {
+    console.log(`[demo] Demo agent already exists: "${existing.name}" (id=${existing.id})`);
+    return existing;
+  }
+  const agent = agents.createAgent({ name: cfg.demo.agentName, ownerId: "demo" });
+  // Patch the persisted record with demo-specific fields.
+  const idx = (store.state.agents || []).findIndex((a) => a.id === agent.id);
+  if (idx >= 0) {
+    store.state.agents[idx].isDemo = true;
+    if (cfg.demo.kbRoomId) {
+      store.state.agents[idx].kbRoomId = cfg.demo.kbRoomId;
+      store.state.agents[idx].kbIncludeRoomRoot = true;
+    }
+    store.save();
+  }
+  console.log(`[demo] Demo agent seeded: "${agent.name}" (id=${agent.id})`);
+  return agent;
 }
 
 async function start() {
@@ -1030,6 +1234,20 @@ async function start() {
     app.get("*", (_req, res) => {
       res.sendFile(path.join(clientRoot, "dist", "index.html"));
     });
+  }
+
+  await seedDemoAgent();
+
+  if (cfg.demo.enabled) {
+    startDemoJanitor({
+      ttlMs: cfg.demo.ttlMs,
+      idleMs: cfg.demo.idleMs,
+      intervalMs: cfg.demo.janitorIntervalMs,
+      onExpire: async (session) => {
+        console.log(`[demo-janitor] Session expired: ${session.id} (user=${session.user?.displayName || session.user?.id})`);
+      }
+    });
+    console.log("[demo] Demo stand is ON — janitor started.");
   }
 
   const port = await listenWithFallback(httpServer, cfg.port);

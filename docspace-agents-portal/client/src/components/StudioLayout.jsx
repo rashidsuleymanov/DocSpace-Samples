@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../services/session.js";
 
@@ -12,9 +12,73 @@ function NavItem({ to, label }) {
   );
 }
 
+function DemoBanner({ session }) {
+  const nav = useNavigate();
+  const [remaining, setRemaining] = useState("");
+
+  useEffect(() => {
+    if (!session.demoExpiresAt) return;
+    function tick() {
+      const diff = new Date(session.demoExpiresAt).getTime() - Date.now();
+      if (diff <= 0) {
+        setRemaining("Истекло");
+        return;
+      }
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setRemaining(`${m}:${String(s).padStart(2, "0")}`);
+    }
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [session.demoExpiresAt]);
+
+  async function handleEnd() {
+    await session.endDemo();
+    nav("/", { replace: true });
+  }
+
+  return (
+    <div className="demo-banner">
+      <div className="demo-banner-left">
+        <span className="demo-badge">Demo</span>
+        <span className="demo-banner-name">{session.user?.displayName || "Demo User"}</span>
+        {remaining ? <span className="demo-banner-timer">{remaining}</span> : null}
+      </div>
+      <div className="demo-banner-right">
+        {session.demoPublicId ? (
+          <a
+            href={`/w/${session.demoPublicId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn sm secondary"
+          >
+            Открыть виджет
+          </a>
+        ) : null}
+        <button className="btn sm secondary" onClick={handleEnd}>
+          Завершить демо
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function StudioLayout() {
   const session = useSession();
   const nav = useNavigate();
+
+  // Send a beacon on tab close so the server can clean up the demo session sooner.
+  useEffect(() => {
+    if (!session.isDemo) return;
+    function onVisibilityHide() {
+      if (document.visibilityState === "hidden") {
+        navigator.sendBeacon?.("/api/demo/end");
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityHide);
+    return () => document.removeEventListener("visibilitychange", onVisibilityHide);
+  }, [session.isDemo]);
 
   async function logout() {
     await session.logout();
@@ -22,7 +86,9 @@ export default function StudioLayout() {
   }
 
   return (
-    <div className="layout">
+    <div className={`layout ${session.isDemo ? "layout-with-banner" : ""}`}>
+      {session.isDemo ? <DemoBanner session={session} /> : null}
+
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">A</div>
@@ -34,19 +100,27 @@ export default function StudioLayout() {
 
         <nav className="nav">
           <NavItem to="/studio" label="Agents" />
-          <NavItem to="/studio/templates" label="Templates" />
+          {!session.isDemo ? <NavItem to="/studio/templates" label="Templates" /> : null}
         </nav>
 
         <div className="sidebar-footer">
           <div className="muted" style={{ fontSize: "0.85rem" }}>
-            Signed in as{" "}
-            <span className="chip" style={{ padding: "4px 8px" }}>
-              {session?.user?.displayName || session?.user?.email || "User"}
-            </span>
+            {session.isDemo ? (
+              <span className="demo-badge" style={{ borderRadius: 8, fontSize: "0.82rem" }}>Demo режим</span>
+            ) : (
+              <>
+                Signed in as{" "}
+                <span className="chip" style={{ padding: "4px 8px" }}>
+                  {session?.user?.displayName || session?.user?.email || "User"}
+                </span>
+              </>
+            )}
           </div>
-          <button className="btn secondary" onClick={logout} style={{ marginTop: 8, width: "100%" }}>
-            Sign out
-          </button>
+          {!session.isDemo ? (
+            <button className="btn secondary" onClick={logout} style={{ marginTop: 8, width: "100%" }}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </aside>
 

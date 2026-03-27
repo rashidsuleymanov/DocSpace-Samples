@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "meta": {
     "nextChunkId": 32,
-    "nextAuditId": 83
+    "nextAuditId": 99
   },
   "adminSessions": [
     {
@@ -67,7 +67,52 @@
       "embedKeySalt": "PQlwVjMtUaz4jIof",
       "embedKeyHash": "smUmJrbUrGZJbHkq2XkigOLpO4pSAQXD338JeWWIQPI",
       "createdAt": "2026-03-02T06:58:44.527Z",
-      "updatedAt": "2026-03-02T08:38:40.149Z"
+      "updatedAt": "2026-03-13T06:54:56.731Z"
+    },
+    {
+      "id": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "publicId": "a_aMp3DnaLufsFsQ",
+      "ownerId": "89bbb9ac-ab74-4c8e-a690-8e58b6045419",
+      "name": "New agent",
+      "systemPrompt": "You are a helpful assistant. Use the available tools when needed.",
+      "llmProvider": "ollama",
+      "llm": {
+        "provider": "ollama",
+        "openai": {
+          "apiKey": "",
+          "chatModel": "gpt-4o-mini",
+          "embedModel": "text-embedding-3-small"
+        },
+        "ollama": {
+          "baseUrl": "http://localhost:11434",
+          "chatModel": "gemma3:4b",
+          "embedModel": "nomic-embed-text"
+        }
+      },
+      "kbRoomId": "",
+      "kbIncludeRoomRoot": true,
+      "kbFolderIds": [],
+      "kbFileIds": [],
+      "tools": {
+        "allowAllDocSpace": false
+      },
+      "theme": {
+        "title": "New agent",
+        "launcherText": "New agent",
+        "primaryColor": "#0f172a",
+        "accentColor": "#38bdf8",
+        "borderRadius": 18,
+        "position": "right"
+      },
+      "billing": {
+        "trialMessages": 5,
+        "requireOwnKeyAfterTrial": true
+      },
+      "embedKey": "k_w3iN6bnzHDC3M2oivvLQv92o",
+      "embedKeySalt": "rAt8BNDJOsBjqVYO",
+      "embedKeyHash": "Cz6_KFmPxmCrHlolzNqhhka4yq8pEXhblRUte7G29nU",
+      "createdAt": "2026-03-13T06:49:55.643Z",
+      "updatedAt": "2026-03-13T06:49:55.643Z"
     }
   ],
   "kbAllowed": {
@@ -4221,11 +4266,189 @@
         "hasAnswer": true
       },
       "createdAt": "2026-03-02T08:46:03.213Z"
+    },
+    {
+      "id": 83,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:51:50.067Z"
+    },
+    {
+      "id": 84,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:51:50.068Z"
+    },
+    {
+      "id": 85,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:52:04.612Z"
+    },
+    {
+      "id": 86,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:52:04.614Z"
+    },
+    {
+      "id": 87,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:52:06.667Z"
+    },
+    {
+      "id": 88,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:52:06.668Z"
+    },
+    {
+      "id": 89,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:52:07.234Z"
+    },
+    {
+      "id": 90,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:52:07.236Z"
+    },
+    {
+      "id": 91,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:52:07.408Z"
+    },
+    {
+      "id": 92,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:52:07.410Z"
+    },
+    {
+      "id": 93,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-13T06:52:07.570Z"
+    },
+    {
+      "id": 94,
+      "agentId": "5750b4fe-93a6-4c54-bc6c-6c754ffd9240",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-13T06:52:07.572Z"
+    },
+    {
+      "id": 95,
+      "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+      "event": "widget_chat",
+      "payload": {
+        "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+        "publicId": "a_7SzZonZ83OPP_g",
+        "steps": 1,
+        "hasAnswer": true
+      },
+      "createdAt": "2026-03-13T06:52:48.906Z"
+    },
+    {
+      "id": 96,
+      "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+      "event": "widget_chat",
+      "payload": {
+        "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+        "publicId": "a_7SzZonZ83OPP_g",
+        "steps": 1,
+        "hasAnswer": true
+      },
+      "createdAt": "2026-03-13T06:54:34.920Z"
+    },
+    {
+      "id": 97,
+      "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+      "event": "widget_chat",
+      "payload": {
+        "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+        "publicId": "a_7SzZonZ83OPP_g",
+        "steps": 1,
+        "hasAnswer": true
+      },
+      "createdAt": "2026-03-13T06:58:10.546Z"
+    },
+    {
+      "id": 98,
+      "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+      "event": "widget_chat",
+      "payload": {
+        "agentId": "89735dbf-a653-4718-b604-31f9a17facc5",
+        "publicId": "a_7SzZonZ83OPP_g",
+        "steps": 1,
+        "hasAnswer": true
+      },
+      "createdAt": "2026-03-13T07:02:20.991Z"
     }
   ],
   "usage": {
     "89735dbf-a653-4718-b604-31f9a17facc5": {
-      "messagesTotal": 4,
+      "messagesTotal": 8,
+      "trialMessagesUsed": 0
+    },
+    "5750b4fe-93a6-4c54-bc6c-6c754ffd9240": {
+      "messagesTotal": 0,
       "trialMessagesUsed": 0
     }
   },
@@ -4309,6 +4532,46 @@
       "createdAt": "2026-03-02T07:16:31.191Z",
       "lastUsedAt": "2026-03-02T11:03:25.166Z",
       "expiresAt": "2026-03-09T07:16:31.191Z"
+    },
+    {
+      "sidHash": "qvNLVlYmUmmG8uDgcTrOLHoeFtwbE9eIvQ9AiQ3yo6Q",
+      "token": "KvHFkLY3OSbzLZt3tM35/fLyujeDk/WQXQ6UdPSvlIH2WRNeIg4dd7ECm0amBJFi3m3kK7gzdtLcmr/vtKwrKiSxEJsR56wn71ZEkp8X/rKOsjrq+NLyPO3uqyqTrPK2zdgv9/dRQmqKqsOU4xpmxq3EtGkQHDWxBl4qlekX/wY=",
+      "user": {
+        "firstName": "Emily",
+        "lastName": "Carter",
+        "userName": "rashid.suleymanov",
+        "email": "rashid.suleymanov@onlyoffice.com",
+        "status": 1,
+        "activationStatus": 1,
+        "department": "",
+        "workFrom": "2026-02-09T06:00:00.0000000+06:00",
+        "isAdmin": false,
+        "isRoomAdmin": true,
+        "isLDAP": false,
+        "isOwner": false,
+        "isVisitor": false,
+        "isCollaborator": false,
+        "cultureName": "en-US",
+        "mobilePhoneActivationStatus": 0,
+        "isSSO": false,
+        "theme": "System",
+        "loginEventId": 0,
+        "registrationDate": "2026-02-09T12:51:12.0000000+06:00",
+        "hasPersonalFolder": true,
+        "id": "89bbb9ac-ab74-4c8e-a690-8e58b6045419",
+        "displayName": "Emily Carter",
+        "avatar": "/static/images/default_user_photo_size_82-82.png?hash=1474497326",
+        "avatarOriginal": "/static/images/default_user_photo_size_200-200.png?hash=1474497326",
+        "avatarMax": "/static/images/default_user_photo_size_200-200.png?hash=1474497326",
+        "avatarMedium": "/static/images/default_user_photo_size_48-48.png?hash=1474497326",
+        "avatarSmall": "/static/images/default_user_photo_size_32-32.png?hash=1474497326",
+        "profileUrl": "https://suleymanovrn.onlyoffice.com/accounts/people/filter?search=rashid.suleymanov%40onlyoffice.com",
+        "hasAvatar": false,
+        "isAnonim": false
+      },
+      "createdAt": "2026-03-13T06:53:05.664Z",
+      "lastUsedAt": "2026-03-13T07:01:42.337Z",
+      "expiresAt": "2026-03-20T06:53:05.664Z"
     }
   ]
 }

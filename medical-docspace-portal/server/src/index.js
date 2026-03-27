@@ -28,7 +28,13 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "35mb" }));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "10mb" }));
 
 app.use((req, _res, next) => {
   const sid = getDemoSessionId(req);
@@ -54,8 +60,12 @@ app.use("/api/patients", patientRoutes);
 app.use("/api/doctor", doctorRoutes);
 
 const isProd = process.env.NODE_ENV === "production";
-const debugEnabled = process.env.ENABLE_DEBUG_API === "true" || !isProd;
+// Debug API requires explicit opt-in via ENABLE_DEBUG_API=true — never enabled automatically.
+const debugEnabled = process.env.ENABLE_DEBUG_API === "true";
 if (debugEnabled) {
+  if (isProd) {
+    console.warn("[medical-portal] WARNING: ENABLE_DEBUG_API=true in production. Debug endpoints are active.");
+  }
   app.use("/api/debug", debugRoutes);
 }
 

@@ -47,18 +47,30 @@ export function createLlmHub() {
   async function openaiChat({ system, messages, apiKey, chatModel, mode }) {
     const resolved = resolveOpenAi({ apiKey, chatModel });
     if (!resolved.apiKey) throw new Error("OPENAI_API_KEY is not set");
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${resolved.apiKey}`
-      },
-      body: JSON.stringify({
-        model: resolved.chatModel,
-        temperature: 0.2,
-        messages: [{ role: "system", content: system }, ...(messages || [])]
-      })
-    });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 45_000);
+    let res;
+    try {
+      res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${resolved.apiKey}`
+        },
+        body: JSON.stringify({
+          model: resolved.chatModel,
+          temperature: 0.2,
+          messages: [{ role: "system", content: system }, ...(messages || [])]
+        })
+      });
+    } catch (e) {
+      const err = new Error(e?.name === "AbortError" ? "OpenAI request timed out" : `OpenAI unreachable: ${e?.message}`);
+      err.status = e?.name === "AbortError" ? 504 : 502;
+      throw err;
+    } finally {
+      clearTimeout(t);
+    }
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -112,11 +124,23 @@ export function createLlmHub() {
     if (mode === "json") {
       body.format = "json";
     }
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 120_000);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      const err = new Error(e?.name === "AbortError" ? "Ollama request timed out" : `Ollama unreachable: ${e?.message}`);
+      err.status = e?.name === "AbortError" ? 504 : 502;
+      throw err;
+    } finally {
+      clearTimeout(t);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = new Error(data?.error || res.statusText);

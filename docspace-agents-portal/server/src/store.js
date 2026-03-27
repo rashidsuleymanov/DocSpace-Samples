@@ -24,8 +24,13 @@ function defaultState() {
 
 function atomicWriteJson(filePath, data) {
   const tmp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-  fs.renameSync(tmp, filePath);
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    console.error("[store] Failed to persist state:", err?.message || err);
+    try { fs.unlinkSync(tmp); } catch { /* ignore cleanup failure */ }
+  }
 }
 
 export function nowIso() {
@@ -60,6 +65,10 @@ export function openStore() {
       payload: payload || {},
       createdAt: nowIso()
     });
+    // Cap to 1000 entries to prevent unbounded file growth.
+    if (state.auditLogs.length > 1000) {
+      state.auditLogs = state.auditLogs.slice(-1000);
+    }
     save();
   }
 

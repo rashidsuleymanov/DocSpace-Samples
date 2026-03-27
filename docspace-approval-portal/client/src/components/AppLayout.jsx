@@ -29,7 +29,7 @@ const navSections = [
   }
 ];
 
-export default function AppLayout({ session, branding, active, onNavigate, onOpenProject, onLogout, children }) {
+export default function AppLayout({ session, branding, active, onNavigate, onOpenProject, onLogout, roleSwitcher, children }) {
   const displayName = session?.user?.displayName || session?.user?.email || "User";
   const token = session?.token || "";
   const projectsActive = active === "projects" || active === "project";
@@ -380,8 +380,9 @@ export default function AppLayout({ session, branding, active, onNavigate, onOpe
               <span className="muted truncate">{session?.user?.email || session?.user?.userName || ""}</span>
             </div>
           </div>
+          {roleSwitcher && <div className="demo-role-switch-wrapper">{roleSwitcher}</div>}
           <button type="button" className="btn subtle sidebar-signout" onClick={onLogout}>
-            Sign out
+            {roleSwitcher ? "End demo" : "Sign out"}
           </button>
         </div>
       </aside>

@@ -663,6 +663,57 @@ export function updateProjectContact(contactId, patch = {}) {
   return next;
 }
 
+export function purgeDemoData({ projectRoomId, requesterUserId } = {}) {
+  const roomId = String(projectRoomId || "").trim();
+  const uid = String(requesterUserId || "").trim();
+
+  // Remove flows in the demo project room or created by the demo requester
+  const flowIds = flows
+    .filter((f) => (roomId && String(f?.projectRoomId || "") === roomId) || (uid && String(f?.createdByUserId || "") === uid))
+    .map((f) => String(f?.id || ""))
+    .filter(Boolean);
+  for (const fid of flowIds) {
+    const idx = flows.findIndex((f) => String(f?.id || "") === fid);
+    if (idx >= 0) flows.splice(idx, 1);
+  }
+
+  // Remove projects for the demo room
+  if (roomId) {
+    const projectIds = projects
+      .filter((p) => String(p?.roomId || "") === roomId)
+      .map((p) => String(p?.id || ""))
+      .filter(Boolean);
+    for (const pid of projectIds) {
+      const idx = projects.findIndex((p) => String(p?.id || "") === pid);
+      if (idx >= 0) projects.splice(idx, 1);
+    }
+  }
+
+  // Remove contacts created by the demo requester
+  if (uid) {
+    const contactIds = contacts
+      .filter((c) => String(c?.ownerUserId || "") === uid)
+      .map((c) => String(c?.id || ""))
+      .filter(Boolean);
+    for (const cid of contactIds) {
+      const idx = contacts.findIndex((c) => String(c?.id || "") === cid);
+      if (idx >= 0) contacts.splice(idx, 1);
+    }
+  }
+
+  // Remove project contacts in the demo room or created by the requester
+  const pcIds = projectContacts
+    .filter((c) => (roomId && String(c?.projectId || "") === roomId) || (uid && String(c?.createdByUserId || "") === uid))
+    .map((c) => String(c?.id || ""))
+    .filter(Boolean);
+  for (const cid of pcIds) {
+    const idx = projectContacts.findIndex((c) => String(c?.id || "") === cid);
+    if (idx >= 0) projectContacts.splice(idx, 1);
+  }
+
+  scheduleSave();
+}
+
 export function deleteProjectContact(contactId) {
   const cid = normalize(contactId);
   if (!cid) return false;

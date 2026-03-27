@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../services/http.js";
 import ChatWidget from "../components/ChatWidget.jsx";
+import { useSession } from "../services/session.js";
 
 const OPENAI_CHAT_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"];
 const OPENAI_EMBED_MODELS = ["text-embedding-3-small", "text-embedding-3-large"];
@@ -84,6 +85,7 @@ function ensureOption(list, current) {
 
 export default function StudioAgentEditor() {
   const { id } = useParams();
+  const session = useSession();
   const detailsRef = useRef(null);
   const modelRef = useRef(null);
   const kbRef = useRef(null);
@@ -458,12 +460,16 @@ export default function StudioAgentEditor() {
           <Link className="btn secondary" to="/studio" style={{ textDecoration: "none" }}>
             Back
           </Link>
-          <button className="btn secondary" onClick={deleteThisAgent}>
-            Delete
-          </button>
-          <button className="btn" onClick={save} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </button>
+          {!session.isDemo ? (
+            <button className="btn secondary" onClick={deleteThisAgent}>
+              Delete
+            </button>
+          ) : null}
+          {!session.isDemo ? (
+            <button className="btn" onClick={save} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </button>
+          ) : null}
         </div>
       </div>
 

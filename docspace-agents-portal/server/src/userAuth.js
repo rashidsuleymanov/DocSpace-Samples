@@ -12,7 +12,11 @@ function parseCookies(header) {
     const k = part.slice(0, idx).trim();
     const v = part.slice(idx + 1).trim();
     if (!k) continue;
-    out[k] = decodeURIComponent(v || "");
+    try {
+      out[k] = decodeURIComponent(v || "");
+    } catch {
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -38,7 +42,11 @@ export function createUserAuth({ store, docspace }) {
     const sidHash = sha256Base64Url(sid);
     const now = nowIso();
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
-    store.state.userSessions = (store.state.userSessions || []).filter((s) => s.sidHash !== sidHash);
+    const nowMs = Date.now();
+    // Remove the same session (if re-issuing) and prune all expired sessions to prevent unbounded growth.
+    store.state.userSessions = (store.state.userSessions || [])
+      .filter((s) => s.sidHash !== sidHash)
+      .filter((s) => !s.expiresAt || Date.parse(s.expiresAt) > nowMs);
     store.state.userSessions.push({
       sidHash,
       token: String(token || ""),

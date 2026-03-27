@@ -260,12 +260,25 @@ router.get("/medical-records", async (req, res) => {
     if (!auth) {
       return res.status(401).json({ error: "Authorization token is required" });
     }
+    // Verify the authenticated patient owns the requested room.
+    const demoRoomId = req.demoSession?.patient?.roomId;
+    if (demoRoomId) {
+      if (String(roomId) !== String(demoRoomId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+    } else {
+      const self = await getSelfProfileWithToken(auth);
+      const ownedRoomId = getPatientRoomIdByUserId(self?.id);
+      if (ownedRoomId && String(roomId) !== String(ownedRoomId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+    }
     const records = listMedicalRecords(roomId);
     return res.json({ records });
   } catch (error) {
-    return res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({
+      error: status < 500 ? error.message : "Internal server error"
     });
   }
 });
@@ -1227,6 +1240,22 @@ router.post("/update-profile", async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: "userId is required" });
     }
+    const auth = getPatientAuth(req);
+    if (!auth) {
+      return res.status(401).json({ error: "Authorization token is required" });
+    }
+    // Verify the authenticated patient is updating only their own profile.
+    const demoUserId = req.demoSession?.patient?.userId;
+    if (demoUserId) {
+      if (String(userId) !== String(demoUserId)) {
+        return res.status(403).json({ error: "Cannot update another user's profile" });
+      }
+    } else {
+      const self = await getSelfProfileWithToken(auth);
+      if (String(self?.id) !== String(userId)) {
+        return res.status(403).json({ error: "Cannot update another user's profile" });
+      }
+    }
     const result = await updateMember({
       userId,
       fullName,
@@ -1241,9 +1270,7 @@ router.post("/update-profile", async (req, res) => {
     console.log("[update-profile] applied", {
       userId,
       firstName: user?.firstName,
-      lastName: user?.lastName,
-      email: user?.email,
-      mobilePhone: user?.mobilePhone
+      lastName: user?.lastName
     });
     const room = roomId ? await getRoomInfo(roomId) : null;
     return res.json({
@@ -1253,9 +1280,9 @@ router.post("/update-profile", async (req, res) => {
       requested: result?.requested || null
     });
   } catch (error) {
-    return res.status(error.status || 500).json({
-      error: error.message,
-      details: error.details || null
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({
+      error: status < 500 ? error.message : "Internal server error"
     });
   }
 });
