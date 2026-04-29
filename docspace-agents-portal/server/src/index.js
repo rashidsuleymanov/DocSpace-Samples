@@ -93,9 +93,19 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Service-token auto-auth: if DOCSPACE_AUTH_TOKEN is set and demo mode is off,
+// every request is automatically authenticated as admin — no login required.
+app.use((req, _res, next) => {
+  if (req.user) return next(); // already set by demo middleware
+  if (cfg.demo.enabled) return next();
+  if (!cfg.docspace.authToken) return next();
+  req.user = { id: "admin", displayName: "Admin", isServiceToken: true };
+  req.docspaceToken = cfg.docspace.authToken;
+  next();
+});
+
 function requireAdmin(req, res, next) {
-  // Demo sessions are already authorized by the middleware above.
-  if (cfg.demo.enabled && req.demoSession) return next();
+  if (req.user) return next(); // set by demo or service-token middleware
   return userAuth.requireUser(req, res, next);
 }
 
@@ -300,6 +310,15 @@ app.get("/api/auth/session", (req, res) => {
       demoAgentId: demoAgent?.id || null,
       demoPublicId: demoAgent?.publicId || null,
       demoExpiresAt: new Date(req.demoSession.createdAt + cfg.demo.ttlMs).toISOString()
+    });
+  }
+  // Service-token auto-auth (no demo, no explicit session needed).
+  if (!cfg.demo.enabled && cfg.docspace.authToken) {
+    return res.json({
+      user: { id: "admin", displayName: "Admin", isServiceToken: true },
+      hasServiceToken: true,
+      isDemo: false,
+      demoEnabled: false
     });
   }
   const session = userAuth.getSessionFromReq(req);
@@ -1256,5 +1275,15 @@ async function start() {
   }
   console.log(`[agents-portal] ${cfg.isProd ? "prod" : "dev"} on http://localhost:${port}`);
 }
+
+let _shuttingDown = false;
+async function shutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`[agents-portal] ${signal} received, shutting down.`);
+  process.exit(0);
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 start();

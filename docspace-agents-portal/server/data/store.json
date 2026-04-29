@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "meta": {
     "nextChunkId": 32,
-    "nextAuditId": 99
+    "nextAuditId": 101
   },
   "adminSessions": [
     {
@@ -113,6 +113,141 @@
       "embedKeyHash": "Cz6_KFmPxmCrHlolzNqhhka4yq8pEXhblRUte7G29nU",
       "createdAt": "2026-03-13T06:49:55.643Z",
       "updatedAt": "2026-03-13T06:49:55.643Z"
+    },
+    {
+      "id": "a446b2a9-fe9d-4836-8e69-7ab3e38c8b38",
+      "publicId": "a_jAEJAmFoCsV1fg",
+      "ownerId": "admin",
+      "name": "New agent",
+      "systemPrompt": "You are a helpful assistant. Use the available tools when needed.",
+      "llmProvider": "ollama",
+      "llm": {
+        "provider": "ollama",
+        "openai": {
+          "apiKey": "",
+          "chatModel": "gpt-4o-mini",
+          "embedModel": "text-embedding-3-small"
+        },
+        "ollama": {
+          "baseUrl": "http://localhost:11434",
+          "chatModel": "gemma3:4b",
+          "embedModel": "nomic-embed-text"
+        }
+      },
+      "kbRoomId": "",
+      "kbIncludeRoomRoot": true,
+      "kbFolderIds": [],
+      "kbFileIds": [],
+      "tools": {
+        "allowAllDocSpace": false
+      },
+      "theme": {
+        "title": "New agent",
+        "launcherText": "New agent",
+        "primaryColor": "#0f172a",
+        "accentColor": "#38bdf8",
+        "borderRadius": 18,
+        "position": "right"
+      },
+      "billing": {
+        "trialMessages": 5,
+        "requireOwnKeyAfterTrial": true
+      },
+      "embedKey": "k_pQrjJyaRIZJevbSouokwwt-S",
+      "embedKeySalt": "KOsLpXwE2254nMCf",
+      "embedKeyHash": "kAzkN_mJxwI5ago7ZvLx5u4btglODx803n5c5lxTLLc",
+      "createdAt": "2026-03-30T11:28:38.843Z",
+      "updatedAt": "2026-03-30T11:28:38.843Z"
+    },
+    {
+      "id": "029fa21d-6fdc-4d99-ab95-5d2146137381",
+      "publicId": "a_0sztQy5CHBdWYw",
+      "ownerId": "admin",
+      "name": "New agent",
+      "systemPrompt": "You are a helpful assistant. Use the available tools when needed.",
+      "llmProvider": "ollama",
+      "llm": {
+        "provider": "ollama",
+        "openai": {
+          "apiKey": "",
+          "chatModel": "gpt-4o-mini",
+          "embedModel": "text-embedding-3-small"
+        },
+        "ollama": {
+          "baseUrl": "http://localhost:11434",
+          "chatModel": "gemma3:4b",
+          "embedModel": "nomic-embed-text"
+        }
+      },
+      "kbRoomId": "",
+      "kbIncludeRoomRoot": true,
+      "kbFolderIds": [],
+      "kbFileIds": [],
+      "tools": {
+        "allowAllDocSpace": false
+      },
+      "theme": {
+        "title": "New agent",
+        "launcherText": "New agent",
+        "primaryColor": "#0f172a",
+        "accentColor": "#38bdf8",
+        "borderRadius": 18,
+        "position": "right"
+      },
+      "billing": {
+        "trialMessages": 5,
+        "requireOwnKeyAfterTrial": true
+      },
+      "embedKey": "k_p8d0xg6SXTpOJcbj6GXgP7bh",
+      "embedKeySalt": "WjKg6ylENEiyNqnS",
+      "embedKeyHash": "0r4uNDqpMv-5G8ujv1Kefy1wqO7W6dxVQly2UzF0zcw",
+      "createdAt": "2026-03-30T11:31:13.090Z",
+      "updatedAt": "2026-03-30T11:31:13.090Z"
+    },
+    {
+      "id": "b61bc242-43b8-485f-8aed-1024003bf1d5",
+      "publicId": "a_mj4YOF8mXvwzYg",
+      "ownerId": "admin",
+      "name": "New agent",
+      "systemPrompt": "You are a helpful assistant. Use the available tools when needed.",
+      "llmProvider": "ollama",
+      "llm": {
+        "provider": "ollama",
+        "openai": {
+          "apiKey": "",
+          "chatModel": "gpt-4o-mini",
+          "embedModel": "text-embedding-3-small"
+        },
+        "ollama": {
+          "baseUrl": "http://localhost:11434",
+          "chatModel": "gemma3:4b",
+          "embedModel": "nomic-embed-text"
+        }
+      },
+      "kbRoomId": "",
+      "kbIncludeRoomRoot": true,
+      "kbFolderIds": [],
+      "kbFileIds": [],
+      "tools": {
+        "allowAllDocSpace": false
+      },
+      "theme": {
+        "title": "New agent",
+        "launcherText": "New agent",
+        "primaryColor": "#0f172a",
+        "accentColor": "#38bdf8",
+        "borderRadius": 18,
+        "position": "right"
+      },
+      "billing": {
+        "trialMessages": 5,
+        "requireOwnKeyAfterTrial": true
+      },
+      "embedKey": "k_nh2d9uVeZ4KLUMR1o6jJTCqN",
+      "embedKeySalt": "Vp8ioDELdt4o9OGe",
+      "embedKeyHash": "-XUi5OgYBnVNP3BersgHmitcUqbBzgTCIcj1s3vqJ2g",
+      "createdAt": "2026-03-30T11:38:13.013Z",
+      "updatedAt": "2026-03-30T11:38:13.013Z"
     }
   ],
   "kbAllowed": {
@@ -4440,6 +4575,27 @@
         "hasAnswer": true
       },
       "createdAt": "2026-03-13T07:02:20.991Z"
+    },
+    {
+      "id": 99,
+      "agentId": "b61bc242-43b8-485f-8aed-1024003bf1d5",
+      "event": "kb_sync_request",
+      "payload": {
+        "roomId": "",
+        "includeRoomRoot": true,
+        "folderIdsCount": 0,
+        "fileIdsCount": 0
+      },
+      "createdAt": "2026-03-30T11:39:06.015Z"
+    },
+    {
+      "id": 100,
+      "agentId": "b61bc242-43b8-485f-8aed-1024003bf1d5",
+      "event": "kb_sync_error",
+      "payload": {
+        "message": "Agent KB roomId is not configured"
+      },
+      "createdAt": "2026-03-30T11:39:06.018Z"
     }
   ],
   "usage": {
@@ -4448,6 +4604,18 @@
       "trialMessagesUsed": 0
     },
     "5750b4fe-93a6-4c54-bc6c-6c754ffd9240": {
+      "messagesTotal": 0,
+      "trialMessagesUsed": 0
+    },
+    "a446b2a9-fe9d-4836-8e69-7ab3e38c8b38": {
+      "messagesTotal": 0,
+      "trialMessagesUsed": 0
+    },
+    "029fa21d-6fdc-4d99-ab95-5d2146137381": {
+      "messagesTotal": 0,
+      "trialMessagesUsed": 0
+    },
+    "b61bc242-43b8-485f-8aed-1024003bf1d5": {
       "messagesTotal": 0,
       "trialMessagesUsed": 0
     }

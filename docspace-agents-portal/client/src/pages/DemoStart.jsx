@@ -10,12 +10,12 @@ export default function DemoStart() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // If already in demo session, go straight to Studio.
+  // If already authed (demo or regular), go straight to Studio.
   useEffect(() => {
-    if (!session.loading && session.isAuthed && session.isDemo) {
+    if (!session.loading && session.isAuthed) {
       nav("/studio", { replace: true });
     }
-  }, [session.loading, session.isAuthed, session.isDemo, nav]);
+  }, [session.loading, session.isAuthed, nav]);
 
   async function startDemo(e) {
     e.preventDefault();
@@ -77,6 +77,14 @@ export default function DemoStart() {
         <div className="demo-start-note">
           Сессия автоматически завершается через 30 минут или при закрытии вкладки.
         </div>
+
+        {!session.demoEnabled && (
+          <div style={{ marginTop: 16, textAlign: "center" }}>
+            <a href="/studio/login" style={{ color: "inherit", opacity: 0.6, fontSize: "0.9rem" }}>
+              Войти как администратор
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -791,9 +791,11 @@ export default function StudioAgentEditor() {
             <div className="divider" />
             <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
               {setupStep === 1 ? (
-                <button className="btn secondary" type="button" onClick={save} disabled={saving}>
-                  {saving ? "Saving..." : "Save"}
-                </button>
+                !session.isDemo ? (
+                  <button className="btn secondary" type="button" onClick={save} disabled={saving}>
+                    {saving ? "Saving..." : "Save"}
+                  </button>
+                ) : <span />
               ) : (
                 <button className="btn secondary" type="button" onClick={() => goStep(setupStep === 2 ? 1 : 3)}>
                   Back
@@ -808,11 +810,11 @@ export default function StudioAgentEditor() {
                 <button className="btn" type="button" onClick={() => goStep(3)}>
                   Next: Knowledge
                 </button>
-              ) : (
+              ) : !session.isDemo ? (
                 <button className="btn" type="button" onClick={save} disabled={saving}>
                   {saving ? "Saving..." : "Save"}
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../services/session.js";
 
@@ -68,17 +68,28 @@ export default function StudioLayout() {
   const session = useSession();
   const nav = useNavigate();
 
-  // Send a beacon on tab close so the server can clean up the demo session sooner.
+  // Send a beacon when the page is actually unloaded (close/navigate away).
+  // Using "pagehide" instead of "visibilitychange" so switching tabs doesn't kill the session.
   useEffect(() => {
     if (!session.isDemo) return;
-    function onVisibilityHide() {
-      if (document.visibilityState === "hidden") {
-        navigator.sendBeacon?.("/api/demo/end");
-      }
+    function onPageHide() {
+      navigator.sendBeacon?.("/api/demo/end");
     }
-    document.addEventListener("visibilitychange", onVisibilityHide);
-    return () => document.removeEventListener("visibilitychange", onVisibilityHide);
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
   }, [session.isDemo]);
+
+  // Auto-redirect when demo session expires.
+  useEffect(() => {
+    if (!session.isDemo || !session.demoExpiresAt) return;
+    const diff = new Date(session.demoExpiresAt).getTime() - Date.now();
+    if (diff <= 0) {
+      nav("/", { replace: true });
+      return;
+    }
+    const t = setTimeout(() => nav("/", { replace: true }), diff);
+    return () => clearTimeout(t);
+  }, [session.isDemo, session.demoExpiresAt, nav]);
 
   async function logout() {
     await session.logout();
